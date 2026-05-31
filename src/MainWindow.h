@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Lotw.h"
+#include "Qrz.h"
 #include "Qso.h"
 #include "Rig.h"
 #include "Udp.h"
@@ -65,6 +66,10 @@ private:
     void onLotwSettings();
     bool isLivePage(LogPage* page);
 
+    // --- QRZ.com callsign lookup ---
+    void onQrzLookup(LogPage* page, const std::string& callsign);
+    void onQrzSettings();
+
     // --- settings persistence ---
     std::string layoutFilePath() const;
     void saveSettings();
@@ -96,6 +101,11 @@ private:
     std::string   tqslPath_ = "tqsl";
     LogPage*      pendingUploadPage_ = nullptr;   // page awaiting an upload result
     std::vector<long> pendingUploadIds_;
+
+    // QRZ.com callsign lookup
+    QrzClient     qrz_;
+    std::string   qrzUser_, qrzPassword_;
+    LogPage*      pendingLookupPage_ = nullptr;   // page awaiting a QRZ result
 
     // Loaded settings, used to apply the shared column layout to new pages.
     Glib::RefPtr<Glib::KeyFile> settings_;

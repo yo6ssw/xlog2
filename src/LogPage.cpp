@@ -358,6 +358,15 @@ void LogPage::buildEntryForm() {
     grid->attach(*nowButton, 6, 0);
 
     field("Call",     call_,    0, 1);
+    // A clickable icon on the right of the callsign entry triggers a QRZ.com
+    // lookup (no extra widget/column needed — Gtk::Entry supports this).
+    call_.set_icon_from_icon_name("edit-find-symbolic", Gtk::Entry::IconPosition::SECONDARY);
+    call_.set_icon_activatable(true, Gtk::Entry::IconPosition::SECONDARY);
+    call_.set_icon_tooltip_text("Look up this callsign on QRZ.com",
+                                Gtk::Entry::IconPosition::SECONDARY);
+    call_.signal_icon_press().connect(
+        [this](Gtk::Entry::IconPosition) { onLookupCall(); });
+
     field("Band",     band_,    1, 1);
     field("Mode",     mode_,    2, 1);
 
@@ -541,6 +550,25 @@ void LogPage::onFrequencyChanged() {
 void LogPage::onSetNow() {
     date_.set_text(ui::utcNow("%Y-%m-%d"));
     timeOn_.set_text(ui::utcNow("%H:%M"));
+}
+
+void LogPage::onLookupCall() {
+    std::string call = ui::entryText(call_);
+    for (auto& c : call)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    if (call.empty()) {
+        status("Enter a callsign to look up.");
+        return;
+    }
+    signalLookupCall_.emit(call);  // the shell owns the QRZ client + credentials
+}
+
+void LogPage::applyQrzLookup(const QrzResult& r) {
+    // Only overwrite a field when QRZ actually has a value, so a lookup that
+    // returns nothing for some fields doesn't wipe what the user typed.
+    if (!r.name.empty())    name_.set_text(r.name);
+    if (!r.qth.empty())     qth_.set_text(r.qth);
+    if (!r.locator.empty()) locator_.set_text(r.locator);
 }
 
 void LogPage::updateDupeIndicator() {
