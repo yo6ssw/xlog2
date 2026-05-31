@@ -96,6 +96,7 @@ void MainWindow::buildActions() {
     add_action("import", sigc::mem_fun(*this, &MainWindow::onImportAdif));
     add_action("export", sigc::mem_fun(*this, &MainWindow::onExportAdif));
     add_action("stats",  sigc::mem_fun(*this, &MainWindow::onStatistics));
+    add_action("find",   sigc::mem_fun(*this, &MainWindow::onFind));
     add_action("about",  sigc::mem_fun(*this, &MainWindow::onAbout));
     add_action("quit",   sigc::mem_fun(*this, &MainWindow::close));
 
@@ -128,6 +129,7 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     menu->append_submenu("_File", fileMenu);
 
     auto logMenu = Gio::Menu::create();
+    logMenu->append("_Find…", "win.find");
     logMenu->append("_Statistics…", "win.stats");
     menu->append_submenu("_Log", logMenu);
 
@@ -387,6 +389,11 @@ void MainWindow::onStatistics() {
     win->set_child(*sc);
     win->signal_hide().connect([win]() { delete win; });
     win->present();
+}
+
+void MainWindow::onFind() {
+    if (auto* page = currentPage())
+        page->beginSearch();
 }
 
 void MainWindow::onAbout() {

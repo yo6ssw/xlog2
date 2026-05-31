@@ -44,6 +44,7 @@ private:
     void onImportAdif();
     void onExportAdif();
     void onStatistics();
+    void onFind();
     void onAbout();
 
     // --- UDP network logging ---

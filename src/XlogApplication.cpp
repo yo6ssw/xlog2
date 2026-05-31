@@ -10,6 +10,8 @@ Glib::RefPtr<XlogApplication> XlogApplication::create() {
 }
 
 void XlogApplication::on_activate() {
+    set_accels_for_action("win.find", {"<Control>f"});
+
     auto* window = new MainWindow();
     add_window(*window);
     // Destroy the heap window when it is closed.
