@@ -416,19 +416,21 @@ void MainWindow::onToggleUdp() {
 
 void MainWindow::startUdpListening() {
     std::string error;
-    if (listener_.start(udpPort_, error)) {
-        udpAction_->change_state(true);
+    // udpEnabled_ tracks the user's intent and is what gets persisted, so it
+    // survives onCloseRequest()'s socket teardown.
+    udpEnabled_ = listener_.start(udpPort_, error);
+    udpAction_->change_state(udpEnabled_);
+    if (udpEnabled_)
         setStatus("Listening for QSOs on UDP port " + std::to_string(udpPort_) +
                   " (WSJT-X / ADIF).");
-    } else {
-        udpAction_->change_state(false);
+    else
         setStatus("Could not start UDP listener on port " +
                   std::to_string(udpPort_) + ": " + error);
-    }
 }
 
 void MainWindow::stopUdpListening() {
     listener_.stop();
+    udpEnabled_ = false;
     udpAction_->change_state(false);
     setStatus("Stopped UDP listener.");
 }
@@ -483,15 +485,8 @@ void MainWindow::onUdpSettings() {
             if (p > 0 && p < 65536) {
                 udpPort_ = p;
                 if (listener_.isListening()) {
-                    std::string error;
                     listener_.stop();
-                    if (listener_.start(udpPort_, error))
-                        setStatus("UDP listener restarted on port " +
-                                  std::to_string(udpPort_) + ".");
-                    else {
-                        udpAction_->change_state(false);
-                        setStatus("Failed to restart UDP listener: " + error);
-                    }
+                    startUdpListening();  // restart on the new port (updates state)
                 } else {
                     setStatus("UDP port set to " + std::to_string(udpPort_) + ".");
                 }
@@ -758,7 +753,7 @@ void MainWindow::saveSettings() {
     keyfile->set_string("session", "active", active);
 
     keyfile->set_integer("udp", "port", udpPort_);
-    keyfile->set_boolean("udp", "enabled", listener_.isListening());
+    keyfile->set_boolean("udp", "enabled", udpEnabled_);
     keyfile->set_integer("rig", "model", rigModel_);
     keyfile->set_string("rig", "device", rigDevice_);
     keyfile->set_integer("rig", "poll_ms", rigPollMs_);
