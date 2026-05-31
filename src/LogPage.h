@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LogBook.h"
+#include "Qrz.h"
 #include "QsoItem.h"
 
 #include <gtkmm.h>
@@ -40,6 +41,9 @@ public:
     // Reveal the search bar and focus it (the "Find" action).
     void beginSearch();
 
+    // Prefill the entry form's name/QTH/locator from a QRZ.com lookup.
+    void applyQrzLookup(const QrzResult& r);
+
     // LoTW helpers (delegate to the LogBook, then refresh + notify).
     std::vector<Qso> qsosNotLotwSent() const;
     void markLotwSent(const std::vector<long>& ids, const std::string& date);
@@ -54,6 +58,8 @@ public:
     sigc::signal<void()>& signalChanged() { return signalChanged_; }
     // Emitted to surface a status message to the hosting window.
     sigc::signal<void(const Glib::ustring&)>& signalStatus() { return signalStatus_; }
+    // Emitted (with the entered callsign) when the user asks for a QRZ lookup.
+    sigc::signal<void(const std::string&)>& signalLookupCall() { return signalLookupCall_; }
 
 private:
     void buildLogView();
@@ -82,6 +88,7 @@ private:
     void onAddOrUpdate();
     void onDeleteSelected();
     void onFrequencyChanged();
+    void onLookupCall();  // QRZ icon in the callsign entry
     void onSetNow();
     void updateDupeIndicator();
     void status(const Glib::ustring& msg) { signalStatus_.emit(msg); }
@@ -112,6 +119,7 @@ private:
 
     sigc::signal<void()>                     signalChanged_;
     sigc::signal<void(const Glib::ustring&)> signalStatus_;
+    sigc::signal<void(const std::string&)>   signalLookupCall_;
 
     long editingId_ = 0;  // id of the QSO loaded in the form, 0 = new
 };

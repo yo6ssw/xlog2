@@ -76,6 +76,21 @@ MainWindow::MainWindow() {
         setStatus(std::string("LoTW upload: ") + message);
     };
 
+    qrz_.onResult = [this](const QrzResult& result, const std::string& error) {
+        LogPage* page = pendingLookupPage_;
+        pendingLookupPage_ = nullptr;
+        if (!error.empty()) {
+            setStatus("QRZ lookup: " + error);
+            return;
+        }
+        if (page && isLivePage(page))
+            page->applyQrzLookup(result);
+        std::string msg = "QRZ: " + result.call;
+        if (!result.name.empty())    msg += " — " + result.name;
+        if (!result.country.empty()) msg += " (" + result.country + ")";
+        setStatus(msg);
+    };
+
     loadSettings();
     if (notebook_.get_n_pages() == 0)
         openDefaultLog();
@@ -109,6 +124,8 @@ void MainWindow::buildActions() {
     add_action("lotwupload",   sigc::mem_fun(*this, &MainWindow::onLotwUpload));
     add_action("lotwdownload", sigc::mem_fun(*this, &MainWindow::onLotwDownload));
     add_action("lotwsettings", sigc::mem_fun(*this, &MainWindow::onLotwSettings));
+
+    add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -148,6 +165,10 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     lotwMenu->append("_Download confirmations", "win.lotwdownload");
     lotwMenu->append("_Settings…", "win.lotwsettings");
     menu->append_submenu("Lo_TW", lotwMenu);
+
+    auto qrzMenu = Gio::Menu::create();
+    qrzMenu->append("_Settings…", "win.qrzsettings");
+    menu->append_submenu("_QRZ", qrzMenu);
 
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
@@ -194,6 +215,8 @@ LogPage* MainWindow::openDefaultLog() {
 void MainWindow::registerTab(LogPage* page) {
     page->signalChanged().connect([this, page]() { onPageChanged(page); });
     page->signalStatus().connect([this](const Glib::ustring& m) { setStatus(m); });
+    page->signalLookupCall().connect(
+        [this, page](const std::string& call) { onQrzLookup(page, call); });
 
     auto* labelBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     labelBox->set_spacing(4);
@@ -712,6 +735,74 @@ void MainWindow::onLotwSettings() {
     win->present();
 }
 
+// --- QRZ.com callsign lookup -------------------------------------------------
+
+void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
+    if (qrzUser_.empty() || qrzPassword_.empty()) {
+        setStatus("Set your QRZ.com username and password in QRZ ▸ Settings first.");
+        return;
+    }
+    if (qrz_.isBusy()) {
+        setStatus("A QRZ lookup is already in progress.");
+        return;
+    }
+    pendingLookupPage_ = page;
+    setStatus("Looking up " + callsign + " on QRZ.com…");
+    qrz_.lookup(qrzUser_, qrzPassword_, callsign);
+}
+
+void MainWindow::onQrzSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("QRZ.com settings");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* userEntry = Gtk::make_managed<Gtk::Entry>();
+    userEntry->set_text(qrzUser_);
+    auto* passEntry = Gtk::make_managed<Gtk::Entry>();
+    passEntry->set_text(qrzPassword_);
+    passEntry->set_visibility(false);
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("QRZ username:", *userEntry, 0);
+    field("QRZ password:", *passEntry, 1);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Used to look up callsign details via QRZ.com's XML service. Credentials\n"
+        "are stored in plain text in ~/.config/xlog2/layout.ini (mode 0600).\n"
+        "Click the search icon in the Call field to look up a callsign.");
+    hint->set_xalign(0.0);
+    grid->attach(*hint, 0, 2, 2, 1);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 3);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect([this, userEntry, passEntry, win]() {
+        qrzUser_     = userEntry->get_text().raw();
+        qrzPassword_ = passEntry->get_text().raw();
+        setStatus("QRZ.com settings saved.");
+        win->set_visible(false);
+    });
+
+    win->present();
+}
+
 // --- settings persistence ----------------------------------------------------
 
 std::string MainWindow::layoutFilePath() const {
@@ -770,6 +861,9 @@ void MainWindow::saveSettings() {
     keyfile->set_string("lotw", "station_location", lotwStation_);
     keyfile->set_string("lotw", "tqsl_path", tqslPath_);
     keyfile->set_string("lotw", "last_download", lotwLastDownload_);
+
+    keyfile->set_string("qrz", "username", qrzUser_);
+    keyfile->set_string("qrz", "password", qrzPassword_);
 
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
@@ -832,6 +926,12 @@ void MainWindow::loadSettings() {
                     tqslPath_ = settings_->get_string("lotw", "tqsl_path").raw();
                 if (settings_->has_key("lotw", "last_download"))
                     lotwLastDownload_ = settings_->get_string("lotw", "last_download").raw();
+            }
+            if (settings_->has_group("qrz")) {
+                if (settings_->has_key("qrz", "username"))
+                    qrzUser_ = settings_->get_string("qrz", "username").raw();
+                if (settings_->has_key("qrz", "password"))
+                    qrzPassword_ = settings_->get_string("qrz", "password").raw();
             }
         } catch (const Glib::Error&) {
         }
