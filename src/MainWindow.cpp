@@ -90,6 +90,11 @@ MainWindow::MainWindow() {
     setMargin(statusLabel_, 4);
     vbox->append(statusLabel_);
 
+    listener_.setCallback(
+        [this](const std::vector<Qso>& qsos, const std::string& source) {
+            onUdpReceived(qsos, source);
+        });
+
     refreshList();
     clearForm();
     updateTitle();
@@ -105,6 +110,9 @@ void MainWindow::buildActions() {
     add_action("stats",  sigc::mem_fun(*this, &MainWindow::onStatistics));
     add_action("about",  sigc::mem_fun(*this, &MainWindow::onAbout));
     add_action("quit",   sigc::mem_fun(*this, &MainWindow::close));
+
+    udpAction_ = add_action_bool("udp", sigc::mem_fun(*this, &MainWindow::onToggleUdp), false);
+    add_action("udpport", sigc::mem_fun(*this, &MainWindow::onUdpSettings));
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -126,6 +134,11 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto logMenu = Gio::Menu::create();
     logMenu->append("_Statistics…", "win.stats");
     menu->append_submenu("_Log", logMenu);
+
+    auto netMenu = Gio::Menu::create();
+    netMenu->append("_Listen for QSOs (UDP)", "win.udp");
+    netMenu->append("UDP _port…", "win.udpport");
+    menu->append_submenu("_Network", netMenu);
 
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
@@ -547,6 +560,98 @@ void MainWindow::onAbout() {
     about->set_authors({"xlog2 contributors"});
     about->signal_hide().connect([about]() { delete about; });
     about->present();
+}
+
+void MainWindow::onToggleUdp() {
+    if (!listener_.isListening()) {
+        std::string error;
+        if (listener_.start(udpPort_, error)) {
+            udpAction_->change_state(true);
+            setStatus("Listening for QSOs on UDP port " + std::to_string(udpPort_) +
+                      " (WSJT-X / ADIF).");
+        } else {
+            udpAction_->change_state(false);
+            setStatus("Could not start UDP listener on port " +
+                      std::to_string(udpPort_) + ": " + error);
+        }
+    } else {
+        listener_.stop();
+        udpAction_->change_state(false);
+        setStatus("Stopped UDP listener.");
+    }
+}
+
+void MainWindow::onUdpReceived(const std::vector<Qso>& qsos,
+                               const std::string& source) {
+    for (const auto& q : qsos)
+        logbook_.add(q);
+    refreshList();
+    if (!qsos.empty())
+        setStatus("Logged " + std::to_string(qsos.size()) + " QSO(s) from " +
+                  source + ": " + qsos.back().call);
+}
+
+void MainWindow::onUdpSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("UDP settings");
+    win->set_hide_on_close(true);
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    box->set_spacing(8);
+    setMargin(*box, 12);
+
+    auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    row->set_spacing(8);
+    row->append(*Gtk::make_managed<Gtk::Label>("Listen port:"));
+    auto* entry = Gtk::make_managed<Gtk::Entry>();
+    entry->set_text(std::to_string(udpPort_));
+    entry->set_hexpand(true);
+    row->append(*entry);
+    box->append(*row);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Receives WSJT-X \"Logged ADIF\" packets and raw ADIF datagrams.\n"
+        "WSJT-X default is 2237.");
+    hint->set_xalign(0.0);
+    box->append(*hint);
+
+    auto* apply = Gtk::make_managed<Gtk::Button>("Apply");
+    apply->set_halign(Gtk::Align::END);
+    box->append(*apply);
+
+    win->set_child(*box);
+    win->signal_hide().connect([win]() { delete win; });
+
+    apply->signal_clicked().connect([this, entry, win]() {
+        try {
+            const int p = std::stoi(entry->get_text().raw());
+            if (p > 0 && p < 65536) {
+                udpPort_ = p;
+                if (listener_.isListening()) {  // restart on the new port
+                    std::string error;
+                    listener_.stop();
+                    if (listener_.start(udpPort_, error))
+                        setStatus("UDP listener restarted on port " +
+                                  std::to_string(udpPort_) + ".");
+                    else {
+                        udpAction_->change_state(false);
+                        setStatus("Failed to restart UDP listener: " + error);
+                    }
+                } else {
+                    setStatus("UDP port set to " + std::to_string(udpPort_) + ".");
+                }
+            } else {
+                setStatus("Port must be between 1 and 65535.");
+            }
+        } catch (const std::exception&) {
+            setStatus("Invalid port number.");
+        }
+        win->set_visible(false);
+    });
+
+    win->present();
 }
 
 void MainWindow::setStatus(const Glib::ustring& msg) {
