@@ -2,10 +2,18 @@
 
 #include "Qso.h"
 
+#include <optional>
 #include <string>
 #include <vector>
 
 struct sqlite3;
+
+// How two QSOs are judged to be duplicates.
+enum class DupeRule {
+    CallBandModeDay,  // same call, band, mode and UTC day (default)
+    CallBandMode,     // same call, band and mode (any day)
+    Call,             // same call (any band/mode/day)
+};
 
 // A logbook backed by a SQLite database. Every add/update/remove is committed
 // immediately, so an open file-backed logbook is always persisted. A freshly
@@ -41,6 +49,12 @@ public:
 
     // Serialises the whole logbook to ADIF text.
     std::string exportAdif() const;
+
+    // Returns the most recent existing QSO that duplicates q under the given
+    // rule, ignoring the row whose id == excludeId (the one being edited).
+    // Empty if q is not a duplicate.
+    std::optional<Qso> findDuplicate(const Qso& q, long excludeId = 0,
+                                     DupeRule rule = DupeRule::CallBandModeDay) const;
 
     const std::string& path() const { return path_; }
     bool isFileBacked() const { return !path_.empty(); }
