@@ -60,6 +60,12 @@ private:
         bool expand = false);
     void applyColumnOrder(const std::vector<std::string>& ids);
 
+    // Column reordering / visibility via the header context menu.
+    void buildColumnMenus();
+    void moveColumn(const Glib::ustring& id, int delta);
+    void setColumnVisible(const Glib::ustring& id, bool visible);
+    void showAllColumns();
+
     void refreshList();
     void onSelectionChanged();
     Qso  formToQso() const;
@@ -78,6 +84,7 @@ private:
     Glib::RefPtr<Gtk::SingleSelection>    selection_;
     Gtk::ColumnView                       columnView_;
     std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
+    Glib::RefPtr<Gio::SimpleActionGroup>  colActions_;
 
     Gtk::Entry    date_, timeOn_, timeOff_, call_, freq_;
     Gtk::Entry    rstSent_, rstRcvd_, name_, qth_, locator_, power_, comment_;

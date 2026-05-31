@@ -114,6 +114,7 @@ void LogPage::buildLogView() {
     auto add = [&](const std::string& id, const Glib::ustring& title,
                    std::function<std::string(const Qso&)> getter, bool expand = false) {
         auto col = makeColumn(title, std::move(getter), expand);
+        col->set_id(id);
         columns_.emplace_back(id, col);
         columnView_.append_column(col);
     };
@@ -145,6 +146,86 @@ void LogPage::buildLogView() {
 
     selection_->property_selected().signal_changed().connect(
         sigc::mem_fun(*this, &LogPage::onSelectionChanged));
+
+    columnView_.set_reorderable(true);  // drag headers to reorder
+    buildColumnMenus();                 // right-click header for explicit reorder/hide
+}
+
+void LogPage::buildColumnMenus() {
+    colActions_ = Gio::SimpleActionGroup::create();
+    const auto strType = Glib::Variant<Glib::ustring>::variant_type();
+
+    auto addMove = [&](const char* name, int delta) {
+        auto a = Gio::SimpleAction::create(name, strType);
+        a->signal_activate().connect([this, delta](const Glib::VariantBase& p) {
+            const auto id =
+                Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(p).get();
+            moveColumn(id, delta);
+        });
+        colActions_->add_action(a);
+    };
+    addMove("move-left", -1);
+    addMove("move-right", +1);
+
+    auto hide = Gio::SimpleAction::create("hide", strType);
+    hide->signal_activate().connect([this](const Glib::VariantBase& p) {
+        setColumnVisible(
+            Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(p).get(), false);
+    });
+    colActions_->add_action(hide);
+
+    auto showAll = Gio::SimpleAction::create("show-all");
+    showAll->signal_activate().connect(
+        [this](const Glib::VariantBase&) { showAllColumns(); });
+    colActions_->add_action(showAll);
+
+    insert_action_group("cols", colActions_);
+
+    // A context menu per column header, targeting that column by id.
+    for (const auto& [id, col] : columns_) {
+        auto menu = Gio::Menu::create();
+        menu->append("Move Left",  "cols.move-left::" + id);
+        menu->append("Move Right", "cols.move-right::" + id);
+        menu->append("Hide Column", "cols.hide::" + id);
+        auto section = Gio::Menu::create();
+        section->append("Show All Columns", "cols.show-all");
+        menu->append_section(section);
+        col->set_header_menu(menu);
+    }
+}
+
+void LogPage::moveColumn(const Glib::ustring& id, int delta) {
+    Glib::RefPtr<Gtk::ColumnViewColumn> col;
+    for (const auto& [cid, c] : columns_)
+        if (cid == id.raw()) { col = c; break; }
+    if (!col)
+        return;
+
+    auto model = columnView_.get_columns();
+    const int n = static_cast<int>(model->get_n_items());
+    int pos = -1;
+    for (int i = 0; i < n; ++i)
+        if (model->get_object(i).get() == col.get()) { pos = i; break; }
+    if (pos < 0)
+        return;
+
+    const int target = pos + delta;
+    if (target < 0 || target >= n)
+        return;  // already at an edge
+
+    columnView_.remove_column(col);
+    columnView_.insert_column(target, col);
+    signalChanged_.emit();  // (no count change, but keeps the shell in sync)
+}
+
+void LogPage::setColumnVisible(const Glib::ustring& id, bool visible) {
+    for (const auto& [cid, c] : columns_)
+        if (cid == id.raw()) { c->set_visible(visible); return; }
+}
+
+void LogPage::showAllColumns() {
+    for (const auto& [cid, c] : columns_)
+        c->set_visible(true);
 }
 
 void LogPage::buildEntryForm() {
