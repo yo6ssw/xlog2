@@ -54,10 +54,10 @@ private:
     void onUdpSettings();
     void onUdpReceived(const std::vector<Qso>& qsos, const std::string& source);
 
-    // --- column layout persistence ---
+    // --- settings persistence (window geometry + column layout) ---
     std::string layoutFilePath() const;
-    void saveColumnLayout();
-    void loadColumnLayout();
+    void saveSettings();
+    void loadSettings();
     void applyColumnOrder(const std::vector<std::string>& ids);
     bool onCloseRequest();
 

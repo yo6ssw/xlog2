@@ -19,8 +19,9 @@ standard **ADIF** interchange format.
 - Per-band / per-mode statistics.
 - UDP network logging: auto-logs QSOs pushed by WSJT-X ("Logged ADIF")
   or any program sending raw ADIF datagrams (*Network* menu).
-- Remembers your column layout (order, width, visibility) between runs,
-  stored in `~/.config/xlog2/layout.ini`.
+- Remembers your column layout (order, width, visibility) and window size
+  between runs, stored in `~/.config/xlog2/layout.ini`. (Window *position*
+  is not restored — GTK4/Wayland provides no API to query or set it.)
 
 ## Building
 

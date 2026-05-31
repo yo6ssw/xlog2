@@ -229,7 +229,7 @@ void MainWindow::buildLogView() {
     selection_->property_selected().signal_changed().connect(
         sigc::mem_fun(*this, &MainWindow::onSelectionChanged));
 
-    loadColumnLayout();
+    loadSettings();
 }
 
 Gtk::Widget& MainWindow::buildEntryForm() {
@@ -686,12 +686,27 @@ std::string MainWindow::layoutFilePath() const {
 }
 
 bool MainWindow::onCloseRequest() {
-    saveColumnLayout();
+    saveSettings();
     return false;  // proceed with the default close (hide) handling
 }
 
-void MainWindow::saveColumnLayout() {
+void MainWindow::saveSettings() {
     auto keyfile = Glib::KeyFile::create();
+    // Load any existing file first so we can preserve fields we don't rewrite
+    // (e.g. the windowed size while currently maximized).
+    try {
+        keyfile->load_from_file(layoutFilePath());
+    } catch (const Glib::Error&) {
+    }
+
+    // Window geometry. (GTK4/Wayland exposes no window position, so only the
+    // size and maximized state can be persisted.) Avoid recording the
+    // maximized size as the restore size.
+    if (!is_maximized()) {
+        keyfile->set_integer("window", "width", get_width());
+        keyfile->set_integer("window", "height", get_height());
+    }
+    keyfile->set_boolean("window", "maximized", is_maximized());
 
     // Column order, read from the view's current display order.
     std::string order;
@@ -730,13 +745,31 @@ void MainWindow::saveColumnLayout() {
     }
 }
 
-void MainWindow::loadColumnLayout() {
+void MainWindow::loadSettings() {
     auto keyfile = Glib::KeyFile::create();
     try {
         if (!keyfile->load_from_file(layoutFilePath()))
             return;
     } catch (const Glib::Error&) {
-        return;  // no saved layout yet
+        return;  // no saved settings yet
+    }
+
+    // Window geometry (size + maximized state; position is not available
+    // under GTK4). Applied before the window is presented.
+    try {
+        if (keyfile->has_group("window")) {
+            if (keyfile->has_key("window", "width") &&
+                keyfile->has_key("window", "height")) {
+                const int w = keyfile->get_integer("window", "width");
+                const int h = keyfile->get_integer("window", "height");
+                if (w > 0 && h > 0)
+                    set_default_size(w, h);
+            }
+            if (keyfile->has_key("window", "maximized") &&
+                keyfile->get_boolean("window", "maximized"))
+                maximize();
+        }
+    } catch (const Glib::Error&) {
     }
 
     // Width and visibility per column.
