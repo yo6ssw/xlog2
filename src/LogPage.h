@@ -72,6 +72,7 @@ private:
     void moveColumn(const Glib::ustring& id, int delta);
     void setColumnVisible(const Glib::ustring& id, bool visible);
     void showAllColumns();
+    void pinFiller();  // keep the empty filler column last
 
     void refreshList();
     void onSelectionChanged();
@@ -95,6 +96,10 @@ private:
     Gtk::SearchBar                        searchBar_;
     Gtk::SearchEntry                      searchEntry_;
     std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
+    // Empty trailing column that expands to absorb leftover horizontal space,
+    // so the last data column isn't stretched. Not part of columns_, so it is
+    // excluded from reordering, hiding and layout persistence.
+    Glib::RefPtr<Gtk::ColumnViewColumn>   filler_;
     Glib::RefPtr<Gio::SimpleActionGroup>  colActions_;
 
     Gtk::Entry    date_, timeOn_, timeOff_, call_, freq_;
