@@ -18,7 +18,11 @@ standard **ADIF** interchange format.
   already worked on the same band and mode that UTC day.
 - Frequency → band auto-detection as you type.
 - "Now" button to stamp the current UTC date/time.
-- SQLite-backed logbooks (`.xlog`), saved immediately as you log.
+- SQLite-backed logbooks (`.xlog`), saved immediately as you log. The default
+  logbook lives on disk at `$XDG_DATA_HOME/xlog2/default.xlog` (typically
+  `~/.local/share/xlog2/default.xlog`) and is created/reopened automatically, so
+  your QSOs persist across restarts without an explicit save. *File ▸ New Tab*
+  still opens a transient in-memory log until you *Save As*.
 - ADIF import and export.
 - Per-band / per-mode statistics.
 - UDP network logging: auto-logs QSOs pushed by WSJT-X ("Logged ADIF")

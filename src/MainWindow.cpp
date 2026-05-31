@@ -78,7 +78,7 @@ MainWindow::MainWindow() {
 
     loadSettings();
     if (notebook_.get_n_pages() == 0)
-        addPage(Gtk::make_managed<LogPage>());
+        openDefaultLog();
 
     updateTitle();
     setStatus("Ready.");
@@ -165,6 +165,26 @@ LogPage* MainWindow::addPage(LogPage* page) {
     return page;
 }
 
+std::string MainWindow::defaultLogPath() const {
+    const std::string dir =
+        Glib::build_filename(Glib::get_user_data_dir(), "xlog2");
+    try {
+        Gio::File::create_for_path(dir)->make_directory_with_parents();
+    } catch (const Glib::Error&) {
+        // already exists (or cannot be created) — open() reports the latter
+    }
+    return Glib::build_filename(dir, "default.xlog");
+}
+
+LogPage* MainWindow::openDefaultLog() {
+    auto* page = addPage(Gtk::make_managed<LogPage>());
+    const std::string path = defaultLogPath();
+    if (!page->openFile(path))
+        setStatus("Could not open the default logbook at " + path +
+                  " — working in memory.");
+    return page;
+}
+
 void MainWindow::registerTab(LogPage* page) {
     page->signalChanged().connect([this, page]() { onPageChanged(page); });
     page->signalStatus().connect([this](const Glib::ustring& m) { setStatus(m); });
@@ -209,7 +229,7 @@ void MainWindow::closePage(LogPage* page) {
     tabLabels_.erase(page);
     notebook_.remove_page(idx);
     if (notebook_.get_n_pages() == 0)
-        addPage(Gtk::make_managed<LogPage>());
+        openDefaultLog();
     updateTitle();
 }
 
