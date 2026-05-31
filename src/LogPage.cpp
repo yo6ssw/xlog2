@@ -66,6 +66,9 @@ LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     ensureCss();
 
     buildLogView();
+    buildSearch();
+    append(searchBar_);
+
     auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     scroller->set_child(columnView_);
@@ -103,7 +106,13 @@ Glib::RefPtr<Gtk::ColumnViewColumn> LogPage::makeColumn(
 
 void LogPage::buildLogView() {
     store_ = Gio::ListStore<QsoItem>::create();
-    selection_ = Gtk::SingleSelection::create(store_);
+    // store_ -> filter (search) -> selection -> view. The StringFilter
+    // substring-matches (case-insensitively, by default) the per-row text
+    // produced by rowSearchText().
+    filter_ = Gtk::StringFilter::create(Gtk::ClosureExpression<Glib::ustring>::create(
+        sigc::mem_fun(*this, &LogPage::rowSearchText)));
+    filterModel_ = Gtk::FilterListModel::create(store_, filter_);
+    selection_ = Gtk::SingleSelection::create(filterModel_);
     selection_->set_autoselect(false);
     selection_->set_can_unselect(true);
     columnView_.set_model(selection_);
@@ -226,6 +235,45 @@ void LogPage::setColumnVisible(const Glib::ustring& id, bool visible) {
 void LogPage::showAllColumns() {
     for (const auto& [cid, c] : columns_)
         c->set_visible(true);
+}
+
+void LogPage::buildSearch() {
+    searchEntry_.set_placeholder_text("Search log — call, name, QTH, locator, comment, band, mode…");
+    searchEntry_.set_hexpand(true);
+    searchBar_.set_child(searchEntry_);
+    searchBar_.connect_entry(searchEntry_);
+    searchBar_.set_show_close_button(true);
+    // Type while the log table is focused to start searching.
+    searchBar_.set_key_capture_widget(columnView_);
+    searchEntry_.signal_search_changed().connect(
+        sigc::mem_fun(*this, &LogPage::onSearchChanged));
+}
+
+Glib::ustring LogPage::rowSearchText(const Glib::RefPtr<Glib::ObjectBase>& obj) {
+    auto* item = dynamic_cast<QsoItem*>(obj.get());
+    if (!item)
+        return {};
+    const Qso& q = item->qso;
+    // Newline-joined so a query can't span field boundaries.
+    return q.call + "\n" + q.name + "\n" + q.qth + "\n" + q.locator + "\n" +
+           q.comment + "\n" + q.band + "\n" + q.mode + "\n" + q.date;
+}
+
+void LogPage::onSearchChanged() {
+    const Glib::ustring query = searchEntry_.get_text();
+    filter_->set_search(query);  // StringFilter re-runs the filter itself
+
+    if (query.empty())
+        status("Search cleared.");
+    else
+        status("Search: " + std::to_string(filterModel_->get_n_items()) +
+               " of " + std::to_string(store_->get_n_items()) + " QSOs match \"" +
+               query + "\".");
+}
+
+void LogPage::beginSearch() {
+    searchBar_.set_search_mode(true);
+    searchEntry_.grab_focus();
 }
 
 void LogPage::buildEntryForm() {

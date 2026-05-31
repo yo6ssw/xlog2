@@ -37,6 +37,9 @@ public:
     void setRigFrequency(double mhz);
     void setRigMode(const std::string& mode);
 
+    // Reveal the search bar and focus it (the "Find" action).
+    void beginSearch();
+
     // LoTW helpers (delegate to the LogBook, then refresh + notify).
     std::vector<Qso> qsosNotLotwSent() const;
     void markLotwSent(const std::vector<long>& ids, const std::string& date);
@@ -54,6 +57,10 @@ public:
 
 private:
     void buildLogView();
+    void buildSearch();
+    // Combined searchable text for a row; the StringFilter substring-matches it.
+    Glib::ustring rowSearchText(const Glib::RefPtr<Glib::ObjectBase>& obj);
+    void onSearchChanged();
     void buildEntryForm();
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
         const Glib::ustring& title, std::function<std::string(const Qso&)> getter,
@@ -81,8 +88,12 @@ private:
     LogBook logbook_;
 
     Glib::RefPtr<Gio::ListStore<QsoItem>> store_;
+    Glib::RefPtr<Gtk::StringFilter>       filter_;
+    Glib::RefPtr<Gtk::FilterListModel>    filterModel_;
     Glib::RefPtr<Gtk::SingleSelection>    selection_;
     Gtk::ColumnView                       columnView_;
+    Gtk::SearchBar                        searchBar_;
+    Gtk::SearchEntry                      searchEntry_;
     std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
     Glib::RefPtr<Gio::SimpleActionGroup>  colActions_;
 
