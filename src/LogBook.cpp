@@ -7,20 +7,47 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
+#include <cstdlib>
+#include <set>
 
 namespace {
 
 // Column order shared by INSERT, UPDATE and SELECT. id is handled separately.
-constexpr std::array<const char*, 16> kColumns = {
+constexpr std::array<const char*, 20> kColumns = {
     "date", "time_on", "time_off", "call", "band", "mode", "freq",
     "rst_sent", "rst_rcvd", "name", "qth", "locator", "power",
     "qsl_sent", "qsl_rcvd", "comment",
+    "lotw_sent", "lotw_sent_date", "lotw_rcvd", "lotw_rcvd_date",
 };
 
-std::array<std::string, 16> fieldsOf(const Qso& q) {
+std::array<std::string, kColumns.size()> fieldsOf(const Qso& q) {
     return {q.date, q.time_on, q.time_off, q.call, q.band, q.mode, q.freq,
             q.rst_sent, q.rst_rcvd, q.name, q.qth, q.locator, q.power,
-            q.qsl_sent, q.qsl_rcvd, q.comment};
+            q.qsl_sent, q.qsl_rcvd, q.comment,
+            q.lotw_sent, q.lotw_sent_date, q.lotw_rcvd, q.lotw_rcvd_date};
+}
+
+// "INSERT INTO qsos (c1,c2,...) VALUES (?,?,...);" built from kColumns so the
+// three insert sites cannot drift out of sync.
+std::string insertSql() {
+    std::string cols, marks;
+    for (size_t i = 0; i < kColumns.size(); ++i) {
+        if (i) { cols += ','; marks += ','; }
+        cols += kColumns[i];
+        marks += '?';
+    }
+    return "INSERT INTO qsos (" + cols + ") VALUES (" + marks + ");";
+}
+
+// "SELECT id,c1,c2,... FROM qsos ORDER BY date,time_on,id;"
+std::string selectSql() {
+    std::string cols = "id";
+    for (const char* c : kColumns) {
+        cols += ',';
+        cols += c;
+    }
+    return "SELECT " + cols + " FROM qsos ORDER BY date, time_on, id;";
 }
 
 void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
@@ -67,11 +94,24 @@ bool LogBook::createSchema(sqlite3* db) {
         "  date     TEXT, time_on  TEXT, time_off TEXT, call     TEXT,"
         "  band     TEXT, mode     TEXT, freq     TEXT, rst_sent TEXT,"
         "  rst_rcvd TEXT, name     TEXT, qth      TEXT, locator  TEXT,"
-        "  power    TEXT, qsl_sent TEXT, qsl_rcvd TEXT, comment  TEXT);";
+        "  power    TEXT, qsl_sent TEXT, qsl_rcvd TEXT, comment  TEXT,"
+        "  lotw_sent TEXT, lotw_sent_date TEXT,"
+        "  lotw_rcvd TEXT, lotw_rcvd_date TEXT);";
     char* err = nullptr;
     if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
         sqlite3_free(err);
         return false;
+    }
+
+    // Migrate logbooks created before a column existed: add any missing
+    // column. ALTER TABLE fails harmlessly ("duplicate column name") when the
+    // column is already present, so the errors are ignored.
+    for (const char* col : kColumns) {
+        const std::string alter =
+            std::string("ALTER TABLE qsos ADD COLUMN ") + col + " TEXT;";
+        char* e = nullptr;
+        sqlite3_exec(db, alter.c_str(), nullptr, nullptr, &e);
+        sqlite3_free(e);
     }
     return true;
 }
@@ -117,12 +157,9 @@ bool LogBook::saveAs(const std::string& path) {
 
     // Copy every cached QSO into the new database in one transaction.
     sqlite3_exec(db, "BEGIN", nullptr, nullptr, nullptr);
-    const char* sql =
-        "INSERT INTO qsos (date,time_on,time_off,call,band,mode,freq,"
-        "rst_sent,rst_rcvd,name,qth,locator,power,qsl_sent,qsl_rcvd,comment) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
+    const std::string sql = insertSql();
     sqlite3_stmt* stmt = nullptr;
-    sqlite3_prepare_v2(db, sql, -1, &stmt, nullptr);
+    sqlite3_prepare_v2(db, sql.c_str(), -1, &stmt, nullptr);
     for (const auto& q : cache_) {
         const auto fields = fieldsOf(q);
         for (int i = 0; i < static_cast<int>(fields.size()); ++i)
@@ -145,33 +182,34 @@ void LogBook::reload() {
     if (!db_)
         return;
 
-    const char* sql =
-        "SELECT id,date,time_on,time_off,call,band,mode,freq,rst_sent,"
-        "rst_rcvd,name,qth,locator,power,qsl_sent,qsl_rcvd,comment "
-        "FROM qsos ORDER BY date, time_on, id;";
+    const std::string sql = selectSql();
     sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
         return;
 
     while (sqlite3_step(stmt) == SQLITE_ROW) {
         Qso q;
-        q.id       = sqlite3_column_int64(stmt, 0);
-        q.date     = columnText(stmt, 1);
-        q.time_on  = columnText(stmt, 2);
-        q.time_off = columnText(stmt, 3);
-        q.call     = columnText(stmt, 4);
-        q.band     = columnText(stmt, 5);
-        q.mode     = columnText(stmt, 6);
-        q.freq     = columnText(stmt, 7);
-        q.rst_sent = columnText(stmt, 8);
-        q.rst_rcvd = columnText(stmt, 9);
-        q.name     = columnText(stmt, 10);
-        q.qth      = columnText(stmt, 11);
-        q.locator  = columnText(stmt, 12);
-        q.power    = columnText(stmt, 13);
-        q.qsl_sent = columnText(stmt, 14);
-        q.qsl_rcvd = columnText(stmt, 15);
-        q.comment  = columnText(stmt, 16);
+        q.id             = sqlite3_column_int64(stmt, 0);
+        q.date           = columnText(stmt, 1);
+        q.time_on        = columnText(stmt, 2);
+        q.time_off       = columnText(stmt, 3);
+        q.call           = columnText(stmt, 4);
+        q.band           = columnText(stmt, 5);
+        q.mode           = columnText(stmt, 6);
+        q.freq           = columnText(stmt, 7);
+        q.rst_sent       = columnText(stmt, 8);
+        q.rst_rcvd       = columnText(stmt, 9);
+        q.name           = columnText(stmt, 10);
+        q.qth            = columnText(stmt, 11);
+        q.locator        = columnText(stmt, 12);
+        q.power          = columnText(stmt, 13);
+        q.qsl_sent       = columnText(stmt, 14);
+        q.qsl_rcvd       = columnText(stmt, 15);
+        q.comment        = columnText(stmt, 16);
+        q.lotw_sent      = columnText(stmt, 17);
+        q.lotw_sent_date = columnText(stmt, 18);
+        q.lotw_rcvd      = columnText(stmt, 19);
+        q.lotw_rcvd_date = columnText(stmt, 20);
         cache_.push_back(std::move(q));
     }
     sqlite3_finalize(stmt);
@@ -181,12 +219,9 @@ long LogBook::add(const Qso& q) {
     if (!db_)
         return 0;
 
-    const char* sql =
-        "INSERT INTO qsos (date,time_on,time_off,call,band,mode,freq,"
-        "rst_sent,rst_rcvd,name,qth,locator,power,qsl_sent,qsl_rcvd,comment) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
+    const std::string sql = insertSql();
     sqlite3_stmt* stmt = nullptr;
-    if (sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr) != SQLITE_OK)
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK)
         return 0;
 
     const auto fields = fieldsOf(q);
@@ -253,12 +288,9 @@ int LogBook::importAdif(const std::string& adifText) {
         return 0;
 
     sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
-    const char* sql =
-        "INSERT INTO qsos (date,time_on,time_off,call,band,mode,freq,"
-        "rst_sent,rst_rcvd,name,qth,locator,power,qsl_sent,qsl_rcvd,comment) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?);";
+    const std::string sql = insertSql();
     sqlite3_stmt* stmt = nullptr;
-    sqlite3_prepare_v2(db_, sql, -1, &stmt, nullptr);
+    sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr);
     int count = 0;
     for (const auto& q : parsed) {
         const auto fields = fieldsOf(q);
@@ -306,4 +338,79 @@ std::optional<Qso> LogBook::findDuplicate(const Qso& q, long excludeId,
         }
     }
     return std::nullopt;
+}
+
+std::vector<Qso> LogBook::qsosNotLotwSent() const {
+    std::vector<Qso> out;
+    for (const auto& q : cache_)
+        if (q.lotw_sent != "Y")
+            out.push_back(q);
+    return out;
+}
+
+void LogBook::markLotwSent(const std::vector<long>& ids, const std::string& date) {
+    // Collect copies first: update() reloads cache_, which would otherwise
+    // invalidate the iteration below.
+    std::vector<Qso> updates;
+    for (long id : ids) {
+        for (const auto& q : cache_) {
+            if (q.id == id && q.lotw_sent != "Y") {
+                Qso u = q;
+                u.lotw_sent = "Y";
+                u.lotw_sent_date = date;
+                updates.push_back(std::move(u));
+                break;
+            }
+        }
+    }
+    for (const auto& u : updates)
+        update(u);
+}
+
+namespace {
+
+// Minutes since midnight for "HH:MM" (or "HHMM"); -1 if not parseable.
+int minutesOfDay(const std::string& t) {
+    int h = 0, m = 0;
+    if (std::sscanf(t.c_str(), "%d:%d", &h, &m) == 2 ||
+        (t.size() >= 4 && std::sscanf(t.c_str(), "%2d%2d", &h, &m) == 2))
+        return h * 60 + m;
+    return -1;
+}
+
+} // namespace
+
+int LogBook::applyLotwConfirmations(const std::vector<Qso>& confirmed) {
+    constexpr int kTimeToleranceMin = 30;
+
+    // Collect the local QSOs to confirm first (update() reloads cache_), and
+    // never match the same local QSO against two confirmations.
+    std::vector<Qso> updates;
+    std::set<long> used;
+
+    for (const auto& c : confirmed) {
+        for (const auto& e : cache_) {
+            if (e.lotw_rcvd == "Y" || used.count(e.id))
+                continue;
+            if (!iequals(e.call, c.call) || e.band != c.band ||
+                !iequals(e.mode, c.mode) || e.date != c.date)
+                continue;
+
+            // If both sides carry a time, require it within tolerance.
+            const int et = minutesOfDay(e.time_on);
+            const int ct = minutesOfDay(c.time_on);
+            if (et >= 0 && ct >= 0 && std::abs(et - ct) > kTimeToleranceMin)
+                continue;
+
+            Qso u = e;
+            u.lotw_rcvd = "Y";
+            u.lotw_rcvd_date = !c.lotw_rcvd_date.empty() ? c.lotw_rcvd_date : c.date;
+            updates.push_back(std::move(u));
+            used.insert(e.id);
+            break;  // one local QSO per confirmation
+        }
+    }
+    for (const auto& u : updates)
+        update(u);
+    return static_cast<int>(updates.size());
 }

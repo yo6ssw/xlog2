@@ -115,6 +115,11 @@ void LogPage::buildLogView() {
         std::string r = q.qsl_rcvd.empty() ? "-" : q.qsl_rcvd;
         return s + "/" + r;
     });
+    add("lotw", "LoTW", [](const Qso& q) -> std::string {
+        if (q.lotw_rcvd == "Y") return "✓";  // ✓ confirmed
+        if (q.lotw_sent == "Y") return "↑";  // ↑ uploaded
+        return "-";
+    });
     add("comment", "Comment", [](const Qso& q) { return q.comment; }, true);
 
     selection_->property_selected().signal_changed().connect(
@@ -422,6 +427,27 @@ void LogPage::setRigMode(const std::string& mode) {
 
 Glib::ustring LogPage::title() const {
     return isFileBacked() ? Glib::path_get_basename(path()) : "Untitled";
+}
+
+std::vector<Qso> LogPage::qsosNotLotwSent() const {
+    return logbook_.qsosNotLotwSent();
+}
+
+void LogPage::markLotwSent(const std::vector<long>& ids, const std::string& date) {
+    logbook_.markLotwSent(ids, date);
+    refreshList();
+    signalChanged_.emit();
+}
+
+int LogPage::applyLotwConfirmations(const std::vector<Qso>& confirmed) {
+    const int n = logbook_.applyLotwConfirmations(confirmed);
+    refreshList();
+    signalChanged_.emit();
+    return n;
+}
+
+void LogPage::refresh() {
+    refreshList();
 }
 
 void LogPage::applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {

@@ -17,6 +17,7 @@ find_package(Threads REQUIRED)
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
+pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
 
 add_executable(xlog2
     src/main.cpp
@@ -28,6 +29,7 @@ add_executable(xlog2
     src/Bands.cpp
     src/Udp.cpp
     src/Rig.cpp
+    src/Lotw.cpp
 )
 
 target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
@@ -35,6 +37,7 @@ target_link_libraries(xlog2 PRIVATE
     PkgConfig::GTKMM
     PkgConfig::SQLITE
     PkgConfig::HAMLIB
+    PkgConfig::CURL
     Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

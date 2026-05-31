@@ -68,6 +68,10 @@ void setField(Qso& q, const std::string& name, const std::string& value) {
     else if (name == "tx_pwr")     q.power    = value;
     else if (name == "qsl_sent")   q.qsl_sent = toUpper(value);
     else if (name == "qsl_rcvd")   q.qsl_rcvd = toUpper(value);
+    else if (name == "lotw_qsl_sent") q.lotw_sent = toUpper(value);
+    else if (name == "lotw_qslsdate") q.lotw_sent_date = dateFromAdif(value);
+    else if (name == "lotw_qsl_rcvd") q.lotw_rcvd = toUpper(value);
+    else if (name == "lotw_qslrdate") q.lotw_rcvd_date = dateFromAdif(value);
     else if (name == "comment" || name == "notes") q.comment = value;
     // unknown fields are silently ignored
 }
@@ -163,6 +167,10 @@ std::string write(const std::vector<Qso>& qsos) {
         writeField(os, "TX_PWR",   q.power);
         writeField(os, "QSL_SENT", q.qsl_sent);
         writeField(os, "QSL_RCVD", q.qsl_rcvd);
+        writeField(os, "LOTW_QSL_SENT", q.lotw_sent);
+        writeField(os, "LOTW_QSLSDATE", dateToAdif(q.lotw_sent_date));
+        writeField(os, "LOTW_QSL_RCVD", q.lotw_rcvd);
+        writeField(os, "LOTW_QSLRDATE", dateToAdif(q.lotw_rcvd_date));
         writeField(os, "COMMENT",  q.comment);
         os << "<EOR>\n";
     }
