@@ -1,0 +1,56 @@
+#pragma once
+
+#include "Qso.h"
+
+#include <string>
+#include <vector>
+
+struct sqlite3;
+
+// A logbook backed by a SQLite database. Every add/update/remove is committed
+// immediately, so an open file-backed logbook is always persisted. A freshly
+// constructed LogBook lives in an in-memory database (an unsaved "New" log)
+// until saveAs() migrates it to a file.
+class LogBook {
+public:
+    LogBook();
+    ~LogBook();
+
+    LogBook(const LogBook&)            = delete;
+    LogBook& operator=(const LogBook&) = delete;
+
+    // Replaces the current logbook with a fresh empty in-memory one.
+    void newInMemory();
+
+    // Opens (or creates) a file-backed logbook, replacing the current one.
+    bool open(const std::string& path);
+
+    // Copies all current QSOs into a new file at path and switches to it.
+    bool saveAs(const std::string& path);
+
+    // The cached, ordered list of QSOs (by date then time on).
+    const std::vector<Qso>& qsos() const { return cache_; }
+
+    // CRUD. add() returns the new id and sets it on the cached copy.
+    long add(const Qso& q);
+    bool update(const Qso& q);
+    bool remove(long id);
+
+    // Imports ADIF text, inserting each record. Returns the number added.
+    int importAdif(const std::string& adifText);
+
+    // Serialises the whole logbook to ADIF text.
+    std::string exportAdif() const;
+
+    const std::string& path() const { return path_; }
+    bool isFileBacked() const { return !path_.empty(); }
+
+private:
+    bool createSchema(sqlite3* db);
+    void reload();
+    void close();
+
+    sqlite3*         db_ = nullptr;
+    std::string      path_;   // empty => in-memory
+    std::vector<Qso> cache_;
+};
