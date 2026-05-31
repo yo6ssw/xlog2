@@ -48,6 +48,8 @@ private:
 
     // --- UDP network logging ---
     void onToggleUdp();
+    void startUdpListening();
+    void stopUdpListening();
     void onUdpSettings();
     void onUdpReceived(const std::vector<Qso>& qsos, const std::string& source);
 
@@ -78,6 +80,7 @@ private:
     // UDP network logging
     UdpListener                     listener_;
     int                             udpPort_ = 2237;  // WSJT-X default
+    bool                            udpEnabled_ = false;  // restored at startup
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
 
     // Hamlib rig control

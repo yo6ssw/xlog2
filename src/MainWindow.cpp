@@ -82,6 +82,10 @@ MainWindow::MainWindow() {
 
     updateTitle();
     setStatus("Ready.");
+
+    // Resume listening for QSOs over UDP if it was enabled last session.
+    if (udpEnabled_)
+        startUdpListening();
 }
 
 void MainWindow::buildActions() {
@@ -404,22 +408,29 @@ void MainWindow::onAbout() {
 // --- UDP network logging -----------------------------------------------------
 
 void MainWindow::onToggleUdp() {
-    if (!listener_.isListening()) {
-        std::string error;
-        if (listener_.start(udpPort_, error)) {
-            udpAction_->change_state(true);
-            setStatus("Listening for QSOs on UDP port " + std::to_string(udpPort_) +
-                      " (WSJT-X / ADIF).");
-        } else {
-            udpAction_->change_state(false);
-            setStatus("Could not start UDP listener on port " +
-                      std::to_string(udpPort_) + ": " + error);
-        }
+    if (!listener_.isListening())
+        startUdpListening();
+    else
+        stopUdpListening();
+}
+
+void MainWindow::startUdpListening() {
+    std::string error;
+    if (listener_.start(udpPort_, error)) {
+        udpAction_->change_state(true);
+        setStatus("Listening for QSOs on UDP port " + std::to_string(udpPort_) +
+                  " (WSJT-X / ADIF).");
     } else {
-        listener_.stop();
         udpAction_->change_state(false);
-        setStatus("Stopped UDP listener.");
+        setStatus("Could not start UDP listener on port " +
+                  std::to_string(udpPort_) + ": " + error);
     }
+}
+
+void MainWindow::stopUdpListening() {
+    listener_.stop();
+    udpAction_->change_state(false);
+    setStatus("Stopped UDP listener.");
 }
 
 void MainWindow::onUdpReceived(const std::vector<Qso>& qsos,
@@ -747,6 +758,7 @@ void MainWindow::saveSettings() {
     keyfile->set_string("session", "active", active);
 
     keyfile->set_integer("udp", "port", udpPort_);
+    keyfile->set_boolean("udp", "enabled", listener_.isListening());
     keyfile->set_integer("rig", "model", rigModel_);
     keyfile->set_string("rig", "device", rigDevice_);
     keyfile->set_integer("rig", "poll_ms", rigPollMs_);
@@ -793,8 +805,12 @@ void MainWindow::loadSettings() {
                     settings_->get_boolean("window", "maximized"))
                     maximize();
             }
-            if (settings_->has_group("udp") && settings_->has_key("udp", "port"))
-                udpPort_ = settings_->get_integer("udp", "port");
+            if (settings_->has_group("udp")) {
+                if (settings_->has_key("udp", "port"))
+                    udpPort_ = settings_->get_integer("udp", "port");
+                if (settings_->has_key("udp", "enabled"))
+                    udpEnabled_ = settings_->get_boolean("udp", "enabled");
+            }
             if (settings_->has_group("rig")) {
                 if (settings_->has_key("rig", "model"))
                     rigModel_ = settings_->get_integer("rig", "model");
