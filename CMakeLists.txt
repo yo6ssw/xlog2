@@ -23,6 +23,7 @@ add_executable(xlog2
     src/LogBook.cpp
     src/Adif.cpp
     src/Bands.cpp
+    src/Udp.cpp
 )
 
 target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

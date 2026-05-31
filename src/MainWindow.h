@@ -2,6 +2,7 @@
 
 #include "LogBook.h"
 #include "QsoItem.h"
+#include "Udp.h"
 
 #include <gtkmm.h>
 
@@ -46,6 +47,11 @@ private:
     void onStatistics();
     void onAbout();
 
+    // --- UDP network logging ---
+    void onToggleUdp();
+    void onUdpSettings();
+    void onUdpReceived(const std::vector<Qso>& qsos, const std::string& source);
+
     // --- misc ---
     void setStatus(const Glib::ustring& msg);
     void updateTitle();
@@ -66,6 +72,11 @@ private:
     Gtk::Button   addButton_, deleteButton_, clearButton_;
 
     Gtk::Label statusLabel_;
+
+    // UDP network logging
+    UdpListener                   listener_;
+    int                           udpPort_ = 2237;  // WSJT-X default
+    Glib::RefPtr<Gio::SimpleAction> udpAction_;
 
     long editingId_ = 0;  // id of the QSO currently loaded in the form, 0 = new
 };
