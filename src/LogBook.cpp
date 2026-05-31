@@ -4,7 +4,9 @@
 
 #include <sqlite3.h>
 
+#include <algorithm>
 #include <array>
+#include <cctype>
 
 namespace {
 
@@ -29,6 +31,14 @@ void bindText(sqlite3_stmt* stmt, int index, const std::string& value) {
 std::string columnText(sqlite3_stmt* stmt, int col) {
     const unsigned char* t = sqlite3_column_text(stmt, col);
     return t ? reinterpret_cast<const char*>(t) : std::string{};
+}
+
+bool iequals(const std::string& a, const std::string& b) {
+    return a.size() == b.size() &&
+           std::equal(a.begin(), a.end(), b.begin(), [](char x, char y) {
+               return std::tolower(static_cast<unsigned char>(x)) ==
+                      std::tolower(static_cast<unsigned char>(y));
+           });
 }
 
 } // namespace
@@ -267,4 +277,33 @@ int LogBook::importAdif(const std::string& adifText) {
 
 std::string LogBook::exportAdif() const {
     return adif::write(cache_);
+}
+
+std::optional<Qso> LogBook::findDuplicate(const Qso& q, long excludeId,
+                                          DupeRule rule) const {
+    if (q.call.empty())
+        return std::nullopt;
+
+    // cache_ is ordered by date then time; scan from newest so the first hit
+    // is the most recent duplicate.
+    for (auto it = cache_.rbegin(); it != cache_.rend(); ++it) {
+        const Qso& e = *it;
+        if (e.id == excludeId)
+            continue;
+        if (!iequals(e.call, q.call))
+            continue;
+        switch (rule) {
+            case DupeRule::CallBandModeDay:
+                if (e.band == q.band && iequals(e.mode, q.mode) && e.date == q.date)
+                    return e;
+                break;
+            case DupeRule::CallBandMode:
+                if (e.band == q.band && iequals(e.mode, q.mode))
+                    return e;
+                break;
+            case DupeRule::Call:
+                return e;
+        }
+    }
+    return std::nullopt;
 }

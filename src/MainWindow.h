@@ -1,49 +1,43 @@
 #pragma once
 
-#include "LogBook.h"
-#include "QsoItem.h"
+#include "Qso.h"
+#include "Rig.h"
 #include "Udp.h"
 
 #include <gtkmm.h>
 
-#include <functional>
+#include <map>
 #include <string>
-#include <utility>
 #include <vector>
 
-// The application's main window: a menu bar, a sortable log view, an entry
-// form for adding/editing QSOs, and a status line.
+class LogPage;
+
+// The application shell: a menu bar, a Gtk::Notebook of logbook tabs
+// (LogPage), a status line, the UDP listener and the Hamlib rig controller.
+// Per-logbook state lives in each LogPage; MainWindow routes menu actions,
+// network QSOs and rig readings to the current page and persists settings.
 class MainWindow : public Gtk::ApplicationWindow {
 public:
     MainWindow();
 
 private:
-    // --- construction helpers ---
     void buildActions();
     Glib::RefPtr<Gio::Menu> buildMenuModel();
-    void buildLogView();
-    Gtk::Widget& buildEntryForm();
-    Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
-        const Glib::ustring& title, std::function<std::string(const Qso&)> getter,
-        bool expand = false);
 
-    // --- data <-> UI ---
-    void refreshList();
-    void onSelectionChanged();
-    Qso  formToQso() const;
-    void qsoToForm(const Qso& q);
-    void clearForm();
-
-    // --- form actions ---
-    void onAddOrUpdate();
-    void onDeleteSelected();
-    void onFrequencyChanged();
-    void onSetNow();
+    // --- tab/page management ---
+    LogPage* currentPage();
+    LogPage* addPage(LogPage* page);          // append, wire up, focus; returns page
+    void     registerTab(LogPage* page);
+    void     updateTabLabel(LogPage* page);
+    void     onPageChanged(LogPage* page);
+    void     closePage(LogPage* page);
+    LogPage* findPageByPath(const std::string& path);
 
     // --- menu actions ---
-    void onNew();
+    void onNewTab();
     void onOpen();
     void onSaveAs();
+    void onCloseTab();
     void onImportAdif();
     void onExportAdif();
     void onStatistics();
@@ -54,42 +48,35 @@ private:
     void onUdpSettings();
     void onUdpReceived(const std::vector<Qso>& qsos, const std::string& source);
 
-    // --- settings persistence (window geometry + column layout) ---
+    // --- Hamlib rig control ---
+    void onRigConnect();
+    void onRigDisconnect();
+    void onRigUpdate(double mhz, const std::string& mode);
+
+    // --- settings persistence ---
     std::string layoutFilePath() const;
     void saveSettings();
     void loadSettings();
-    void applyColumnOrder(const std::vector<std::string>& ids);
     bool onCloseRequest();
 
-    // --- misc ---
     void setStatus(const Glib::ustring& msg);
     void updateTitle();
 
-    LogBook logbook_;
-
-    // Log view
-    Glib::RefPtr<Gio::ListStore<QsoItem>> store_;
-    Glib::RefPtr<Gtk::SingleSelection>    selection_;
-    Gtk::ColumnView                       columnView_;
-
-    // Stable id -> column, in the order originally created. Used to persist
-    // and restore the user's column order/width/visibility.
-    std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
-
-    // Entry form fields
-    Gtk::Entry    date_, timeOn_, timeOff_, call_, freq_;
-    Gtk::Entry    rstSent_, rstRcvd_, name_, qth_, locator_, power_, comment_;
-    Gtk::DropDown band_, mode_;
-    Glib::RefPtr<Gtk::StringList> bandModel_, modeModel_;
-    Gtk::CheckButton qslSent_, qslRcvd_;
-    Gtk::Button   addButton_, deleteButton_, clearButton_;
-
-    Gtk::Label statusLabel_;
+    Gtk::Notebook                   notebook_;
+    Gtk::Label                      statusLabel_;
+    std::map<LogPage*, Gtk::Label*> tabLabels_;
 
     // UDP network logging
-    UdpListener                   listener_;
-    int                           udpPort_ = 2237;  // WSJT-X default
+    UdpListener                     listener_;
+    int                             udpPort_ = 2237;  // WSJT-X default
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
 
-    long editingId_ = 0;  // id of the QSO currently loaded in the form, 0 = new
+    // Hamlib rig control
+    RigController rig_;
+    int           rigModel_  = 1;     // 1 == RIG_MODEL_DUMMY
+    std::string   rigDevice_;
+    int           rigPollMs_ = 500;
+
+    // Loaded settings, used to apply the shared column layout to new pages.
+    Glib::RefPtr<Glib::KeyFile> settings_;
 };

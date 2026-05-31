@@ -13,21 +13,29 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
 endif()
 
 find_package(PkgConfig REQUIRED)
+find_package(Threads REQUIRED)
 pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
+pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
 
 add_executable(xlog2
     src/main.cpp
     src/XlogApplication.cpp
     src/MainWindow.cpp
+    src/LogPage.cpp
     src/LogBook.cpp
     src/Adif.cpp
     src/Bands.cpp
     src/Udp.cpp
+    src/Rig.cpp
 )
 
 target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(xlog2 PRIVATE PkgConfig::GTKMM PkgConfig::SQLITE)
+target_link_libraries(xlog2 PRIVATE
+    PkgConfig::GTKMM
+    PkgConfig::SQLITE
+    PkgConfig::HAMLIB
+    Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(xlog2 PRIVATE -Wall -Wextra)

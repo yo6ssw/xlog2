@@ -1,0 +1,498 @@
+#include "LogPage.h"
+
+#include "Bands.h"
+#include "UiUtil.h"
+
+#include <cctype>
+#include <cstdio>
+#include <set>
+#include <stdexcept>
+
+namespace {
+
+// Install the dupe-highlight CSS once for the whole application.
+void ensureDupeCss() {
+    static bool installed = false;
+    if (installed)
+        return;
+    installed = true;
+    auto provider = Gtk::CssProvider::create();
+    provider->load_from_string(
+        ".dupe-warning { color: #c01c28; font-weight: bold; }\n"
+        "entry.dupe { background-image: none; background-color: #f7d4d4; }\n");
+    if (auto display = Gdk::Display::get_default())
+        Gtk::StyleContext::add_provider_for_display(
+            display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+}
+
+// Format MHz without trailing zeros, e.g. 14.250000 -> "14.25".
+std::string formatMhz(double mhz) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.6f", mhz);
+    std::string s = buf;
+    if (s.find('.') != std::string::npos) {
+        while (!s.empty() && s.back() == '0')
+            s.pop_back();
+        if (!s.empty() && s.back() == '.')
+            s.pop_back();
+    }
+    return s;
+}
+
+} // namespace
+
+LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL) {
+    ensureDupeCss();
+
+    buildLogView();
+    auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    scroller->set_child(columnView_);
+    scroller->set_vexpand(true);
+    append(*scroller);
+
+    buildEntryForm();
+
+    refreshList();
+    clearForm();
+}
+
+Glib::RefPtr<Gtk::ColumnViewColumn> LogPage::makeColumn(
+    const Glib::ustring& title, std::function<std::string(const Qso&)> getter,
+    bool expand) {
+    auto factory = Gtk::SignalListItemFactory::create();
+    factory->signal_setup().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto* label = Gtk::make_managed<Gtk::Label>();
+        label->set_xalign(0.0);
+        li->set_child(*label);
+    });
+    factory->signal_bind().connect(
+        [getter](const Glib::RefPtr<Gtk::ListItem>& li) {
+            auto* label = dynamic_cast<Gtk::Label*>(li->get_child());
+            auto* item = dynamic_cast<QsoItem*>(li->get_item().get());
+            if (label && item)
+                label->set_text(getter(item->qso));
+        });
+
+    auto column = Gtk::ColumnViewColumn::create(title, factory);
+    column->set_resizable(true);
+    column->set_expand(expand);
+    return column;
+}
+
+void LogPage::buildLogView() {
+    store_ = Gio::ListStore<QsoItem>::create();
+    selection_ = Gtk::SingleSelection::create(store_);
+    selection_->set_autoselect(false);
+    selection_->set_can_unselect(true);
+    columnView_.set_model(selection_);
+    columnView_.add_css_class("data-table");
+    columnView_.set_show_column_separators(true);
+    columnView_.set_show_row_separators(true);
+
+    auto add = [&](const std::string& id, const Glib::ustring& title,
+                   std::function<std::string(const Qso&)> getter, bool expand = false) {
+        auto col = makeColumn(title, std::move(getter), expand);
+        columns_.emplace_back(id, col);
+        columnView_.append_column(col);
+    };
+
+    add("date", "Date", [](const Qso& q) { return q.date; });
+    add("on",   "On",   [](const Qso& q) { return q.time_on; });
+    add("off",  "Off",  [](const Qso& q) { return q.time_off; });
+    add("call", "Call", [](const Qso& q) { return q.call; });
+    add("band", "Band", [](const Qso& q) { return q.band; });
+    add("mode", "Mode", [](const Qso& q) { return q.mode; });
+    add("freq", "Freq", [](const Qso& q) { return q.freq; });
+    add("rst_s", "RST S", [](const Qso& q) { return q.rst_sent; });
+    add("rst_r", "RST R", [](const Qso& q) { return q.rst_rcvd; });
+    add("name", "Name", [](const Qso& q) { return q.name; });
+    add("qth",  "QTH",  [](const Qso& q) { return q.qth; });
+    add("loc",  "Loc",  [](const Qso& q) { return q.locator; });
+    add("pwr",  "Pwr",  [](const Qso& q) { return q.power; });
+    add("qsl",  "QSL",  [](const Qso& q) {
+        std::string s = q.qsl_sent.empty() ? "-" : q.qsl_sent;
+        std::string r = q.qsl_rcvd.empty() ? "-" : q.qsl_rcvd;
+        return s + "/" + r;
+    });
+    add("comment", "Comment", [](const Qso& q) { return q.comment; }, true);
+
+    selection_->property_selected().signal_changed().connect(
+        sigc::mem_fun(*this, &LogPage::onSelectionChanged));
+}
+
+void LogPage::buildEntryForm() {
+    auto* frame = Gtk::make_managed<Gtk::Frame>("QSO entry");
+    ui::setMargin(*frame, 6);
+
+    auto* outer = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    ui::setMargin(*outer, 6);
+    outer->set_spacing(6);
+    frame->set_child(*outer);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(4);
+    grid->set_column_spacing(8);
+    outer->append(*grid);
+
+    std::vector<Glib::ustring> bandStrings(bands::names().begin(), bands::names().end());
+    std::vector<Glib::ustring> modeStrings(bands::modes().begin(), bands::modes().end());
+    bandModel_ = Gtk::StringList::create(bandStrings);
+    modeModel_ = Gtk::StringList::create(modeStrings);
+    band_.set_model(bandModel_);
+    mode_.set_model(modeModel_);
+
+    qslSent_.set_label("QSL sent");
+    qslRcvd_.set_label("QSL rcvd");
+
+    auto field = [&](const char* text, Gtk::Widget& w, int col, int row) {
+        auto* label = Gtk::make_managed<Gtk::Label>(text);
+        label->set_xalign(1.0);
+        grid->attach(*label, col * 2, row);
+        w.set_hexpand(true);
+        grid->attach(w, col * 2 + 1, row);
+    };
+
+    auto* nowButton = Gtk::make_managed<Gtk::Button>("Now");
+    nowButton->signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onSetNow));
+
+    field("Date",     date_,    0, 0);
+    field("Time on",  timeOn_,  1, 0);
+    field("Time off", timeOff_, 2, 0);
+    grid->attach(*nowButton, 6, 0);
+
+    field("Call",     call_,    0, 1);
+    field("Band",     band_,    1, 1);
+    field("Mode",     mode_,    2, 1);
+
+    field("Freq MHz", freq_,    0, 2);
+    field("RST sent", rstSent_, 1, 2);
+    field("RST rcvd", rstRcvd_, 2, 2);
+
+    field("Name",     name_,    0, 3);
+    field("QTH",      qth_,     1, 3);
+    field("Locator",  locator_, 2, 3);
+
+    field("Power W",  power_,   0, 4);
+    grid->attach(qslSent_, 3, 4);
+    grid->attach(qslRcvd_, 5, 4);
+
+    auto* commentLabel = Gtk::make_managed<Gtk::Label>("Comment");
+    commentLabel->set_xalign(1.0);
+    grid->attach(*commentLabel, 0, 5);
+    comment_.set_hexpand(true);
+    grid->attach(comment_, 1, 5, 5, 1);
+
+    // Duplicate-warning indicator (hidden when empty).
+    dupeLabel_.set_xalign(0.0);
+    dupeLabel_.add_css_class("dupe-warning");
+    outer->append(dupeLabel_);
+
+    auto* buttons = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    buttons->set_spacing(6);
+    buttons->set_halign(Gtk::Align::END);
+    addButton_.set_label("Add QSO");
+    deleteButton_.set_label("Delete");
+    clearButton_.set_label("Clear");
+    deleteButton_.set_sensitive(false);
+    buttons->append(clearButton_);
+    buttons->append(deleteButton_);
+    buttons->append(addButton_);
+    outer->append(*buttons);
+
+    append(*frame);
+
+    addButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
+    deleteButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onDeleteSelected));
+    clearButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::clearForm));
+    freq_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::onFrequencyChanged));
+    call_.signal_activate().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
+
+    // Live dupe detection as the key fields change.
+    call_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+    date_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+    band_.property_selected().signal_changed().connect(
+        sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+    mode_.property_selected().signal_changed().connect(
+        sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+}
+
+void LogPage::refreshList() {
+    store_->remove_all();
+    for (const auto& q : logbook_.qsos())
+        store_->append(QsoItem::create(q));
+    updateDupeIndicator();
+}
+
+void LogPage::onSelectionChanged() {
+    auto* item = dynamic_cast<QsoItem*>(selection_->get_selected_item().get());
+    if (!item)
+        return;  // deselection — leave the form alone
+    qsoToForm(item->qso);
+    editingId_ = item->qso.id;
+    addButton_.set_label("Update QSO");
+    deleteButton_.set_sensitive(true);
+    updateDupeIndicator();
+}
+
+Qso LogPage::formToQso() const {
+    Qso q;
+    q.id       = editingId_;
+    q.date     = ui::entryText(date_);
+    q.time_on  = ui::entryText(timeOn_);
+    q.time_off = ui::entryText(timeOff_);
+    q.call     = ui::entryText(call_);
+    q.band     = ui::dropdownText(band_, bandModel_);
+    q.mode     = ui::dropdownText(mode_, modeModel_);
+    q.freq     = ui::entryText(freq_);
+    q.rst_sent = ui::entryText(rstSent_);
+    q.rst_rcvd = ui::entryText(rstRcvd_);
+    q.name     = ui::entryText(name_);
+    q.qth      = ui::entryText(qth_);
+    q.locator  = ui::entryText(locator_);
+    q.power    = ui::entryText(power_);
+    q.qsl_sent = qslSent_.get_active() ? "Y" : "N";
+    q.qsl_rcvd = qslRcvd_.get_active() ? "Y" : "N";
+    q.comment  = ui::entryText(comment_);
+
+    for (auto& c : q.call) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    for (auto& c : q.locator) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return q;
+}
+
+void LogPage::qsoToForm(const Qso& q) {
+    date_.set_text(q.date);
+    timeOn_.set_text(q.time_on);
+    timeOff_.set_text(q.time_off);
+    call_.set_text(q.call);
+    freq_.set_text(q.freq);  // set before band so it does not overwrite it
+    ui::setDropdown(band_, bandModel_, q.band);
+    ui::setDropdown(mode_, modeModel_, q.mode);
+    rstSent_.set_text(q.rst_sent);
+    rstRcvd_.set_text(q.rst_rcvd);
+    name_.set_text(q.name);
+    qth_.set_text(q.qth);
+    locator_.set_text(q.locator);
+    power_.set_text(q.power);
+    qslSent_.set_active(q.qsl_sent == "Y");
+    qslRcvd_.set_active(q.qsl_rcvd == "Y");
+    comment_.set_text(q.comment);
+}
+
+void LogPage::clearForm() {
+    editingId_ = 0;
+    for (Gtk::Entry* e : {&date_, &timeOn_, &timeOff_, &call_, &freq_, &rstSent_,
+                          &rstRcvd_, &name_, &qth_, &locator_, &power_, &comment_})
+        e->set_text("");
+    band_.set_selected(GTK_INVALID_LIST_POSITION);
+    mode_.set_selected(GTK_INVALID_LIST_POSITION);
+    qslSent_.set_active(false);
+    qslRcvd_.set_active(false);
+
+    date_.set_text(ui::utcNow("%Y-%m-%d"));
+    timeOn_.set_text(ui::utcNow("%H:%M"));
+
+    addButton_.set_label("Add QSO");
+    deleteButton_.set_sensitive(false);
+    selection_->unselect_all();
+    call_.grab_focus();
+}
+
+void LogPage::onAddOrUpdate() {
+    Qso q = formToQso();
+    if (q.call.empty()) {
+        status("Cannot log a QSO without a callsign.");
+        return;
+    }
+    if (editingId_ != 0) {
+        logbook_.update(q);
+        status("Updated QSO with " + q.call + ".");
+    } else {
+        logbook_.add(q);
+        status("Logged QSO with " + q.call + ".");
+    }
+    refreshList();
+    clearForm();
+    signalChanged_.emit();
+}
+
+void LogPage::onDeleteSelected() {
+    if (editingId_ == 0) {
+        status("No QSO selected to delete.");
+        return;
+    }
+    logbook_.remove(editingId_);
+    refreshList();
+    clearForm();
+    signalChanged_.emit();
+    status("QSO deleted.");
+}
+
+void LogPage::onFrequencyChanged() {
+    const std::string text = ui::entryText(freq_);
+    if (text.empty())
+        return;
+    try {
+        const double mhz = std::stod(text);
+        const std::string b = bands::forFrequencyMHz(mhz);
+        if (!b.empty())
+            ui::setDropdown(band_, bandModel_, b);
+    } catch (const std::exception&) {
+        // not a number yet; ignore
+    }
+}
+
+void LogPage::onSetNow() {
+    date_.set_text(ui::utcNow("%Y-%m-%d"));
+    timeOn_.set_text(ui::utcNow("%H:%M"));
+}
+
+void LogPage::updateDupeIndicator() {
+    const Qso q = formToQso();
+    const auto dup = logbook_.findDuplicate(q, editingId_);
+    if (dup) {
+        dupeLabel_.set_text("⚠ Dupe — already worked " + dup->call + " on " +
+                            dup->band + " " + dup->mode + " at " + dup->time_on +
+                            " (" + dup->date + ")");
+        if (!call_.has_css_class("dupe"))
+            call_.add_css_class("dupe");
+    } else {
+        dupeLabel_.set_text("");
+        call_.remove_css_class("dupe");
+    }
+}
+
+void LogPage::newInMemory() {
+    logbook_.newInMemory();
+    refreshList();
+    clearForm();
+    signalChanged_.emit();
+}
+
+bool LogPage::openFile(const std::string& path) {
+    if (!logbook_.open(path))
+        return false;
+    refreshList();
+    clearForm();
+    signalChanged_.emit();
+    return true;
+}
+
+bool LogPage::saveAs(const std::string& path) {
+    if (!logbook_.saveAs(path))
+        return false;
+    refreshList();
+    signalChanged_.emit();
+    return true;
+}
+
+int LogPage::importAdif(const std::string& adifText) {
+    const int n = logbook_.importAdif(adifText);
+    refreshList();
+    signalChanged_.emit();
+    return n;
+}
+
+std::string LogPage::exportAdif() const {
+    return logbook_.exportAdif();
+}
+
+void LogPage::addExternalQso(const Qso& q) {
+    logbook_.add(q);
+    refreshList();
+    signalChanged_.emit();
+}
+
+void LogPage::setRigFrequency(double mhz) {
+    if (mhz > 0.0)
+        freq_.set_text(formatMhz(mhz));  // triggers band auto-detect
+}
+
+void LogPage::setRigMode(const std::string& mode) {
+    if (mode.empty())
+        return;
+    for (guint i = 0; i < modeModel_->get_n_items(); ++i) {
+        if (modeModel_->get_string(i).raw() == mode) {
+            mode_.set_selected(i);
+            return;
+        }
+    }
+    // Unknown mode name: leave the current selection untouched.
+}
+
+Glib::ustring LogPage::title() const {
+    return isFileBacked() ? Glib::path_get_basename(path()) : "Untitled";
+}
+
+void LogPage::applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {
+    if (!keyfile)
+        return;
+    for (const auto& [id, col] : columns_) {
+        try {
+            if (keyfile->has_group("width") && keyfile->has_key("width", id)) {
+                const int width = keyfile->get_integer("width", id);
+                if (width > 0)
+                    col->set_fixed_width(width);
+            }
+            if (keyfile->has_group("visible") && keyfile->has_key("visible", id))
+                col->set_visible(keyfile->get_boolean("visible", id));
+        } catch (const Glib::Error&) {
+        }
+    }
+    try {
+        if (keyfile->has_group("columns") && keyfile->has_key("columns", "order"))
+            applyColumnOrder(ui::splitSemicolons(keyfile->get_string("columns", "order")));
+    } catch (const Glib::Error&) {
+    }
+}
+
+void LogPage::storeColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {
+    if (!keyfile)
+        return;
+    std::string order;
+    auto displayed = columnView_.get_columns();
+    for (guint i = 0; i < displayed->get_n_items(); ++i) {
+        auto* colPtr = dynamic_cast<Gtk::ColumnViewColumn*>(displayed->get_object(i).get());
+        for (const auto& [id, col] : columns_) {
+            if (col.get() == colPtr) {
+                if (!order.empty())
+                    order += ';';
+                order += id;
+                break;
+            }
+        }
+    }
+    keyfile->set_string("columns", "order", order);
+    for (const auto& [id, col] : columns_) {
+        const int width = col->get_fixed_width();
+        if (width > 0)
+            keyfile->set_integer("width", id, width);
+        keyfile->set_boolean("visible", id, col->get_visible());
+    }
+}
+
+void LogPage::applyColumnOrder(const std::vector<std::string>& ids) {
+    std::vector<Glib::RefPtr<Gtk::ColumnViewColumn>> desired;
+    std::set<std::string> used;
+
+    for (const auto& id : ids) {
+        for (const auto& [cid, col] : columns_) {
+            if (cid == id && !used.count(cid)) {
+                desired.push_back(col);
+                used.insert(cid);
+                break;
+            }
+        }
+    }
+    for (const auto& [cid, col] : columns_)
+        if (!used.count(cid))
+            desired.push_back(col);
+
+    if (desired.size() != columns_.size())
+        return;
+
+    for (const auto& [cid, col] : columns_)
+        columnView_.remove_column(col);
+    for (const auto& col : desired)
+        columnView_.append_column(col);
+}
