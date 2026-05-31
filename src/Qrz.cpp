@@ -57,6 +57,32 @@ std::string xmlTag(const std::string& xml, const std::string& tag) {
     return xmlUnescape(xml.substr(start, b - start));
 }
 
+// Extract every flat <tag>value</tag> element from `block`, in order. QRZ's
+// callsign fields carry no attributes and don't nest, so a simple scan works.
+std::vector<std::pair<std::string, std::string>> parseElements(const std::string& block) {
+    std::vector<std::pair<std::string, std::string>> out;
+    const size_t n = block.size();
+    size_t i = 0;
+    while (i < n) {
+        if (block[i] != '<') { ++i; continue; }
+        const size_t gt = block.find('>', i);
+        if (gt == std::string::npos)
+            break;
+        const std::string tag = block.substr(i + 1, gt - i - 1);
+        i = gt + 1;
+        if (tag.empty() || tag[0] == '/' || tag[0] == '!' || tag[0] == '?' ||
+            tag.find(' ') != std::string::npos)  // skip closing/decl/attr tags
+            continue;
+        const std::string close = "</" + tag + ">";
+        const size_t end = block.find(close, i);
+        if (end == std::string::npos)
+            continue;
+        out.emplace_back(tag, xmlUnescape(block.substr(i, end - i)));
+        i = end + close.size();
+    }
+    return out;
+}
+
 std::string httpGet(CURL* curl, const std::string& url, std::string& error) {
     std::string body;
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
@@ -165,6 +191,12 @@ void QrzClient::worker(std::string user, std::string password, std::string calls
                 if (result.call.empty()) {
                     error = "No QRZ record for " + callsign;
                 } else {
+                    const size_t cs = body.find("<Callsign>");
+                    const size_t ce = body.find("</Callsign>");
+                    if (cs != std::string::npos && ce != std::string::npos && ce > cs)
+                        result.fields = parseElements(
+                            body.substr(cs + 10, ce - (cs + 10)));
+
                     const std::string fn = xmlTag(body, "fname");
                     const std::string ln = xmlTag(body, "name");
                     result.name = fn.empty() ? ln
