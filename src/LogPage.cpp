@@ -10,8 +10,11 @@
 
 namespace {
 
-// Install the dupe-highlight CSS once for the whole application.
-void ensureDupeCss() {
+// Install the application's CSS once: the dupe-highlight styling and a raised
+// (beveled) look for the log table's column headers. Scoped to the
+// "data-table" class so only the log view is affected; theme colours keep it
+// working in light and dark themes.
+void ensureCss() {
     static bool installed = false;
     if (installed)
         return;
@@ -19,7 +22,25 @@ void ensureDupeCss() {
     auto provider = Gtk::CssProvider::create();
     provider->load_from_string(
         ".dupe-warning { color: #c01c28; font-weight: bold; }\n"
-        "entry.dupe { background-image: none; background-color: #f7d4d4; }\n");
+        "entry.dupe { background-image: none; background-color: #f7d4d4; }\n"
+        "columnview.data-table > header > button {\n"
+        "  border: 1px solid @borders;\n"
+        "  border-radius: 0;\n"
+        "  background-image: linear-gradient(to bottom,\n"
+        "      shade(@theme_bg_color, 1.06), shade(@theme_bg_color, 0.92));\n"
+        "  box-shadow: inset 0 1px shade(@theme_bg_color, 1.18),\n"
+        "              inset 0 -1px shade(@theme_bg_color, 0.82);\n"
+        "  padding: 2px 8px;\n"
+        "}\n"
+        "columnview.data-table > header > button:hover {\n"
+        "  background-image: linear-gradient(to bottom,\n"
+        "      shade(@theme_bg_color, 1.10), shade(@theme_bg_color, 0.96));\n"
+        "}\n"
+        "columnview.data-table > header > button:active {\n"
+        "  background-image: linear-gradient(to bottom,\n"
+        "      shade(@theme_bg_color, 0.90), shade(@theme_bg_color, 1.02));\n"
+        "  box-shadow: inset 0 1px shade(@theme_bg_color, 0.70);\n"
+        "}\n");
     if (auto display = Gdk::Display::get_default())
         Gtk::StyleContext::add_provider_for_display(
             display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
@@ -42,7 +63,7 @@ std::string formatMhz(double mhz) {
 } // namespace
 
 LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL) {
-    ensureDupeCss();
+    ensureCss();
 
     buildLogView();
     auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
