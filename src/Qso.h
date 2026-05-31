@@ -25,4 +25,10 @@ struct Qso {
     std::string qsl_sent;       // "Y" / "N" / ""
     std::string qsl_rcvd;       // "Y" / "N" / ""
     std::string comment;        // free-form remarks
+
+    // Logbook of The World (LoTW) status, mapped to the ADIF LOTW_* fields.
+    std::string lotw_sent;      // "Y"/"N"/""     LOTW_QSL_SENT
+    std::string lotw_sent_date; // YYYY-MM-DD      LOTW_QSLSDATE
+    std::string lotw_rcvd;      // "Y"/"N"/""     LOTW_QSL_RCVD ("Y" = confirmed)
+    std::string lotw_rcvd_date; // YYYY-MM-DD      LOTW_QSLRDATE
 };

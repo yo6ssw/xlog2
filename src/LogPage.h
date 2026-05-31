@@ -37,6 +37,12 @@ public:
     void setRigFrequency(double mhz);
     void setRigMode(const std::string& mode);
 
+    // LoTW helpers (delegate to the LogBook, then refresh + notify).
+    std::vector<Qso> qsosNotLotwSent() const;
+    void markLotwSent(const std::vector<long>& ids, const std::string& date);
+    int  applyLotwConfirmations(const std::vector<Qso>& confirmed);
+    void refresh();  // repaint the list after external changes
+
     // Shared column layout (order/width/visibility) persistence.
     void applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile);
     void storeColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile);

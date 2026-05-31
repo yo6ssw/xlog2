@@ -1,7 +1,10 @@
 #include "MainWindow.h"
 
+#include "Adif.h"
 #include "LogPage.h"
 #include "UiUtil.h"
+
+#include <sys/stat.h>
 
 #include <algorithm>
 #include <map>
@@ -47,6 +50,32 @@ MainWindow::MainWindow() {
         onRigUpdate(mhz, mode);
     };
 
+    lotw_.onDownloadDone = [this](const std::string& adif, const std::string& error) {
+        if (!error.empty()) {
+            setStatus("LoTW download failed: " + error);
+            return;
+        }
+        const auto records = adif::parse(adif);
+        auto* page = currentPage();
+        if (!page)
+            return;
+        const int n = page->applyLotwConfirmations(records);
+        lotwLastDownload_ = ui::utcNow("%Y-%m-%d");
+        if (records.empty())
+            setStatus("LoTW: no confirmations returned (check username/password).");
+        else
+            setStatus("LoTW: " + std::to_string(records.size()) +
+                      " record(s) downloaded, " + std::to_string(n) +
+                      " QSO(s) newly confirmed.");
+    };
+    lotw_.onUploadDone = [this](bool ok, const std::string& message) {
+        if (ok && pendingUploadPage_ && isLivePage(pendingUploadPage_))
+            pendingUploadPage_->markLotwSent(pendingUploadIds_, ui::utcNow("%Y-%m-%d"));
+        pendingUploadPage_ = nullptr;
+        pendingUploadIds_.clear();
+        setStatus(std::string("LoTW upload: ") + message);
+    };
+
     loadSettings();
     if (notebook_.get_n_pages() == 0)
         addPage(Gtk::make_managed<LogPage>());
@@ -71,6 +100,10 @@ void MainWindow::buildActions() {
 
     add_action("rigconnect",    sigc::mem_fun(*this, &MainWindow::onRigConnect));
     add_action("rigdisconnect", sigc::mem_fun(*this, &MainWindow::onRigDisconnect));
+
+    add_action("lotwupload",   sigc::mem_fun(*this, &MainWindow::onLotwUpload));
+    add_action("lotwdownload", sigc::mem_fun(*this, &MainWindow::onLotwDownload));
+    add_action("lotwsettings", sigc::mem_fun(*this, &MainWindow::onLotwSettings));
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -103,6 +136,12 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     rigMenu->append("_Connect…", "win.rigconnect");
     rigMenu->append("_Disconnect", "win.rigdisconnect");
     menu->append_submenu("_Rig", rigMenu);
+
+    auto lotwMenu = Gio::Menu::create();
+    lotwMenu->append("_Upload to LoTW…", "win.lotwupload");
+    lotwMenu->append("_Download confirmations", "win.lotwdownload");
+    lotwMenu->append("_Settings…", "win.lotwsettings");
+    menu->append_submenu("Lo_TW", lotwMenu);
 
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
@@ -525,6 +564,121 @@ void MainWindow::onRigUpdate(double mhz, const std::string& mode) {
     setStatus(os.str());
 }
 
+// --- LoTW --------------------------------------------------------------------
+
+bool MainWindow::isLivePage(LogPage* page) {
+    for (int i = 0; i < notebook_.get_n_pages(); ++i)
+        if (notebook_.get_nth_page(i) == page)
+            return true;
+    return false;
+}
+
+void MainWindow::onLotwUpload() {
+    auto* page = currentPage();
+    if (!page)
+        return;
+    const auto unsent = page->qsosNotLotwSent();
+    if (unsent.empty()) {
+        setStatus("No new QSOs to upload to LoTW.");
+        return;
+    }
+
+    const std::string tmp =
+        Glib::build_filename(Glib::get_tmp_dir(), "xlog2-lotw-upload.adi");
+    try {
+        Glib::file_set_contents(tmp, adif::write(unsent));
+    } catch (const Glib::Error&) {
+        setStatus("Could not write a temporary ADIF file for upload.");
+        return;
+    }
+
+    pendingUploadIds_.clear();
+    for (const auto& q : unsent)
+        pendingUploadIds_.push_back(q.id);
+    pendingUploadPage_ = page;
+
+    setStatus("Signing and uploading " + std::to_string(unsent.size()) +
+              " QSO(s) via tqsl…");
+    lotw_.uploadAdifFile(tqslPath_, lotwStation_, tmp);
+}
+
+void MainWindow::onLotwDownload() {
+    if (lotwUser_.empty() || lotwPassword_.empty()) {
+        setStatus("Set your LoTW username and password in LoTW ▸ Settings first.");
+        return;
+    }
+    if (lotw_.isBusy()) {
+        setStatus("A LoTW download is already in progress.");
+        return;
+    }
+    setStatus("Downloading LoTW confirmations…");
+    lotw_.downloadConfirmations(lotwUser_, lotwPassword_, lotwLastDownload_);
+}
+
+void MainWindow::onLotwSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("LoTW settings");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* userEntry = Gtk::make_managed<Gtk::Entry>();
+    userEntry->set_text(lotwUser_);
+    auto* passEntry = Gtk::make_managed<Gtk::Entry>();
+    passEntry->set_text(lotwPassword_);
+    passEntry->set_visibility(false);
+    auto* stationEntry = Gtk::make_managed<Gtk::Entry>();
+    stationEntry->set_text(lotwStation_);
+    stationEntry->set_placeholder_text("tqsl station location (optional)");
+    auto* tqslEntry = Gtk::make_managed<Gtk::Entry>();
+    tqslEntry->set_text(tqslPath_);
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("LoTW username:", *userEntry, 0);
+    field("LoTW password:", *passEntry, 1);
+    field("Station location:", *stationEntry, 2);
+    field("tqsl path:", *tqslEntry, 3);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Username/password are for downloading confirmations and are stored in\n"
+        "plain text in ~/.config/xlog2/layout.ini (mode 0600). Uploading uses\n"
+        "the tqsl tool and your certificate — install tqsl and configure it once.");
+    hint->set_xalign(0.0);
+    grid->attach(*hint, 0, 4, 2, 1);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 5);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect(
+        [this, userEntry, passEntry, stationEntry, tqslEntry, win]() {
+            lotwUser_     = userEntry->get_text().raw();
+            lotwPassword_ = passEntry->get_text().raw();
+            lotwStation_  = stationEntry->get_text().raw();
+            tqslPath_     = tqslEntry->get_text().raw();
+            if (tqslPath_.empty())
+                tqslPath_ = "tqsl";
+            setStatus("LoTW settings saved.");
+            win->set_visible(false);
+        });
+
+    win->present();
+}
+
 // --- settings persistence ----------------------------------------------------
 
 std::string MainWindow::layoutFilePath() const {
@@ -577,6 +731,12 @@ void MainWindow::saveSettings() {
     keyfile->set_string("rig", "device", rigDevice_);
     keyfile->set_integer("rig", "poll_ms", rigPollMs_);
 
+    keyfile->set_string("lotw", "username", lotwUser_);
+    keyfile->set_string("lotw", "password", lotwPassword_);
+    keyfile->set_string("lotw", "station_location", lotwStation_);
+    keyfile->set_string("lotw", "tqsl_path", tqslPath_);
+    keyfile->set_string("lotw", "last_download", lotwLastDownload_);
+
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
             ->make_directory_with_parents();
@@ -584,6 +744,8 @@ void MainWindow::saveSettings() {
     }
     try {
         Glib::file_set_contents(layoutFilePath(), keyfile->to_data());
+        // The file holds a plaintext LoTW password — restrict to the owner.
+        ::chmod(layoutFilePath().c_str(), S_IRUSR | S_IWUSR);
     } catch (const Glib::Error&) {
     }
 }
@@ -620,6 +782,18 @@ void MainWindow::loadSettings() {
                     rigDevice_ = settings_->get_string("rig", "device").raw();
                 if (settings_->has_key("rig", "poll_ms"))
                     rigPollMs_ = settings_->get_integer("rig", "poll_ms");
+            }
+            if (settings_->has_group("lotw")) {
+                if (settings_->has_key("lotw", "username"))
+                    lotwUser_ = settings_->get_string("lotw", "username").raw();
+                if (settings_->has_key("lotw", "password"))
+                    lotwPassword_ = settings_->get_string("lotw", "password").raw();
+                if (settings_->has_key("lotw", "station_location"))
+                    lotwStation_ = settings_->get_string("lotw", "station_location").raw();
+                if (settings_->has_key("lotw", "tqsl_path"))
+                    tqslPath_ = settings_->get_string("lotw", "tqsl_path").raw();
+                if (settings_->has_key("lotw", "last_download"))
+                    lotwLastDownload_ = settings_->get_string("lotw", "last_download").raw();
             }
         } catch (const Glib::Error&) {
         }

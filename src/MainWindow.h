@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Lotw.h"
 #include "Qso.h"
 #include "Rig.h"
 #include "Udp.h"
@@ -53,6 +54,12 @@ private:
     void onRigDisconnect();
     void onRigUpdate(double mhz, const std::string& mode);
 
+    // --- LoTW ---
+    void onLotwUpload();
+    void onLotwDownload();
+    void onLotwSettings();
+    bool isLivePage(LogPage* page);
+
     // --- settings persistence ---
     std::string layoutFilePath() const;
     void saveSettings();
@@ -76,6 +83,13 @@ private:
     int           rigModel_  = 1;     // 1 == RIG_MODEL_DUMMY
     std::string   rigDevice_;
     int           rigPollMs_ = 500;
+
+    // LoTW
+    LotwClient    lotw_;
+    std::string   lotwUser_, lotwPassword_, lotwStation_, lotwLastDownload_;
+    std::string   tqslPath_ = "tqsl";
+    LogPage*      pendingUploadPage_ = nullptr;   // page awaiting an upload result
+    std::vector<long> pendingUploadIds_;
 
     // Loaded settings, used to apply the shared column layout to new pages.
     Glib::RefPtr<Glib::KeyFile> settings_;

@@ -56,6 +56,19 @@ public:
     std::optional<Qso> findDuplicate(const Qso& q, long excludeId = 0,
                                      DupeRule rule = DupeRule::CallBandModeDay) const;
 
+    // --- LoTW (Logbook of The World) ---
+
+    // QSOs not yet marked as uploaded to LoTW (lotw_sent != "Y").
+    std::vector<Qso> qsosNotLotwSent() const;
+
+    // Marks the given QSOs as uploaded to LoTW on the given date (YYYY-MM-DD).
+    void markLotwSent(const std::vector<long>& ids, const std::string& date);
+
+    // Given confirmation records downloaded from LoTW (each carrying call,
+    // band, mode, date and optionally time_on / lotw_rcvd_date), marks the
+    // matching local QSOs as LoTW-confirmed. Returns the number matched.
+    int applyLotwConfirmations(const std::vector<Qso>& confirmed);
+
     const std::string& path() const { return path_; }
     bool isFileBacked() const { return !path_.empty(); }
 
