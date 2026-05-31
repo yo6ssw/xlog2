@@ -28,6 +28,8 @@ private:
     // --- tab/page management ---
     LogPage* currentPage();
     LogPage* addPage(LogPage* page);          // append, wire up, focus; returns page
+    LogPage* openDefaultLog();                // open the persistent default logbook
+    std::string defaultLogPath() const;       // $XDG_DATA_HOME/xlog2/default.xlog
     void     registerTab(LogPage* page);
     void     updateTabLabel(LogPage* page);
     void     onPageChanged(LogPage* page);
