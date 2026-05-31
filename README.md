@@ -11,6 +11,8 @@ standard **ADIF** interchange format.
 
 - Tabular log view (GTK 4 `ColumnView`) with date, time, call, band, mode,
   frequency, reports, name, QTH, locator, power, QSL status and comments.
+  Columns can be reordered (drag a header, or right-click it for Move
+  Left/Right · Hide · Show All) and resized; the layout is remembered.
 - Entry form to add, edit and delete QSOs; click a row to load it for editing.
 - **Multiple logbooks in tabs** — open several `.xlog` files at once; the
   previously open files are reopened on the next launch.
