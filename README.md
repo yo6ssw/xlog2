@@ -26,7 +26,8 @@ standard **ADIF** interchange format.
 - ADIF import and export.
 - Per-band / per-mode statistics.
 - UDP network logging: auto-logs QSOs pushed by WSJT-X ("Logged ADIF")
-  or any program sending raw ADIF datagrams (*Network* menu).
+  or any program sending raw ADIF datagrams (*Network* menu). The listen port
+  and whether listening is enabled are remembered, so it resumes on startup.
 - **Hamlib rig control** — polls the radio's frequency/mode and auto-fills the
   entry form (*Rig ▸ Connect…*). Enter a Hamlib model id (e.g. `1` for the
   built-in dummy rig, useful for testing) and a serial device.
