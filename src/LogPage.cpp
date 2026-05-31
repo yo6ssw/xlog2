@@ -350,9 +350,11 @@ void LogPage::buildEntryForm() {
     auto* nowButton = Gtk::make_managed<Gtk::Button>("Now");
     nowButton->signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onSetNow));
 
-    field("Date",     date_,    0, 0);
-    field("Time on",  timeOn_,  1, 0);
-    field("Time off", timeOff_, 2, 0);
+    // Dates and times are stored (and exchanged via ADIF/LoTW) as UTC; spell
+    // that out so they aren't entered as local time.
+    field("Date (UTC)",     date_,    0, 0);
+    field("Time on (UTC)",  timeOn_,  1, 0);
+    field("Time off (UTC)", timeOff_, 2, 0);
     grid->attach(*nowButton, 6, 0);
 
     field("Call",     call_,    0, 1);
