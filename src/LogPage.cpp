@@ -151,7 +151,14 @@ void LogPage::buildLogView() {
         if (q.lotw_sent == "Y") return "↑";  // ↑ uploaded
         return "-";
     });
-    add("comment", "Comment", [](const Qso& q) { return q.comment; }, true);
+    add("comment", "Comment", [](const Qso& q) { return q.comment; });
+
+    // Empty trailing column that soaks up any leftover width. Its factory
+    // builds no child, so cells stay blank; it carries no id/header menu and
+    // is kept out of columns_, so reorder/hide/persistence ignore it.
+    filler_ = Gtk::ColumnViewColumn::create("", Gtk::SignalListItemFactory::create());
+    filler_->set_expand(true);
+    columnView_.append_column(filler_);
 
     selection_->property_selected().signal_changed().connect(
         sigc::mem_fun(*this, &LogPage::onSelectionChanged));
@@ -224,6 +231,7 @@ void LogPage::moveColumn(const Glib::ustring& id, int delta) {
 
     columnView_.remove_column(col);
     columnView_.insert_column(target, col);
+    pinFiller();            // the empty filler always stays last
     signalChanged_.emit();  // (no count change, but keeps the shell in sync)
 }
 
@@ -235,6 +243,13 @@ void LogPage::setColumnVisible(const Glib::ustring& id, bool visible) {
 void LogPage::showAllColumns() {
     for (const auto& [cid, c] : columns_)
         c->set_visible(true);
+}
+
+void LogPage::pinFiller() {
+    if (!filler_)
+        return;
+    columnView_.remove_column(filler_);
+    columnView_.append_column(filler_);
 }
 
 void LogPage::buildSearch() {
@@ -671,4 +686,5 @@ void LogPage::applyColumnOrder(const std::vector<std::string>& ids) {
         columnView_.remove_column(col);
     for (const auto& col : desired)
         columnView_.append_column(col);
+    pinFiller();  // re-append the empty filler after the reordered columns
 }
