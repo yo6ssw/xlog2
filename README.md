@@ -17,6 +17,10 @@ standard **ADIF** interchange format.
 - SQLite-backed logbooks (`.xlog`), saved immediately as you log.
 - ADIF import and export.
 - Per-band / per-mode statistics.
+- UDP network logging: auto-logs QSOs pushed by WSJT-X ("Logged ADIF")
+  or any program sending raw ADIF datagrams (*Network* menu).
+- Remembers your column layout (order, width, visibility) between runs,
+  stored in `~/.config/xlog2/layout.ini`.
 
 ## Building
 
@@ -45,6 +49,7 @@ cmake --build build -j
 | `src/Bands.*`        | Band/mode tables and frequency→band lookup.     |
 | `src/Adif.*`         | ADIF parsing and serialisation.                 |
 | `src/LogBook.*`      | SQLite-backed storage and CRUD.                 |
+| `src/Udp.*`          | UDP listener + WSJT-X/ADIF datagram decoding.   |
 | `src/QsoItem.h`      | `Glib::Object` wrapper for the `ColumnView`.    |
 | `src/MainWindow.*`   | The main window: menu, log view, entry form.    |
 | `src/XlogApplication.*` | The `Gtk::Application`.                       |

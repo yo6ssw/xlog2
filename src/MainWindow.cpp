@@ -49,6 +49,23 @@ std::string utcNow(const char* fmt) {
     return buf;
 }
 
+std::vector<std::string> splitSemicolons(const std::string& s) {
+    std::vector<std::string> out;
+    std::string cur;
+    for (char c : s) {
+        if (c == ';') {
+            if (!cur.empty())
+                out.push_back(cur);
+            cur.clear();
+        } else {
+            cur += c;
+        }
+    }
+    if (!cur.empty())
+        out.push_back(cur);
+    return out;
+}
+
 Glib::RefPtr<Gio::ListStore<Gtk::FileFilter>> makeFilters(
     const Glib::ustring& name, const std::vector<Glib::ustring>& patterns) {
     auto filter = Gtk::FileFilter::create();
@@ -68,6 +85,8 @@ MainWindow::MainWindow() {
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
     // can delete us deterministically.
     set_hide_on_close(true);
+    // Save the column layout while the widgets are still alive (before hide).
+    signal_close_request().connect(sigc::mem_fun(*this, &MainWindow::onCloseRequest), false);
 
     buildActions();
 
@@ -180,29 +199,37 @@ void MainWindow::buildLogView() {
     columnView_.set_show_column_separators(true);
     columnView_.set_show_row_separators(true);
 
-    columnView_.append_column(makeColumn("Date",   [](const Qso& q) { return q.date; }));
-    columnView_.append_column(makeColumn("On",     [](const Qso& q) { return q.time_on; }));
-    columnView_.append_column(makeColumn("Off",    [](const Qso& q) { return q.time_off; }));
-    columnView_.append_column(makeColumn("Call",   [](const Qso& q) { return q.call; }));
-    columnView_.append_column(makeColumn("Band",   [](const Qso& q) { return q.band; }));
-    columnView_.append_column(makeColumn("Mode",   [](const Qso& q) { return q.mode; }));
-    columnView_.append_column(makeColumn("Freq",   [](const Qso& q) { return q.freq; }));
-    columnView_.append_column(makeColumn("RST S",  [](const Qso& q) { return q.rst_sent; }));
-    columnView_.append_column(makeColumn("RST R",  [](const Qso& q) { return q.rst_rcvd; }));
-    columnView_.append_column(makeColumn("Name",   [](const Qso& q) { return q.name; }));
-    columnView_.append_column(makeColumn("QTH",    [](const Qso& q) { return q.qth; }));
-    columnView_.append_column(makeColumn("Loc",    [](const Qso& q) { return q.locator; }));
-    columnView_.append_column(makeColumn("Pwr",    [](const Qso& q) { return q.power; }));
-    columnView_.append_column(makeColumn("QSL",    [](const Qso& q) {
+    auto add = [&](const std::string& id, const Glib::ustring& title,
+                   std::function<std::string(const Qso&)> getter, bool expand = false) {
+        auto col = makeColumn(title, std::move(getter), expand);
+        columns_.emplace_back(id, col);
+        columnView_.append_column(col);
+    };
+
+    add("date", "Date", [](const Qso& q) { return q.date; });
+    add("on",   "On",   [](const Qso& q) { return q.time_on; });
+    add("off",  "Off",  [](const Qso& q) { return q.time_off; });
+    add("call", "Call", [](const Qso& q) { return q.call; });
+    add("band", "Band", [](const Qso& q) { return q.band; });
+    add("mode", "Mode", [](const Qso& q) { return q.mode; });
+    add("freq", "Freq", [](const Qso& q) { return q.freq; });
+    add("rst_s", "RST S", [](const Qso& q) { return q.rst_sent; });
+    add("rst_r", "RST R", [](const Qso& q) { return q.rst_rcvd; });
+    add("name", "Name", [](const Qso& q) { return q.name; });
+    add("qth",  "QTH",  [](const Qso& q) { return q.qth; });
+    add("loc",  "Loc",  [](const Qso& q) { return q.locator; });
+    add("pwr",  "Pwr",  [](const Qso& q) { return q.power; });
+    add("qsl",  "QSL",  [](const Qso& q) {
         std::string s = q.qsl_sent.empty() ? "-" : q.qsl_sent;
         std::string r = q.qsl_rcvd.empty() ? "-" : q.qsl_rcvd;
         return s + "/" + r;
-    }));
-    columnView_.append_column(makeColumn("Comment",
-                                         [](const Qso& q) { return q.comment; }, true));
+    });
+    add("comment", "Comment", [](const Qso& q) { return q.comment; }, true);
 
     selection_->property_selected().signal_changed().connect(
         sigc::mem_fun(*this, &MainWindow::onSelectionChanged));
+
+    loadColumnLayout();
 }
 
 Gtk::Widget& MainWindow::buildEntryForm() {
@@ -652,6 +679,116 @@ void MainWindow::onUdpSettings() {
     });
 
     win->present();
+}
+
+std::string MainWindow::layoutFilePath() const {
+    return Glib::build_filename(Glib::get_user_config_dir(), "xlog2", "layout.ini");
+}
+
+bool MainWindow::onCloseRequest() {
+    saveColumnLayout();
+    return false;  // proceed with the default close (hide) handling
+}
+
+void MainWindow::saveColumnLayout() {
+    auto keyfile = Glib::KeyFile::create();
+
+    // Column order, read from the view's current display order.
+    std::string order;
+    auto displayed = columnView_.get_columns();
+    for (guint i = 0; i < displayed->get_n_items(); ++i) {
+        auto* colPtr = dynamic_cast<Gtk::ColumnViewColumn*>(displayed->get_object(i).get());
+        for (const auto& [id, col] : columns_) {
+            if (col.get() == colPtr) {
+                if (!order.empty())
+                    order += ';';
+                order += id;
+                break;
+            }
+        }
+    }
+    keyfile->set_string("columns", "order", order);
+
+    // Per-column width (only when the user has set one) and visibility.
+    for (const auto& [id, col] : columns_) {
+        const int width = col->get_fixed_width();
+        if (width > 0)
+            keyfile->set_integer("width", id, width);
+        keyfile->set_boolean("visible", id, col->get_visible());
+    }
+
+    try {
+        Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
+            ->make_directory_with_parents();
+    } catch (const Glib::Error&) {
+        // already exists (or cannot be created) — file_set_contents reports the latter
+    }
+    try {
+        Glib::file_set_contents(layoutFilePath(), keyfile->to_data());
+    } catch (const Glib::Error&) {
+        // non-fatal: layout simply will not persist
+    }
+}
+
+void MainWindow::loadColumnLayout() {
+    auto keyfile = Glib::KeyFile::create();
+    try {
+        if (!keyfile->load_from_file(layoutFilePath()))
+            return;
+    } catch (const Glib::Error&) {
+        return;  // no saved layout yet
+    }
+
+    // Width and visibility per column.
+    for (const auto& [id, col] : columns_) {
+        try {
+            if (keyfile->has_group("width") && keyfile->has_key("width", id)) {
+                const int width = keyfile->get_integer("width", id);
+                if (width > 0)
+                    col->set_fixed_width(width);
+            }
+            if (keyfile->has_group("visible") && keyfile->has_key("visible", id))
+                col->set_visible(keyfile->get_boolean("visible", id));
+        } catch (const Glib::Error&) {
+        }
+    }
+
+    // Column order.
+    try {
+        if (keyfile->has_group("columns") && keyfile->has_key("columns", "order")) {
+            const std::string order = keyfile->get_string("columns", "order");
+            applyColumnOrder(splitSemicolons(order));
+        }
+    } catch (const Glib::Error&) {
+    }
+}
+
+void MainWindow::applyColumnOrder(const std::vector<std::string>& ids) {
+    std::vector<Glib::RefPtr<Gtk::ColumnViewColumn>> desired;
+    std::set<std::string> used;
+
+    for (const auto& id : ids) {
+        for (const auto& [cid, col] : columns_) {
+            if (cid == id && !used.count(cid)) {
+                desired.push_back(col);
+                used.insert(cid);
+                break;
+            }
+        }
+    }
+    // Append any columns missing from the saved order (e.g. added in a newer
+    // version) so none are silently dropped.
+    for (const auto& [cid, col] : columns_)
+        if (!used.count(cid))
+            desired.push_back(col);
+
+    if (desired.size() != columns_.size())
+        return;  // something is off; leave the default order untouched
+
+    for (const auto& [cid, col] : columns_)
+        columnView_.remove_column(col);
+    for (const auto& col : desired)
+        columnView_.append_column(col);
 }
 
 void MainWindow::setStatus(const Glib::ustring& msg) {

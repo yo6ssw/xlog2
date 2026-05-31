@@ -8,6 +8,8 @@
 
 #include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 // The application's main window: a menu bar, a sortable log view, an entry
 // form for adding/editing QSOs, and a status line.
@@ -52,6 +54,13 @@ private:
     void onUdpSettings();
     void onUdpReceived(const std::vector<Qso>& qsos, const std::string& source);
 
+    // --- column layout persistence ---
+    std::string layoutFilePath() const;
+    void saveColumnLayout();
+    void loadColumnLayout();
+    void applyColumnOrder(const std::vector<std::string>& ids);
+    bool onCloseRequest();
+
     // --- misc ---
     void setStatus(const Glib::ustring& msg);
     void updateTitle();
@@ -62,6 +71,10 @@ private:
     Glib::RefPtr<Gio::ListStore<QsoItem>> store_;
     Glib::RefPtr<Gtk::SingleSelection>    selection_;
     Gtk::ColumnView                       columnView_;
+
+    // Stable id -> column, in the order originally created. Used to persist
+    // and restore the user's column order/width/visibility.
+    std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
 
     // Entry form fields
     Gtk::Entry    date_, timeOn_, timeOff_, call_, freq_;
