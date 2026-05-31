@@ -89,6 +89,7 @@ MainWindow::MainWindow() {
         if (!result.name.empty())    msg += " — " + result.name;
         if (!result.country.empty()) msg += " (" + result.country + ")";
         setStatus(msg);
+        showQrzResult(result);
     };
 
     loadSettings();
@@ -800,6 +801,55 @@ void MainWindow::onQrzSettings() {
         win->set_visible(false);
     });
 
+    win->present();
+}
+
+void MainWindow::showQrzResult(const QrzResult& result) {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_title("QRZ.com — " + result.call);
+    win->set_hide_on_close(true);
+    win->set_default_size(380, 500);
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+
+    auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroller->set_policy(Gtk::PolicyType::NEVER, Gtk::PolicyType::AUTOMATIC);
+    scroller->set_vexpand(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(4);
+    grid->set_column_spacing(12);
+    ui::setMargin(*grid, 12);
+
+    int row = 0;
+    for (const auto& [key, value] : result.fields) {
+        auto* k = Gtk::make_managed<Gtk::Label>(key);
+        k->set_xalign(0.0);
+        k->set_yalign(0.0);
+        k->add_css_class("dim-label");
+        auto* v = Gtk::make_managed<Gtk::Label>(value);
+        v->set_xalign(0.0);
+        v->set_selectable(true);  // let the user copy values out
+        v->set_wrap(true);
+        v->set_hexpand(true);
+        grid->attach(*k, 0, row);
+        grid->attach(*v, 1, row);
+        ++row;
+    }
+    if (row == 0)
+        grid->attach(*Gtk::make_managed<Gtk::Label>("No fields returned."), 0, 0);
+    scroller->set_child(*grid);
+    box->append(*scroller);
+
+    auto* close = Gtk::make_managed<Gtk::Button>("Close");
+    close->set_halign(Gtk::Align::END);
+    ui::setMargin(*close, 8);
+    close->signal_clicked().connect([win]() { win->set_visible(false); });
+    box->append(*close);
+
+    win->set_child(*box);
+    win->signal_hide().connect([win]() { delete win; });
     win->present();
 }
 

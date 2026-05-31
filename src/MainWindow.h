@@ -69,6 +69,7 @@ private:
     // --- QRZ.com callsign lookup ---
     void onQrzLookup(LogPage* page, const std::string& callsign);
     void onQrzSettings();
+    void showQrzResult(const QrzResult& result);  // popup with all returned fields
 
     // --- settings persistence ---
     std::string layoutFilePath() const;
