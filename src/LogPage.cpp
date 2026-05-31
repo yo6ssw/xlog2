@@ -190,12 +190,25 @@ void LogPage::buildColumnMenus() {
     });
     colActions_->add_action(hide);
 
+    auto show = Gio::SimpleAction::create("show", strType);
+    show->signal_activate().connect([this](const Glib::VariantBase& p) {
+        setColumnVisible(
+            Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(p).get(), true);
+    });
+    colActions_->add_action(show);
+
     auto showAll = Gio::SimpleAction::create("show-all");
     showAll->signal_activate().connect(
         [this](const Glib::VariantBase&) { showAllColumns(); });
     colActions_->add_action(showAll);
 
     insert_action_group("cols", colActions_);
+
+    // Shared "Show Column" submenu listing every column, so any hidden column
+    // can be brought back from any header's context menu.
+    auto showMenu = Gio::Menu::create();
+    for (const auto& [id, col] : columns_)
+        showMenu->append(col->get_title(), "cols.show::" + id);
 
     // A context menu per column header, targeting that column by id.
     for (const auto& [id, col] : columns_) {
@@ -204,9 +217,20 @@ void LogPage::buildColumnMenus() {
         menu->append("Move Right", "cols.move-right::" + id);
         menu->append("Hide Column", "cols.hide::" + id);
         auto section = Gio::Menu::create();
+        section->append_submenu("Show Column", showMenu);
         section->append("Show All Columns", "cols.show-all");
         menu->append_section(section);
         col->set_header_menu(menu);
+    }
+
+    // The filler column is never hidden, so its header is always present —
+    // give it the show menu too, guaranteeing a way back even if every data
+    // column is hidden.
+    if (filler_) {
+        auto menu = Gio::Menu::create();
+        menu->append_submenu("Show Column", showMenu);
+        menu->append("Show All Columns", "cols.show-all");
+        filler_->set_header_menu(menu);
     }
 }
 
