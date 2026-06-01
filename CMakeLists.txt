@@ -31,6 +31,7 @@ add_executable(xlog2
     src/Rig.cpp
     src/Lotw.cpp
     src/Qrz.cpp
+    src/CwKeyer.cpp
 )
 
 target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

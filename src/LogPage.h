@@ -6,6 +6,7 @@
 
 #include <gtkmm.h>
 
+#include <array>
 #include <functional>
 #include <string>
 #include <utility>
@@ -44,6 +45,9 @@ public:
     // Prefill the entry form's name/QTH/locator from a QRZ.com lookup.
     void applyQrzLookup(const QrzResult& r);
 
+    // The 9 cwdaemon message templates (for the F1–F9 keyer buttons).
+    void setCwMessages(const std::array<std::string, 9>& msgs);
+
     // LoTW helpers (delegate to the LogBook, then refresh + notify).
     std::vector<Qso> qsosNotLotwSent() const;
     void markLotwSent(const std::vector<long>& ids, const std::string& date);
@@ -60,6 +64,10 @@ public:
     sigc::signal<void(const Glib::ustring&)>& signalStatus() { return signalStatus_; }
     // Emitted (with the entered callsign) when the user asks for a QRZ lookup.
     sigc::signal<void(const std::string&)>& signalLookupCall() { return signalLookupCall_; }
+    // Emitted with the fully-substituted CW text to send to the network keyer.
+    sigc::signal<void(const std::string&)>& signalSendCw() { return signalSendCw_; }
+    // Emitted when the user aborts the message being keyed.
+    sigc::signal<void()>& signalAbortCw() { return signalAbortCw_; }
 
 private:
     void buildLogView();
@@ -68,6 +76,9 @@ private:
     Glib::ustring rowSearchText(const Glib::RefPtr<Glib::ObjectBase>& obj);
     void onSearchChanged();
     void buildEntryForm();
+    void buildKeyerBar(Gtk::Box& parent);     // F1–F9 keyer buttons + Stop
+    std::string expandCwTemplate(const std::string& tmpl) const;
+    void sendCwMessage(int index);            // 0-based; expands + emits
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
         const Glib::ustring& title, std::function<std::string(const Qso&)> getter,
         bool expand = false);
@@ -117,9 +128,15 @@ private:
     Gtk::Button   addButton_, deleteButton_, clearButton_;
     Gtk::Label    dupeLabel_;
 
+    // Network keyer (cwdaemon) message buttons.
+    std::array<std::string, 9> cwMessages_{};
+    std::array<Gtk::Button*, 9> cwButtons_{};
+
     sigc::signal<void()>                     signalChanged_;
     sigc::signal<void(const Glib::ustring&)> signalStatus_;
     sigc::signal<void(const std::string&)>   signalLookupCall_;
+    sigc::signal<void(const std::string&)>   signalSendCw_;
+    sigc::signal<void()>                     signalAbortCw_;
 
     long editingId_ = 0;  // id of the QSO loaded in the form, 0 = new
 };
