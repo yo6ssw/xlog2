@@ -52,6 +52,9 @@ public:
     // Load a DX-cluster spot into the entry form (call + frequency/band).
     void applyDxSpot(const std::string& call, double mhz);
 
+    // Fill in DXCC entity/zones for stored QSOs that lack them (from cty.dat).
+    void backfillDxcc();
+
     // LoTW helpers (delegate to the LogBook, then refresh + notify).
     std::vector<Qso> qsosNotLotwSent() const;
     void markLotwSent(const std::vector<long>& ids, const std::string& date);

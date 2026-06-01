@@ -273,6 +273,45 @@ bool LogBook::update(const Qso& q) {
     return ok;
 }
 
+int LogBook::updateBatch(const std::vector<Qso>& qsos) {
+    if (!db_ || qsos.empty())
+        return 0;
+
+    std::string sql = "UPDATE qsos SET ";
+    for (size_t i = 0; i < kColumns.size(); ++i) {
+        sql += kColumns[i];
+        sql += "=?";
+        if (i + 1 < kColumns.size())
+            sql += ",";
+    }
+    sql += " WHERE id=?;";
+
+    sqlite3_exec(db_, "BEGIN", nullptr, nullptr, nullptr);
+    sqlite3_stmt* stmt = nullptr;
+    if (sqlite3_prepare_v2(db_, sql.c_str(), -1, &stmt, nullptr) != SQLITE_OK) {
+        sqlite3_exec(db_, "ROLLBACK", nullptr, nullptr, nullptr);
+        return 0;
+    }
+
+    int count = 0;
+    for (const auto& q : qsos) {
+        if (q.id == 0)
+            continue;
+        const auto fields = fieldsOf(q);
+        for (int i = 0; i < static_cast<int>(fields.size()); ++i)
+            bindText(stmt, i + 1, fields[i]);
+        sqlite3_bind_int64(stmt, static_cast<int>(fields.size()) + 1, q.id);
+        if (sqlite3_step(stmt) == SQLITE_DONE)
+            ++count;
+        sqlite3_reset(stmt);
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_exec(db_, "COMMIT", nullptr, nullptr, nullptr);
+
+    reload();
+    return count;
+}
+
 bool LogBook::remove(long id) {
     if (!db_ || id == 0)
         return false;

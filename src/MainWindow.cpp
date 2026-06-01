@@ -132,6 +132,10 @@ void MainWindow::buildActions() {
     add_action("export", sigc::mem_fun(*this, &MainWindow::onExportAdif));
     add_action("stats",  sigc::mem_fun(*this, &MainWindow::onStatistics));
     add_action("find",   sigc::mem_fun(*this, &MainWindow::onFind));
+    add_action("filldxcc", [this]() {
+        if (auto* page = currentPage())
+            page->backfillDxcc();
+    });
     add_action("about",  sigc::mem_fun(*this, &MainWindow::onAbout));
     add_action("quit",   sigc::mem_fun(*this, &MainWindow::close));
 
@@ -176,6 +180,7 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
 
     auto logMenu = Gio::Menu::create();
     logMenu->append("_Find…", "win.find");
+    logMenu->append("Fill _DXCC entities", "win.filldxcc");
     logMenu->append("_Statistics…", "win.stats");
     menu->append_submenu("_Log", logMenu);
 
