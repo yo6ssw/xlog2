@@ -1,6 +1,7 @@
 #include "DxClusterPanel.h"
 
 #include "Bands.h"
+#include "Dxcc.h"
 #include "UiUtil.h"
 
 #include <algorithm>
@@ -60,8 +61,8 @@ DxClusterPanel::DxClusterPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     columnView_.append_column(makeColumn("DX",   [](const BandMapRow& r) { return r.dxCall; }));
     columnView_.append_column(makeColumn("Band", [](const BandMapRow& r) { return r.band; }));
     columnView_.append_column(makeCountColumn());
-    columnView_.append_column(makeColumn("Time", [](const BandMapRow& r) { return r.timeUtc; }));
-    columnView_.append_column(makeColumn("Comment", [](const BandMapRow& r) { return r.comment; }, true));
+    columnView_.append_column(makeColumn("Entity", [](const BandMapRow& r) { return r.entity; }, true));
+    columnView_.append_column(makeColumn("Cont", [](const BandMapRow& r) { return r.continent; }));
 
     auto* spotScroller = Gtk::make_managed<Gtk::ScrolledWindow>();
     spotScroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
@@ -211,6 +212,10 @@ void DxClusterPanel::rebuild() {
         row.dxCall  = e.dxCall;
         row.band    = e.band;
         row.count   = static_cast<int>(sorted.size());
+        if (const dxcc::Info* info = dxcc::lookup(e.dxCall)) {
+            row.entity    = info->entity;
+            row.continent = info->continent;
+        }
         if (!sorted.empty()) {
             row.comment = sorted.front()->second.comment;
             row.timeUtc = sorted.front()->second.timeUtc;
