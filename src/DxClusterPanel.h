@@ -47,7 +47,7 @@ private:
     };
 
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
-        const Glib::ustring& title, std::function<std::string(const BandMapRow&)> getter,
+        const Glib::ustring& title, std::function<std::string(const BandMapItem&)> getter,
         bool expand = false);
     Glib::RefPtr<Gtk::ColumnViewColumn> makeCountColumn();
     void buildBandChips();
@@ -72,9 +72,15 @@ private:
     bool            connected_ = false;
 
     // Band-map state, keyed by (freq in 0.1 kHz units, DX call) so iteration is
-    // ordered by frequency then call.
-    std::map<std::pair<long, std::string>, Entry> entries_;
+    // ordered by frequency then call. items_ holds the live ColumnView row for
+    // each key, so rows can be updated in place rather than rebuilt.
+    using Key = std::pair<long, std::string>;
+    std::map<Key, Entry> entries_;
+    std::map<Key, Glib::RefPtr<BandMapItem>> items_;
     sigc::connection expiryTimer_;
+
+    // Per-bound-listitem connections for the count cell's property updates.
+    std::map<Gtk::ListItem*, std::vector<sigc::connection>> countConns_;
 
     sigc::signal<void(const DxSpot&)>       signalActivate_;
     sigc::signal<void(const std::string&)>  signalCommand_;
