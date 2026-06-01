@@ -28,6 +28,11 @@ public:
     bool start(int model, const std::string& device, int pollMs);
     void stop();
 
+    // Queue a VFO frequency change (MHz); applied by the worker on its next
+    // poll tick, so the Hamlib handle stays worker-thread-only. No-op if the
+    // rig isn't running.
+    void setFrequency(double mhz);
+
     bool isRunning() const { return running_.load(); }
     const std::string& lastError() const { return lastError_; }
 
@@ -44,6 +49,8 @@ private:
     double      mhz_       = 0.0;
     std::string mode_;
     bool        hasUpdate_ = false;
+    double      pendingFreqMhz_ = 0.0;   // requested VFO freq, applied by worker
+    bool        hasPendingFreq_ = false;
 
     Glib::Dispatcher dispatcher_;
     std::string      lastError_;

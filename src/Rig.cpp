@@ -56,8 +56,28 @@ void RigController::stop() {
     }
 }
 
+void RigController::setFrequency(double mhz) {
+    if (!running_.load() || mhz <= 0.0)
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingFreqMhz_ = mhz;
+    hasPendingFreq_ = true;
+}
+
 void RigController::worker() {
     while (running_.load()) {
+        // Apply a queued tune request before reading back the current state.
+        double pending = 0.0;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (hasPendingFreq_) {
+                pending = pendingFreqMhz_;
+                hasPendingFreq_ = false;
+            }
+        }
+        if (pending > 0.0)
+            rig_set_freq(asRig(rig_), RIG_VFO_CURR, static_cast<freq_t>(pending * 1.0e6));
+
         freq_t   f = 0;
         rmode_t  m = RIG_MODE_NONE;
         pbwidth_t w = 0;
