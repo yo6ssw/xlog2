@@ -112,6 +112,7 @@ private:
     int           rigModel_  = 1;     // 1 == RIG_MODEL_DUMMY
     std::string   rigDevice_;
     int           rigPollMs_ = 500;
+    bool          rigAutoConnect_ = false;  // connect to the rig at startup
 
     // LoTW
     LotwClient    lotw_;
