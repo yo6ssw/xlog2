@@ -30,6 +30,13 @@ bool RigController::start(int model, const std::string& device, int pollMs) {
     if (!device.empty())
         rig_set_conf(rig, rig_token_lookup(rig, "rig_pathname"), device.c_str());
 
+    // We run our own polling thread, so disable Hamlib's background readers
+    // (internal poll routine + async data handler) — otherwise they'd touch the
+    // non-thread-safe RIG handle concurrently with our worker. Set before
+    // rig_open(), where those threads would be started.
+    rig_set_conf(rig, rig_token_lookup(rig, "poll_interval"), "0");
+    rig_set_conf(rig, rig_token_lookup(rig, "async"), "0");
+
     const int rc = rig_open(rig);
     if (rc != RIG_OK) {
         lastError_ = rigerror(rc);
@@ -47,8 +54,11 @@ bool RigController::start(int model, const std::string& device, int pollMs) {
 void RigController::stop() {
     if (running_.exchange(false)) {
         if (thread_.joinable())
-            thread_.join();
+            thread_.join();  // the worker closes the rig as its last action
+        return;
     }
+    // No worker was running (e.g. rig opened but polling never started): close
+    // on this thread as a fallback.
     if (rig_) {
         rig_close(asRig(rig_));
         rig_cleanup(asRig(rig_));
@@ -96,6 +106,14 @@ void RigController::worker() {
         // Sleep in small slices so stop() is responsive.
         for (int slept = 0; slept < pollMs_ && running_.load(); slept += 50)
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    }
+
+    // Close the rig on the worker thread, strictly after the last poll, so
+    // polling and the close never overlap.
+    if (rig_) {
+        rig_close(asRig(rig_));
+        rig_cleanup(asRig(rig_));
+        rig_ = nullptr;
     }
 }
 
