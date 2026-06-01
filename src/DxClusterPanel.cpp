@@ -13,6 +13,9 @@ namespace {
 // A spotter is forgotten this long after its report.
 constexpr std::chrono::minutes kSpotterTtl{5};
 
+// Spots for the same callsign within this many kHz are treated as one entry.
+constexpr double kFreqToleranceKHz = 0.2;  // +/- 200 Hz
+
 std::string formatKHz(double khz) {
     char buf[32];
     std::snprintf(buf, sizeof(buf), "%.1f", khz);
@@ -183,11 +186,30 @@ void DxClusterPanel::refreshFilter() {
 void DxClusterPanel::addSpot(const DxSpot& spot) {
     if (spot.dxCall.empty() || spot.freqKHz <= 0.0)
         return;
-    const auto key = std::make_pair(std::lround(spot.freqKHz * 10.0), spot.dxCall);
+
+    // Group spots for the same callsign within +/- 200 Hz of an existing
+    // entry's frequency (operators/skimmers report slightly different freqs for
+    // the same station). Reuse that entry; otherwise start a new one keyed by
+    // this frequency. The entry keeps its original representative frequency.
+    Key key{};
+    bool found = false;
+    for (const auto& [k, e] : entries_) {
+        if (e.dxCall == spot.dxCall &&
+            std::abs(e.freqKHz - spot.freqKHz) <= kFreqToleranceKHz) {
+            key = k;
+            found = true;
+            break;
+        }
+    }
+    if (!found)
+        key = std::make_pair(std::lround(spot.freqKHz * 10.0), spot.dxCall);
+
     Entry& e = entries_[key];
-    e.freqKHz = spot.freqKHz;
-    e.dxCall  = spot.dxCall;
-    e.band    = spot.band;
+    if (!found) {
+        e.freqKHz = spot.freqKHz;
+        e.dxCall  = spot.dxCall;
+        e.band    = spot.band;
+    }
     // A repeat from the same spotter refreshes its timer; a new spotter is
     // added (extending the entry's life). Empty spotter name is unlikely but
     // guarded.
