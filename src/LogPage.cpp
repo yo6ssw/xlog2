@@ -25,6 +25,7 @@ void ensureCss() {
     auto provider = Gtk::CssProvider::create();
     provider->load_from_string(
         ".dupe-warning { color: #c01c28; font-weight: bold; }\n"
+        ".dxcc-entity { color: #1c71d8; font-weight: bold; }\n"
         "entry.dupe { background-image: none; background-color: #f7d4d4; }\n"
         "columnview.data-table > header > button {\n"
         "  border: 1px solid @borders;\n"
@@ -135,6 +136,7 @@ void LogPage::buildLogView() {
     add("on",   "On",   [](const Qso& q) { return q.time_on; });
     add("off",  "Off",  [](const Qso& q) { return q.time_off; });
     add("call", "Call", [](const Qso& q) { return q.call; });
+    add("country", "Country", [](const Qso& q) { return q.country; });
     add("band", "Band", [](const Qso& q) { return q.band; });
     add("mode", "Mode", [](const Qso& q) { return q.mode; });
     add("freq", "Freq", [](const Qso& q) { return q.freq; });
@@ -154,7 +156,6 @@ void LogPage::buildLogView() {
         if (q.lotw_sent == "Y") return "↑";  // ↑ uploaded
         return "-";
     });
-    add("country", "Country", [](const Qso& q) { return q.country; });
     add("cqz",     "CQ",      [](const Qso& q) { return q.cq_zone; });
     add("comment", "Comment", [](const Qso& q) { return q.comment; });
 
@@ -375,6 +376,12 @@ void LogPage::buildEntryForm() {
     field("Band",     band_,    1, 1);
     field("Mode",     mode_,    2, 1);
 
+    // DXCC entity shown right on the call row, updated live as the call is typed.
+    dxccLabel_.set_xalign(0.0);
+    dxccLabel_.set_margin_start(8);
+    dxccLabel_.add_css_class("dxcc-entity");
+    grid->attach(dxccLabel_, 6, 1);
+
     field("Freq MHz", freq_,    0, 2);
     field("RST sent", rstSent_, 1, 2);
     field("RST rcvd", rstRcvd_, 2, 2);
@@ -392,11 +399,6 @@ void LogPage::buildEntryForm() {
     grid->attach(*commentLabel, 0, 5);
     comment_.set_hexpand(true);
     grid->attach(comment_, 1, 5, 5, 1);
-
-    // DXCC entity indicator (derived from the callsign via cty.dat).
-    dxccLabel_.set_xalign(0.0);
-    dxccLabel_.add_css_class("dim-label");
-    outer->append(dxccLabel_);
 
     // Duplicate-warning indicator (hidden when empty).
     dupeLabel_.set_xalign(0.0);
@@ -752,6 +754,7 @@ void LogPage::newInMemory() {
 bool LogPage::openFile(const std::string& path) {
     if (!logbook_.open(path))
         return false;
+    backfillDxcc();  // fill DXCC for any pre-existing QSOs that lack it
     refreshList();
     clearForm();
     signalChanged_.emit();
@@ -786,6 +789,31 @@ void LogPage::addExternalQso(const Qso& q) {
 void LogPage::setRigFrequency(double mhz) {
     if (mhz > 0.0)
         freq_.set_text(formatMhz(mhz));  // triggers band auto-detect
+}
+
+void LogPage::backfillDxcc() {
+    if (!dxcc::available())
+        return;
+    std::vector<Qso> updates;
+    for (const auto& q : logbook_.qsos()) {
+        if (q.call.empty() || !q.country.empty())
+            continue;  // nothing to do, or already filled (idempotent)
+        const dxcc::Info* info = dxcc::lookup(q.call);
+        if (!info)
+            continue;
+        Qso u = q;
+        u.country   = info->entity;
+        u.cq_zone   = info->cqZone  ? std::to_string(info->cqZone)  : std::string{};
+        u.itu_zone  = info->ituZone ? std::to_string(info->ituZone) : std::string{};
+        u.continent = info->continent;
+        updates.push_back(std::move(u));
+    }
+    if (updates.empty())
+        return;
+    logbook_.updateBatch(updates);
+    refreshList();
+    signalChanged_.emit();
+    status("Filled DXCC for " + std::to_string(updates.size()) + " QSO(s).");
 }
 
 void LogPage::applyDxSpot(const std::string& call, double mhz) {

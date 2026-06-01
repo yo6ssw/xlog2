@@ -44,6 +44,10 @@ public:
     bool update(const Qso& q);
     bool remove(long id);
 
+    // Updates many QSOs in a single transaction with one reload. Returns the
+    // number written.
+    int updateBatch(const std::vector<Qso>& qsos);
+
     // Imports ADIF text, inserting each record. Returns the number added.
     int importAdif(const std::string& adifText);
 
