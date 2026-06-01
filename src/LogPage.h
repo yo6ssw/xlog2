@@ -48,6 +48,9 @@ public:
     // The 9 cwdaemon message templates (for the F1–F9 keyer buttons).
     void setCwMessages(const std::array<std::string, 9>& msgs);
 
+    // Load a DX-cluster spot into the entry form (call + frequency/band).
+    void applyDxSpot(const std::string& call, double mhz);
+
     // LoTW helpers (delegate to the LogBook, then refresh + notify).
     std::vector<Qso> qsosNotLotwSent() const;
     void markLotwSent(const std::vector<long>& ids, const std::string& date);

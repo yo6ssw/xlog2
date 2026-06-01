@@ -36,7 +36,26 @@ MainWindow::MainWindow() {
                 set_title("xlog2 — " + lp->title() + "  (" +
                           std::to_string(lp->qsoCount()) + " QSOs)");
         });
-    vbox->append(notebook_);
+
+    // The notebook and the DX-cluster panel share a Gtk::Paned whose
+    // orientation/order is set by applyDxDock() from the dock preference.
+    dxPanel_.signalActivate().connect(
+        sigc::mem_fun(*this, &MainWindow::onSpotActivated));
+    dxPanel_.signalCommand().connect(
+        [this](const std::string& cmd) { cluster_.sendCommand(cmd); });
+    dxPanel_.signalConnectToggle().connect(
+        sigc::mem_fun(*this, &MainWindow::onClusterConnect));
+    paned_.set_vexpand(true);
+    vbox->append(paned_);
+    applyDxDock();  // initial layout (defaults); reapplied after loadSettings
+
+    cluster_.onSpot   = [this](const DxSpot& s) { dxPanel_.addSpot(s); };
+    cluster_.onLine   = [this](const std::string& l) { dxPanel_.addLine(l); };
+    cluster_.onStatus = [this](const std::string& s) {
+        dxPanel_.addLine(s);
+        dxPanel_.setConnected(cluster_.isConnected());
+        setStatus(s);
+    };
 
     statusLabel_.set_xalign(0.0);
     ui::setMargin(statusLabel_, 4);
@@ -129,6 +148,13 @@ void MainWindow::buildActions() {
     add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
 
     add_action("keyersettings", sigc::mem_fun(*this, &MainWindow::onKeyerSettings));
+
+    dxShowAction_ = add_action_bool(
+        "dxshow", sigc::mem_fun(*this, &MainWindow::onClusterToggleShow), false);
+    add_action("dxconnect",  sigc::mem_fun(*this, &MainWindow::onClusterConnect));
+    add_action("dxsettings", sigc::mem_fun(*this, &MainWindow::onClusterSettings));
+    dxDockAction_ = add_action_radio_string(
+        "dxdock", sigc::mem_fun(*this, &MainWindow::onDxDock), "bottom");
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -176,6 +202,18 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto keyerMenu = Gio::Menu::create();
     keyerMenu->append("_Settings…", "win.keyersettings");
     menu->append_submenu("_Keyer", keyerMenu);
+
+    auto clusterMenu = Gio::Menu::create();
+    clusterMenu->append("_Show panel", "win.dxshow");
+    clusterMenu->append("_Connect / Disconnect", "win.dxconnect");
+    auto dockMenu = Gio::Menu::create();
+    dockMenu->append("_Top",    "win.dxdock::top");
+    dockMenu->append("_Bottom", "win.dxdock::bottom");
+    dockMenu->append("_Left",   "win.dxdock::left");
+    dockMenu->append("_Right",  "win.dxdock::right");
+    clusterMenu->append_submenu("_Dock", dockMenu);
+    clusterMenu->append("S_ettings…", "win.dxsettings");
+    menu->append_submenu("_Cluster", clusterMenu);
 
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
@@ -952,6 +990,142 @@ void MainWindow::onKeyerSettings() {
     win->present();
 }
 
+// --- DX cluster --------------------------------------------------------------
+
+void MainWindow::applyDxDock() {
+    paned_.unset_start_child();
+    paned_.unset_end_child();
+    const bool horizontal = (dxDock_ == "left" || dxDock_ == "right");
+    paned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
+                                      : Gtk::Orientation::VERTICAL);
+    const bool panelFirst = (dxDock_ == "top" || dxDock_ == "left");
+    if (panelFirst) {
+        paned_.set_start_child(dxPanel_);
+        paned_.set_end_child(notebook_);
+    } else {
+        paned_.set_start_child(notebook_);
+        paned_.set_end_child(dxPanel_);
+    }
+    // The log keeps the bulk of the space; the panel holds its own size.
+    paned_.set_resize_start_child(!panelFirst);
+    paned_.set_resize_end_child(panelFirst);
+    paned_.set_shrink_start_child(false);
+    paned_.set_shrink_end_child(false);
+    dxPanel_.set_visible(dxVisible_);
+}
+
+void MainWindow::applyDxConfig() {
+    if (dxDock_ != "top" && dxDock_ != "bottom" &&
+        dxDock_ != "left" && dxDock_ != "right")
+        dxDock_ = "bottom";
+    if (dxDockAction_)
+        dxDockAction_->set_state(Glib::Variant<Glib::ustring>::create(dxDock_));
+    if (dxShowAction_)
+        dxShowAction_->set_state(Glib::Variant<bool>::create(dxVisible_));
+    applyDxDock();
+    if (dxAutoConnect_ && !dxHost_.empty())
+        cluster_.connectTo(dxHost_, dxPort_, dxLogin_);
+}
+
+void MainWindow::onClusterToggleShow() {
+    // The bool action has already toggled its own state; mirror it.
+    bool state = false;
+    dxShowAction_->get_state(state);
+    dxVisible_ = state;
+    dxPanel_.set_visible(dxVisible_);
+}
+
+void MainWindow::onDxDock(const Glib::ustring& side) {
+    dxDock_ = side.raw();
+    dxDockAction_->set_state(Glib::Variant<Glib::ustring>::create(side));
+    if (!dxVisible_) {  // picking a dock implies wanting the panel shown
+        dxVisible_ = true;
+        dxShowAction_->set_state(Glib::Variant<bool>::create(true));
+    }
+    applyDxDock();
+}
+
+void MainWindow::onClusterConnect() {
+    if (cluster_.isConnected()) {
+        cluster_.disconnect();
+        return;
+    }
+    if (dxHost_.empty()) {
+        setStatus("Set a DX cluster host in Cluster ▸ Settings first.");
+        return;
+    }
+    if (!dxVisible_) {
+        dxVisible_ = true;
+        dxShowAction_->set_state(Glib::Variant<bool>::create(true));
+        applyDxDock();
+    }
+    cluster_.connectTo(dxHost_, dxPort_, dxLogin_);
+}
+
+void MainWindow::onSpotActivated(const DxSpot& spot) {
+    const double mhz = spot.freqKHz / 1000.0;
+    if (auto* page = currentPage())
+        page->applyDxSpot(spot.dxCall, mhz);
+    if (rig_.isRunning())
+        rig_.setFrequency(mhz);  // tune the connected rig to the spot
+}
+
+void MainWindow::onClusterSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("DX cluster settings");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
+    hostEntry->set_text(dxHost_);
+    hostEntry->set_placeholder_text("cluster.example.net");
+    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
+    portEntry->set_text(std::to_string(dxPort_));
+    auto* loginEntry = Gtk::make_managed<Gtk::Entry>();
+    loginEntry->set_text(dxLogin_);
+    loginEntry->set_placeholder_text("your callsign (sent at the login prompt)");
+    auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
+    autoCheck->set_active(dxAutoConnect_);
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("Host:", *hostEntry, 0);
+    field("Port:", *portEntry, 1);
+    field("Login call:", *loginEntry, 2);
+    grid->attach(*autoCheck, 1, 3);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 4);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect(
+        [this, hostEntry, portEntry, loginEntry, autoCheck, win]() {
+            dxHost_ = hostEntry->get_text().raw();
+            try { dxPort_ = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { dxPort_ = 7300; }
+            dxLogin_ = loginEntry->get_text().raw();
+            dxAutoConnect_ = autoCheck->get_active();
+            setStatus("DX cluster settings saved.");
+            win->set_visible(false);
+        });
+
+    win->present();
+}
+
 // --- settings persistence ----------------------------------------------------
 
 std::string MainWindow::layoutFilePath() const {
@@ -1020,6 +1194,13 @@ void MainWindow::saveSettings() {
     for (int i = 0; i < 9; ++i)
         keyfile->set_string("keyer", "message" + std::to_string(i + 1),
                             keyerMessages_[i]);
+
+    keyfile->set_string("dxcluster", "host", dxHost_);
+    keyfile->set_integer("dxcluster", "port", dxPort_);
+    keyfile->set_string("dxcluster", "login", dxLogin_);
+    keyfile->set_string("dxcluster", "dock", dxDock_);
+    keyfile->set_boolean("dxcluster", "visible", dxVisible_);
+    keyfile->set_boolean("dxcluster", "autoconnect", dxAutoConnect_);
 
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
@@ -1102,6 +1283,20 @@ void MainWindow::loadSettings() {
                         keyerMessages_[i] = settings_->get_string("keyer", key).raw();
                 }
             }
+            if (settings_->has_group("dxcluster")) {
+                if (settings_->has_key("dxcluster", "host"))
+                    dxHost_ = settings_->get_string("dxcluster", "host").raw();
+                if (settings_->has_key("dxcluster", "port"))
+                    dxPort_ = settings_->get_integer("dxcluster", "port");
+                if (settings_->has_key("dxcluster", "login"))
+                    dxLogin_ = settings_->get_string("dxcluster", "login").raw();
+                if (settings_->has_key("dxcluster", "dock"))
+                    dxDock_ = settings_->get_string("dxcluster", "dock").raw();
+                if (settings_->has_key("dxcluster", "visible"))
+                    dxVisible_ = settings_->get_boolean("dxcluster", "visible");
+                if (settings_->has_key("dxcluster", "autoconnect"))
+                    dxAutoConnect_ = settings_->get_boolean("dxcluster", "autoconnect");
+            }
         } catch (const Glib::Error&) {
         }
     }
@@ -1131,6 +1326,9 @@ void MainWindow::loadSettings() {
 
     // Open the keyer socket and push messages to the restored pages.
     applyKeyerConfig();
+
+    // Apply the DX-cluster dock/visibility and optionally auto-connect.
+    applyDxConfig();
 }
 
 void MainWindow::setStatus(const Glib::ustring& msg) {

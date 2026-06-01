@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CwKeyer.h"
+#include "DxCluster.h"
+#include "DxClusterPanel.h"
 #include "Lotw.h"
 #include "Qrz.h"
 #include "Qso.h"
@@ -77,6 +79,15 @@ private:
     void onKeyerSettings();
     void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages
 
+    // --- DX cluster ---
+    void onClusterConnect();          // connect/disconnect toggle
+    void onClusterSettings();
+    void onClusterToggleShow();       // show/hide the panel
+    void onDxDock(const Glib::ustring& side);  // dock-side radio action
+    void onSpotActivated(const DxSpot& spot);  // fill form + tune rig
+    void applyDxDock();               // (re)build the paned from dock/visibility
+    void applyDxConfig();             // after load: dock + optional auto-connect
+
     // --- settings persistence ---
     std::string layoutFilePath() const;
     void saveSettings();
@@ -120,6 +131,22 @@ private:
     int           keyerPort_ = 6789;
     int           keyerSpeed_ = 0;                // 0 = leave cwdaemon's default
     std::array<std::string, 9> keyerMessages_{};
+
+    // DX cluster
+    DxCluster        cluster_;
+    // A value member (like notebook_) so it survives being reparented between
+    // paned slots when the dock side changes — a make_managed widget would be
+    // destroyed the moment unset_*_child drops the paned's only reference.
+    DxClusterPanel   dxPanel_;
+    Gtk::Paned       paned_;                      // wraps notebook_ + dxPanel_
+    std::string      dxHost_;
+    int              dxPort_ = 7300;
+    std::string      dxLogin_;
+    std::string      dxDock_ = "bottom";          // top|bottom|left|right
+    bool             dxVisible_ = false;
+    bool             dxAutoConnect_ = false;
+    Glib::RefPtr<Gio::SimpleAction> dxShowAction_;
+    Glib::RefPtr<Gio::SimpleAction> dxDockAction_;
 
     // Loaded settings, used to apply the shared column layout to new pages.
     Glib::RefPtr<Glib::KeyFile> settings_;

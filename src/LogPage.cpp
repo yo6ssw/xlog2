@@ -729,6 +729,15 @@ void LogPage::setRigFrequency(double mhz) {
         freq_.set_text(formatMhz(mhz));  // triggers band auto-detect
 }
 
+void LogPage::applyDxSpot(const std::string& call, double mhz) {
+    std::string up = call;
+    for (auto& c : up)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    call_.set_text(up);
+    setRigFrequency(mhz);  // fills freq and auto-detects the band
+    status("DX spot: " + up + " on " + formatMhz(mhz) + " MHz.");
+}
+
 void LogPage::setRigMode(const std::string& mode) {
     if (mode.empty())
         return;
