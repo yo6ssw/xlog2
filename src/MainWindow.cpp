@@ -1139,6 +1139,7 @@ std::string MainWindow::layoutFilePath() const {
 bool MainWindow::onCloseRequest() {
     rig_.stop();
     listener_.stop();
+    cluster_.disconnect();  // close the socket while the panel is still alive
     saveSettings();
     return false;  // proceed with the default close (hide) handling
 }
