@@ -145,6 +145,7 @@ private:
     std::string      dxDock_ = "bottom";          // top|bottom|left|right
     bool             dxVisible_ = false;
     bool             dxAutoConnect_ = false;
+    int              dxPanelPos_ = 0;              // saved Gtk::Paned divider (0 = unset)
     Glib::RefPtr<Gio::SimpleAction> dxShowAction_;
     Glib::RefPtr<Gio::SimpleAction> dxDockAction_;
 
