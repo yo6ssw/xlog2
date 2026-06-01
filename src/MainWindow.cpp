@@ -1023,6 +1023,10 @@ void MainWindow::applyDxConfig() {
     if (dxShowAction_)
         dxShowAction_->set_state(Glib::Variant<bool>::create(dxVisible_));
     applyDxDock();
+    // Restore the panel size (divider position). Honoured on first allocation;
+    // the persisted window geometry + dock side make it reproduce the size.
+    if (dxPanelPos_ > 0)
+        paned_.set_position(dxPanelPos_);
     if (dxAutoConnect_ && !dxHost_.empty())
         cluster_.connectTo(dxHost_, dxPort_, dxLogin_);
 }
@@ -1201,6 +1205,13 @@ void MainWindow::saveSettings() {
     keyfile->set_string("dxcluster", "dock", dxDock_);
     keyfile->set_boolean("dxcluster", "visible", dxVisible_);
     keyfile->set_boolean("dxcluster", "autoconnect", dxAutoConnect_);
+    // Only record the divider while the panel is shown; a hidden panel's
+    // position is meaningless and would clobber the last good value.
+    if (dxVisible_) {
+        const int pos = paned_.get_position();
+        if (pos > 0)
+            keyfile->set_integer("dxcluster", "position", pos);
+    }
 
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
@@ -1296,6 +1307,8 @@ void MainWindow::loadSettings() {
                     dxVisible_ = settings_->get_boolean("dxcluster", "visible");
                 if (settings_->has_key("dxcluster", "autoconnect"))
                     dxAutoConnect_ = settings_->get_boolean("dxcluster", "autoconnect");
+                if (settings_->has_key("dxcluster", "position"))
+                    dxPanelPos_ = settings_->get_integer("dxcluster", "position");
             }
         } catch (const Glib::Error&) {
         }
