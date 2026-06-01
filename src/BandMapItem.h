@@ -12,8 +12,10 @@ struct BandMapRow {
     double      freqKHz = 0.0;
     std::string dxCall;
     std::string band;
-    std::string comment;          // from the most recent spotter
-    std::string timeUtc;          // from the most recent spotter
+    std::string entity;           // DXCC entity name (from cty.dat)
+    std::string continent;        // DXCC continent (from cty.dat)
+    std::string comment;          // from the most recent spotter (kept for activate)
+    std::string timeUtc;          // from the most recent spotter (kept for activate)
     int         count = 0;
     std::string spottersTooltip;
 };

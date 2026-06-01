@@ -137,6 +137,7 @@ void LogPage::buildLogView() {
     add("off",  "Off",  [](const Qso& q) { return q.time_off; });
     add("call", "Call", [](const Qso& q) { return q.call; });
     add("country", "Country", [](const Qso& q) { return q.country; });
+    add("cont", "Cont", [](const Qso& q) { return q.continent; });
     add("band", "Band", [](const Qso& q) { return q.band; });
     add("mode", "Mode", [](const Qso& q) { return q.mode; });
     add("freq", "Freq", [](const Qso& q) { return q.freq; });
