@@ -57,12 +57,12 @@ DxClusterPanel::DxClusterPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     columnView_.set_show_column_separators(true);
     columnView_.signal_activate().connect(sigc::mem_fun(*this, &DxClusterPanel::onActivate));
 
-    columnView_.append_column(makeColumn("Freq", [](const BandMapRow& r) { return formatKHz(r.freqKHz); }));
-    columnView_.append_column(makeColumn("DX",   [](const BandMapRow& r) { return r.dxCall; }));
-    columnView_.append_column(makeColumn("Band", [](const BandMapRow& r) { return r.band; }));
+    columnView_.append_column(makeColumn("Freq", [](const BandMapItem& r) { return formatKHz(r.freqKHz); }));
+    columnView_.append_column(makeColumn("DX",   [](const BandMapItem& r) { return r.dxCall; }));
+    columnView_.append_column(makeColumn("Band", [](const BandMapItem& r) { return r.band; }));
     columnView_.append_column(makeCountColumn());
-    columnView_.append_column(makeColumn("Entity", [](const BandMapRow& r) { return r.entity; }, true));
-    columnView_.append_column(makeColumn("Cont", [](const BandMapRow& r) { return r.continent; }));
+    columnView_.append_column(makeColumn("Entity", [](const BandMapItem& r) { return r.entity; }, true));
+    columnView_.append_column(makeColumn("Cont", [](const BandMapItem& r) { return r.continent; }));
 
     auto* spotScroller = Gtk::make_managed<Gtk::ScrolledWindow>();
     spotScroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
@@ -90,7 +90,7 @@ DxClusterPanel::~DxClusterPanel() {
 }
 
 Glib::RefPtr<Gtk::ColumnViewColumn> DxClusterPanel::makeColumn(
-    const Glib::ustring& title, std::function<std::string(const BandMapRow&)> getter,
+    const Glib::ustring& title, std::function<std::string(const BandMapItem&)> getter,
     bool expand) {
     auto factory = Gtk::SignalListItemFactory::create();
     factory->signal_setup().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
@@ -102,7 +102,7 @@ Glib::RefPtr<Gtk::ColumnViewColumn> DxClusterPanel::makeColumn(
         auto* label = dynamic_cast<Gtk::Label*>(li->get_child());
         auto* item  = dynamic_cast<BandMapItem*>(li->get_item().get());
         if (label && item)
-            label->set_text(getter(item->row));
+            label->set_text(getter(*item));  // stable fields, set once per bind
     });
     auto column = Gtk::ColumnViewColumn::create(title, factory);
     column->set_resizable(true);
@@ -117,12 +117,30 @@ Glib::RefPtr<Gtk::ColumnViewColumn> DxClusterPanel::makeCountColumn() {
         label->set_xalign(0.0);
         li->set_child(*label);
     });
-    factory->signal_bind().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
+    // Bind the count cell to the item's `count`/`spotters` properties so it
+    // updates in place — the row widget is never recreated, so a hovered row
+    // doesn't flicker when its spotter count changes.
+    factory->signal_bind().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
         auto* label = dynamic_cast<Gtk::Label*>(li->get_child());
         auto* item  = dynamic_cast<BandMapItem*>(li->get_item().get());
-        if (label && item) {
-            label->set_text(std::to_string(item->row.count));
-            label->set_tooltip_text(item->row.spottersTooltip);  // spotter list
+        if (!label || !item)
+            return;
+        auto update = [label, item]() {
+            label->set_text(std::to_string(item->count.get_value()));
+            label->set_tooltip_text(item->spotters.get_value());
+        };
+        update();
+        std::vector<sigc::connection> conns;
+        conns.push_back(item->count.get_proxy().signal_changed().connect(update));
+        conns.push_back(item->spotters.get_proxy().signal_changed().connect(update));
+        countConns_[li.get()] = std::move(conns);
+    });
+    factory->signal_unbind().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto it = countConns_.find(li.get());
+        if (it != countConns_.end()) {
+            for (auto& c : it->second)
+                c.disconnect();
+            countConns_.erase(it);
         }
     });
     auto column = Gtk::ColumnViewColumn::create("Spotters", factory);
@@ -154,7 +172,7 @@ bool DxClusterPanel::spotMatchesFilter(const Glib::RefPtr<Glib::ObjectBase>& obj
     auto* item = dynamic_cast<BandMapItem*>(obj.get());
     if (!item)
         return true;
-    return activeBands_.count(item->row.band) > 0;
+    return activeBands_.count(item->band) > 0;
 }
 
 void DxClusterPanel::refreshFilter() {
@@ -181,9 +199,10 @@ void DxClusterPanel::addSpot(const DxSpot& spot) {
 void DxClusterPanel::rebuild() {
     const auto now = Clock::now();
 
-    // Discard spotters older than the TTL; drop entries left with none.
-    for (auto it = entries_.begin(); it != entries_.end();) {
-        auto& spotters = it->second.spotters;
+    // Discard spotters older than the TTL; collect entries left with none.
+    std::vector<Key> expired;
+    for (auto& [key, e] : entries_) {
+        auto& spotters = e.spotters;
         for (auto s = spotters.begin(); s != spotters.end();) {
             if (now - s->second.time > kSpotterTtl)
                 s = spotters.erase(s);
@@ -191,15 +210,29 @@ void DxClusterPanel::rebuild() {
                 ++s;
         }
         if (spotters.empty())
-            it = entries_.erase(it);
-        else
-            ++it;
+            expired.push_back(key);
+    }
+    // Remove emptied entries and their rows (only the affected rows, so other
+    // rows — including a hovered one — are untouched).
+    for (const auto& key : expired) {
+        if (auto it = items_.find(key); it != items_.end()) {
+            if (auto [found, pos] = store_->find(it->second); found)
+                store_->remove(pos);
+            items_.erase(it);
+        }
+        entries_.erase(key);
     }
 
-    // entries_ is keyed by (freq, call), so iteration is frequency-ordered.
-    store_->remove_all();
+    // Keep rows ordered by frequency then call when inserting new ones.
+    const auto cmp = [](const Glib::RefPtr<const BandMapItem>& a,
+                        const Glib::RefPtr<const BandMapItem>& b) -> int {
+        if (a->freqKHz < b->freqKHz) return -1;
+        if (a->freqKHz > b->freqKHz) return 1;
+        return a->dxCall.compare(b->dxCall);
+    };
+
     for (const auto& [key, e] : entries_) {
-        // Spotters newest-first for the comment/time shown and the tooltip.
+        // Spotters newest-first for the displayed comment/time and tooltip.
         std::vector<const std::pair<const std::string, SpotterInfo>*> sorted;
         sorted.reserve(e.spotters.size());
         for (const auto& kv : e.spotters)
@@ -207,19 +240,6 @@ void DxClusterPanel::rebuild() {
         std::sort(sorted.begin(), sorted.end(),
                   [](auto* a, auto* b) { return a->second.time > b->second.time; });
 
-        BandMapRow row;
-        row.freqKHz = e.freqKHz;
-        row.dxCall  = e.dxCall;
-        row.band    = e.band;
-        row.count   = static_cast<int>(sorted.size());
-        if (const dxcc::Info* info = dxcc::lookup(e.dxCall)) {
-            row.entity    = info->entity;
-            row.continent = info->continent;
-        }
-        if (!sorted.empty()) {
-            row.comment = sorted.front()->second.comment;
-            row.timeUtc = sorted.front()->second.timeUtc;
-        }
         std::string tip;
         for (const auto* p : sorted) {
             const auto mins = std::chrono::duration_cast<std::chrono::minutes>(
@@ -228,8 +248,36 @@ void DxClusterPanel::rebuild() {
                 tip += '\n';
             tip += p->first + "  (" + std::to_string(mins) + "m ago)";
         }
-        row.spottersTooltip = tip;
-        store_->append(BandMapItem::create(row));
+        const int count = static_cast<int>(sorted.size());
+        const std::string comment = sorted.empty() ? std::string{} : sorted.front()->second.comment;
+        const std::string timeUtc = sorted.empty() ? std::string{} : sorted.front()->second.timeUtc;
+
+        auto it = items_.find(key);
+        if (it == items_.end()) {
+            // New entry: build the row once and insert it in frequency order.
+            auto item = BandMapItem::create();
+            item->freqKHz = e.freqKHz;
+            item->dxCall  = e.dxCall;
+            item->band    = e.band;
+            if (const dxcc::Info* info = dxcc::lookup(e.dxCall)) {
+                item->entity    = info->entity;
+                item->continent = info->continent;
+            }
+            item->comment = comment;
+            item->timeUtc = timeUtc;
+            item->count.set_value(count);
+            item->spotters.set_value(tip);
+            store_->insert_sorted(item, cmp);
+            items_.emplace(key, std::move(item));
+        } else {
+            // Existing row: update only the mutable cell data in place.
+            it->second->comment = comment;
+            it->second->timeUtc = timeUtc;
+            if (it->second->count.get_value() != count)
+                it->second->count.set_value(count);
+            if (it->second->spotters.get_value().raw() != tip)
+                it->second->spotters.set_value(tip);
+        }
     }
 }
 
@@ -252,11 +300,11 @@ void DxClusterPanel::onActivate(guint position) {
         return;
     // Synthesise a spot from the band-map row for the form/rig.
     DxSpot s;
-    s.freqKHz = item->row.freqKHz;
-    s.dxCall  = item->row.dxCall;
-    s.band    = item->row.band;
-    s.comment = item->row.comment;
-    s.timeUtc = item->row.timeUtc;
+    s.freqKHz = item->freqKHz;
+    s.dxCall  = item->dxCall;
+    s.band    = item->band;
+    s.comment = item->comment;
+    s.timeUtc = item->timeUtc;
     signalActivate_.emit(s);
 }
 
