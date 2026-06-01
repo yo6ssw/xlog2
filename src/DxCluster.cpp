@@ -104,6 +104,12 @@ std::optional<DxSpot> parseSpot(const std::string& line) {
 }  // namespace dxcluster
 
 DxCluster::~DxCluster() {
+    // Drop callbacks before tearing down: at shutdown the owning panel may
+    // already be destroyed, and teardown() would otherwise invoke onStatus and
+    // call into the freed widget (use-after-free).
+    onSpot   = nullptr;
+    onLine   = nullptr;
+    onStatus = nullptr;
     disconnect();
 }
 
