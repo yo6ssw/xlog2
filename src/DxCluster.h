@@ -8,6 +8,7 @@
 #include <giomm/socketconnection.h>
 
 #include <sigc++/connection.h>
+#include <sigc++/trackable.h>
 
 #include <functional>
 #include <optional>
@@ -19,7 +20,13 @@
 // reads lines, the output stream writes the login callsign and commands. It all
 // runs on the GLib main loop (async DNS + I/O) — no worker thread — so every
 // callback fires on the UI thread.
-class DxCluster {
+//
+// Derives from sigc::trackable so the giomm async callbacks bound with
+// sigc::mem_fun(*this, …) are automatically invalidated when this object is
+// destroyed. Otherwise a read_line_async() completion queued in the main loop
+// can fire after the DxCluster is gone (e.g. the window is deleted while
+// g_application_run is still dispatching) and dereference freed memory.
+class DxCluster : public sigc::trackable {
 public:
     std::function<void(const DxSpot&)>      onSpot;    // a parsed DX spot
     std::function<void(const std::string&)> onLine;    // every raw line (console)

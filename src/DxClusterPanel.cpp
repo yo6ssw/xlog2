@@ -123,7 +123,16 @@ Glib::RefPtr<Gtk::ColumnViewColumn> DxClusterPanel::makeCountColumn() {
     // Bind the count cell to the item's `count`/`spotters` properties so it
     // updates in place — the row widget is never recreated, so a hovered row
     // doesn't flicker when its spotter count changes.
-    factory->signal_bind().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
+    //
+    // The per-listitem property connections are kept in a map owned by the
+    // factory's own slots (a shared_ptr captured below), NOT in a DxClusterPanel
+    // member. At shutdown GTK tears the rows down (firing signal_unbind) as the
+    // widget tree unrefs, which can happen after the DxClusterPanel members are
+    // gone; owning the map in the factory keeps it alive for exactly as long as
+    // the unbind handler can run.
+    auto conns =
+        std::make_shared<std::map<Gtk::ListItem*, std::vector<sigc::connection>>>();
+    factory->signal_bind().connect([conns](const Glib::RefPtr<Gtk::ListItem>& li) {
         auto* label = dynamic_cast<Gtk::Label*>(li->get_child());
         auto* item  = dynamic_cast<BandMapItem*>(li->get_item().get());
         if (!label || !item)
@@ -133,17 +142,17 @@ Glib::RefPtr<Gtk::ColumnViewColumn> DxClusterPanel::makeCountColumn() {
             label->set_tooltip_text(item->spotters.get_value());
         };
         update();
-        std::vector<sigc::connection> conns;
-        conns.push_back(item->count.get_proxy().signal_changed().connect(update));
-        conns.push_back(item->spotters.get_proxy().signal_changed().connect(update));
-        countConns_[li.get()] = std::move(conns);
+        std::vector<sigc::connection> v;
+        v.push_back(item->count.get_proxy().signal_changed().connect(update));
+        v.push_back(item->spotters.get_proxy().signal_changed().connect(update));
+        (*conns)[li.get()] = std::move(v);
     });
-    factory->signal_unbind().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
-        auto it = countConns_.find(li.get());
-        if (it != countConns_.end()) {
+    factory->signal_unbind().connect([conns](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto it = conns->find(li.get());
+        if (it != conns->end()) {
             for (auto& c : it->second)
                 c.disconnect();
-            countConns_.erase(it);
+            conns->erase(it);
         }
     });
     auto column = Gtk::ColumnViewColumn::create("Spotters", factory);
