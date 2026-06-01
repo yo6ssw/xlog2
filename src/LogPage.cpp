@@ -629,9 +629,12 @@ void LogPage::buildKeyerBar(Gtk::Box& parent) {
     bar->append(*stop);
     parent.append(*bar);
 
-    // F1–F9 fire the messages while focus is anywhere within this page.
+    // F1–F9 fire the messages while focus is anywhere within this page. Use the
+    // CAPTURE phase so these win over the GtkPaned (added for the DX-cluster
+    // panel) default bindings on F6/F8, which would otherwise eat F8.
     auto ctrl = Gtk::ShortcutController::create();
-    ctrl->set_scope(Gtk::ShortcutScope::MANAGED);
+    ctrl->set_scope(Gtk::ShortcutScope::LOCAL);
+    ctrl->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
     for (int i = 0; i < 9; ++i) {
         auto action = Gtk::CallbackAction::create(
             [this, i](Gtk::Widget&, const Glib::VariantBase&) {
