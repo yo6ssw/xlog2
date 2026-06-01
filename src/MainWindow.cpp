@@ -127,6 +127,8 @@ void MainWindow::buildActions() {
     add_action("lotwsettings", sigc::mem_fun(*this, &MainWindow::onLotwSettings));
 
     add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
+
+    add_action("keyersettings", sigc::mem_fun(*this, &MainWindow::onKeyerSettings));
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -171,6 +173,10 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     qrzMenu->append("_Settings…", "win.qrzsettings");
     menu->append_submenu("_QRZ", qrzMenu);
 
+    auto keyerMenu = Gio::Menu::create();
+    keyerMenu->append("_Settings…", "win.keyersettings");
+    menu->append_submenu("_Keyer", keyerMenu);
+
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
     menu->append_submenu("_Help", helpMenu);
@@ -189,6 +195,7 @@ LogPage* MainWindow::currentPage() {
 
 LogPage* MainWindow::addPage(LogPage* page) {
     page->applyColumnLayout(settings_);
+    page->setCwMessages(keyerMessages_);
     registerTab(page);
     return page;
 }
@@ -218,6 +225,14 @@ void MainWindow::registerTab(LogPage* page) {
     page->signalStatus().connect([this](const Glib::ustring& m) { setStatus(m); });
     page->signalLookupCall().connect(
         [this, page](const std::string& call) { onQrzLookup(page, call); });
+    page->signalSendCw().connect([this](const std::string& text) {
+        if (!keyer_.send(text))
+            setStatus("Keyer: " + keyer_.lastError());
+    });
+    page->signalAbortCw().connect([this]() {
+        if (!keyer_.abort())
+            setStatus("Keyer: " + keyer_.lastError());
+    });
 
     auto* labelBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     labelBox->set_spacing(4);
@@ -853,6 +868,90 @@ void MainWindow::showQrzResult(const QrzResult& result) {
     win->present();
 }
 
+// --- network keyer (cwdaemon) ------------------------------------------------
+
+void MainWindow::applyKeyerConfig() {
+    keyer_.setEndpoint(keyerHost_, keyerPort_);
+    keyer_.setSpeed(keyerSpeed_);
+    for (int i = 0; i < notebook_.get_n_pages(); ++i)
+        if (auto* p = dynamic_cast<LogPage*>(notebook_.get_nth_page(i)))
+            p->setCwMessages(keyerMessages_);
+}
+
+void MainWindow::onKeyerSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("Network keyer (cwdaemon)");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
+    hostEntry->set_text(keyerHost_);
+    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
+    portEntry->set_text(std::to_string(keyerPort_));
+    auto* speedEntry = Gtk::make_managed<Gtk::Entry>();
+    speedEntry->set_text(keyerSpeed_ > 0 ? std::to_string(keyerSpeed_) : "");
+    speedEntry->set_placeholder_text("wpm (blank = leave cwdaemon default)");
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("Host:", *hostEntry, 0);
+    field("Port:", *portEntry, 1);
+    field("Speed:", *speedEntry, 2);
+
+    std::array<Gtk::Entry*, 9> msgEntries{};
+    for (int i = 0; i < 9; ++i) {
+        msgEntries[i] = Gtk::make_managed<Gtk::Entry>();
+        msgEntries[i]->set_text(keyerMessages_[i]);
+        field(("F" + std::to_string(i + 1) + ":").c_str(), *msgEntries[i], 3 + i);
+    }
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Sends CW to a cwdaemon over UDP. Messages may contain the tokens\n"
+        "%CALL% %NAME% %QTH% %RST% (case-insensitive; %RST% = the RST rcvd\n"
+        "field), substituted from the QSO entry form. Trigger with the F1–F9\n"
+        "buttons or keys; Stop aborts the message being sent.");
+    hint->set_xalign(0.0);
+    grid->attach(*hint, 0, 12, 2, 1);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 13);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect(
+        [this, hostEntry, portEntry, speedEntry, msgEntries, win]() {
+            keyerHost_ = hostEntry->get_text().raw();
+            if (keyerHost_.empty())
+                keyerHost_ = "127.0.0.1";
+            try { keyerPort_ = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { keyerPort_ = 6789; }
+            try {
+                const std::string s = speedEntry->get_text().raw();
+                keyerSpeed_ = s.empty() ? 0 : std::stoi(s);
+            } catch (const std::exception&) { keyerSpeed_ = 0; }
+            for (int i = 0; i < 9; ++i)
+                keyerMessages_[i] = msgEntries[i]->get_text().raw();
+            applyKeyerConfig();
+            setStatus("Keyer settings saved.");
+            win->set_visible(false);
+        });
+
+    win->present();
+}
+
 // --- settings persistence ----------------------------------------------------
 
 std::string MainWindow::layoutFilePath() const {
@@ -914,6 +1013,13 @@ void MainWindow::saveSettings() {
 
     keyfile->set_string("qrz", "username", qrzUser_);
     keyfile->set_string("qrz", "password", qrzPassword_);
+
+    keyfile->set_string("keyer", "host", keyerHost_);
+    keyfile->set_integer("keyer", "port", keyerPort_);
+    keyfile->set_integer("keyer", "speed", keyerSpeed_);
+    for (int i = 0; i < 9; ++i)
+        keyfile->set_string("keyer", "message" + std::to_string(i + 1),
+                            keyerMessages_[i]);
 
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
@@ -983,6 +1089,19 @@ void MainWindow::loadSettings() {
                 if (settings_->has_key("qrz", "password"))
                     qrzPassword_ = settings_->get_string("qrz", "password").raw();
             }
+            if (settings_->has_group("keyer")) {
+                if (settings_->has_key("keyer", "host"))
+                    keyerHost_ = settings_->get_string("keyer", "host").raw();
+                if (settings_->has_key("keyer", "port"))
+                    keyerPort_ = settings_->get_integer("keyer", "port");
+                if (settings_->has_key("keyer", "speed"))
+                    keyerSpeed_ = settings_->get_integer("keyer", "speed");
+                for (int i = 0; i < 9; ++i) {
+                    const std::string key = "message" + std::to_string(i + 1);
+                    if (settings_->has_key("keyer", key))
+                        keyerMessages_[i] = settings_->get_string("keyer", key).raw();
+                }
+            }
         } catch (const Glib::Error&) {
         }
     }
@@ -1009,6 +1128,9 @@ void MainWindow::loadSettings() {
     if (!active.empty())
         if (auto* p = findPageByPath(active))
             notebook_.set_current_page(notebook_.page_num(*p));
+
+    // Open the keyer socket and push messages to the restored pages.
+    applyKeyerConfig();
 }
 
 void MainWindow::setStatus(const Glib::ustring& msg) {

@@ -3,6 +3,8 @@
 #include "Bands.h"
 #include "UiUtil.h"
 
+#include <gdk/gdkkeysyms.h>
+
 #include <cctype>
 #include <cstdio>
 #include <set>
@@ -405,6 +407,8 @@ void LogPage::buildEntryForm() {
     buttons->append(addButton_);
     outer->append(*buttons);
 
+    buildKeyerBar(*outer);
+
     append(*frame);
 
     addButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
@@ -569,6 +573,99 @@ void LogPage::applyQrzLookup(const QrzResult& r) {
     if (!r.name.empty())    name_.set_text(r.name);
     if (!r.qth.empty())     qth_.set_text(r.qth);
     if (!r.locator.empty()) locator_.set_text(r.locator);
+}
+
+void LogPage::buildKeyerBar(Gtk::Box& parent) {
+    auto* bar = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    bar->set_spacing(4);
+    ui::setMargin(*bar, 0);
+    bar->append(*Gtk::make_managed<Gtk::Label>("Keyer:"));
+
+    for (int i = 0; i < 9; ++i) {
+        auto* b = Gtk::make_managed<Gtk::Button>("F" + std::to_string(i + 1));
+        b->set_sensitive(false);  // enabled once a template is assigned
+        b->signal_clicked().connect([this, i]() { sendCwMessage(i); });
+        cwButtons_[i] = b;
+        bar->append(*b);
+    }
+
+    auto* stop = Gtk::make_managed<Gtk::Button>("Stop");
+    stop->set_tooltip_text("Abort the message being sent");
+    stop->signal_clicked().connect([this]() { signalAbortCw_.emit(); });
+    bar->append(*stop);
+    parent.append(*bar);
+
+    // F1–F9 fire the messages while focus is anywhere within this page.
+    auto ctrl = Gtk::ShortcutController::create();
+    ctrl->set_scope(Gtk::ShortcutScope::MANAGED);
+    for (int i = 0; i < 9; ++i) {
+        auto action = Gtk::CallbackAction::create(
+            [this, i](Gtk::Widget&, const Glib::VariantBase&) {
+                sendCwMessage(i);
+                return true;
+            });
+        ctrl->add_shortcut(
+            Gtk::Shortcut::create(Gtk::KeyvalTrigger::create(GDK_KEY_F1 + i), action));
+    }
+    add_controller(ctrl);
+}
+
+void LogPage::setCwMessages(const std::array<std::string, 9>& msgs) {
+    cwMessages_ = msgs;
+    for (int i = 0; i < 9; ++i) {
+        if (!cwButtons_[i])
+            continue;
+        const bool has = !cwMessages_[i].empty();
+        cwButtons_[i]->set_sensitive(has);
+        cwButtons_[i]->set_tooltip_text(has ? cwMessages_[i] : "(no message set)");
+    }
+}
+
+std::string LogPage::expandCwTemplate(const std::string& tmpl) const {
+    std::string call = ui::entryText(call_);
+    for (auto& c : call)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    const std::pair<std::string, std::string> subs[] = {
+        {"CALL", call},
+        {"NAME", ui::entryText(name_)},
+        {"QTH",  ui::entryText(qth_)},
+        {"RST",  ui::entryText(rstRcvd_)},  // %RST% = the RST rcvd field
+    };
+
+    std::string out;
+    const size_t n = tmpl.size();
+    size_t i = 0;
+    while (i < n) {
+        if (tmpl[i] == '%') {
+            const size_t end = tmpl.find('%', i + 1);
+            if (end != std::string::npos) {
+                std::string name = tmpl.substr(i + 1, end - i - 1);
+                for (auto& c : name)
+                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+                bool matched = false;
+                for (const auto& [tok, val] : subs)
+                    if (name == tok) { out += val; matched = true; break; }
+                if (matched) {
+                    i = end + 1;
+                    continue;
+                }
+            }
+            // Unknown or unterminated token: copy the '%' through literally.
+        }
+        out += tmpl[i++];
+    }
+    return out;
+}
+
+void LogPage::sendCwMessage(int index) {
+    if (index < 0 || index >= 9 || cwMessages_[index].empty()) {
+        status("Keyer F" + std::to_string(index + 1) + " has no message set.");
+        return;
+    }
+    const std::string text = expandCwTemplate(cwMessages_[index]);
+    signalSendCw_.emit(text);
+    status("Keyer: " + text);
 }
 
 void LogPage::updateDupeIndicator() {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "CwKeyer.h"
 #include "Lotw.h"
 #include "Qrz.h"
 #include "Qso.h"
@@ -8,6 +9,7 @@
 
 #include <gtkmm.h>
 
+#include <array>
 #include <map>
 #include <string>
 #include <vector>
@@ -71,6 +73,10 @@ private:
     void onQrzSettings();
     void showQrzResult(const QrzResult& result);  // popup with all returned fields
 
+    // --- network keyer (cwdaemon) ---
+    void onKeyerSettings();
+    void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages
+
     // --- settings persistence ---
     std::string layoutFilePath() const;
     void saveSettings();
@@ -107,6 +113,13 @@ private:
     QrzClient     qrz_;
     std::string   qrzUser_, qrzPassword_;
     LogPage*      pendingLookupPage_ = nullptr;   // page awaiting a QRZ result
+
+    // Network keyer (cwdaemon)
+    CwKeyer       keyer_;
+    std::string   keyerHost_ = "127.0.0.1";
+    int           keyerPort_ = 6789;
+    int           keyerSpeed_ = 0;                // 0 = leave cwdaemon's default
+    std::array<std::string, 9> keyerMessages_{};
 
     // Loaded settings, used to apply the shared column layout to new pages.
     Glib::RefPtr<Glib::KeyFile> settings_;
