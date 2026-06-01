@@ -26,6 +26,12 @@ struct Qso {
     std::string qsl_rcvd;       // "Y" / "N" / ""
     std::string comment;        // free-form remarks
 
+    // DXCC entity data derived from the callsign (cty.dat), mapped to ADIF.
+    std::string country;        // DXCC entity name, e.g. "Germany"  (COUNTRY)
+    std::string cq_zone;        // CQ zone number as text            (CQZ)
+    std::string itu_zone;       // ITU zone number as text           (ITUZ)
+    std::string continent;      // continent, e.g. "EU"              (CONT)
+
     // Logbook of The World (LoTW) status, mapped to the ADIF LOTW_* fields.
     std::string lotw_sent;      // "Y"/"N"/""     LOTW_QSL_SENT
     std::string lotw_sent_date; // YYYY-MM-DD      LOTW_QSLSDATE

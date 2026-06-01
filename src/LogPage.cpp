@@ -1,6 +1,7 @@
 #include "LogPage.h"
 
 #include "Bands.h"
+#include "Dxcc.h"
 #include "UiUtil.h"
 
 #include <gdk/gdkkeysyms.h>
@@ -153,6 +154,8 @@ void LogPage::buildLogView() {
         if (q.lotw_sent == "Y") return "↑";  // ↑ uploaded
         return "-";
     });
+    add("country", "Country", [](const Qso& q) { return q.country; });
+    add("cqz",     "CQ",      [](const Qso& q) { return q.cq_zone; });
     add("comment", "Comment", [](const Qso& q) { return q.comment; });
 
     // Empty trailing column that soaks up any leftover width. Its factory
@@ -390,6 +393,11 @@ void LogPage::buildEntryForm() {
     comment_.set_hexpand(true);
     grid->attach(comment_, 1, 5, 5, 1);
 
+    // DXCC entity indicator (derived from the callsign via cty.dat).
+    dxccLabel_.set_xalign(0.0);
+    dxccLabel_.add_css_class("dim-label");
+    outer->append(dxccLabel_);
+
     // Duplicate-warning indicator (hidden when empty).
     dupeLabel_.set_xalign(0.0);
     dupeLabel_.add_css_class("dupe-warning");
@@ -417,8 +425,9 @@ void LogPage::buildEntryForm() {
     freq_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::onFrequencyChanged));
     call_.signal_activate().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
 
-    // Live dupe detection as the key fields change.
+    // Live dupe detection + DXCC lookup as the key fields change.
     call_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+    call_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDxccIndicator));
     date_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
     band_.property_selected().signal_changed().connect(
         sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
@@ -464,12 +473,27 @@ Qso LogPage::formToQso() const {
     q.qsl_rcvd = qslRcvd_.get_active() ? "Y" : "N";
     q.comment  = ui::entryText(comment_);
 
+    // DXCC entity/zones are derived from the call (kept current by
+    // updateDxccIndicator), not edited directly.
+    q.country   = dxccCountry_;
+    q.cq_zone   = dxccCqZone_;
+    q.itu_zone  = dxccItuZone_;
+    q.continent = dxccContinent_;
+
     for (auto& c : q.call) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     for (auto& c : q.locator) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
     return q;
 }
 
 void LogPage::qsoToForm(const Qso& q) {
+    // Remember the record's stored DXCC fields so updateDxccIndicator can fall
+    // back to them when no country file is loaded. Set before call_ below,
+    // whose change signal triggers updateDxccIndicator.
+    loadedCountry_   = q.country;
+    loadedCqZone_    = q.cq_zone;
+    loadedItuZone_   = q.itu_zone;
+    loadedContinent_ = q.continent;
+
     date_.set_text(q.date);
     timeOn_.set_text(q.time_on);
     timeOff_.set_text(q.time_off);
@@ -490,6 +514,10 @@ void LogPage::qsoToForm(const Qso& q) {
 
 void LogPage::clearForm() {
     editingId_ = 0;
+    loadedCountry_.clear();
+    loadedCqZone_.clear();
+    loadedItuZone_.clear();
+    loadedContinent_.clear();
     for (Gtk::Entry* e : {&date_, &timeOn_, &timeOff_, &call_, &freq_, &rstSent_,
                           &rstRcvd_, &name_, &qth_, &locator_, &power_, &comment_})
         e->set_text("");
@@ -681,6 +709,37 @@ void LogPage::updateDupeIndicator() {
         dupeLabel_.set_text("");
         call_.remove_css_class("dupe");
     }
+}
+
+void LogPage::updateDxccIndicator() {
+    std::string call = ui::entryText(call_);
+    for (auto& c : call)
+        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    const dxcc::Info* info = call.empty() ? nullptr : dxcc::lookup(call);
+    if (info) {
+        dxccCountry_   = info->entity;
+        dxccCqZone_    = info->cqZone  ? std::to_string(info->cqZone)  : std::string{};
+        dxccItuZone_   = info->ituZone ? std::to_string(info->ituZone) : std::string{};
+        dxccContinent_ = info->continent;
+    } else {
+        // No match (or no cty.dat) — keep whatever the loaded record carried so
+        // editing a QSO doesn't silently drop imported DXCC data.
+        dxccCountry_   = loadedCountry_;
+        dxccCqZone_    = loadedCqZone_;
+        dxccItuZone_   = loadedItuZone_;
+        dxccContinent_ = loadedContinent_;
+    }
+
+    if (dxccCountry_.empty()) {
+        dxccLabel_.set_text("");
+        return;
+    }
+    std::string s = dxccCountry_;
+    if (!dxccCqZone_.empty())    s += "  ·  CQ " + dxccCqZone_;
+    if (!dxccItuZone_.empty())   s += "  ·  ITU " + dxccItuZone_;
+    if (!dxccContinent_.empty()) s += "  ·  " + dxccContinent_;
+    dxccLabel_.set_text(s);
 }
 
 void LogPage::newInMemory() {

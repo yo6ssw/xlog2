@@ -14,18 +14,20 @@
 namespace {
 
 // Column order shared by INSERT, UPDATE and SELECT. id is handled separately.
-constexpr std::array<const char*, 20> kColumns = {
+constexpr std::array<const char*, 24> kColumns = {
     "date", "time_on", "time_off", "call", "band", "mode", "freq",
     "rst_sent", "rst_rcvd", "name", "qth", "locator", "power",
     "qsl_sent", "qsl_rcvd", "comment",
     "lotw_sent", "lotw_sent_date", "lotw_rcvd", "lotw_rcvd_date",
+    "country", "cq_zone", "itu_zone", "continent",
 };
 
 std::array<std::string, kColumns.size()> fieldsOf(const Qso& q) {
     return {q.date, q.time_on, q.time_off, q.call, q.band, q.mode, q.freq,
             q.rst_sent, q.rst_rcvd, q.name, q.qth, q.locator, q.power,
             q.qsl_sent, q.qsl_rcvd, q.comment,
-            q.lotw_sent, q.lotw_sent_date, q.lotw_rcvd, q.lotw_rcvd_date};
+            q.lotw_sent, q.lotw_sent_date, q.lotw_rcvd, q.lotw_rcvd_date,
+            q.country, q.cq_zone, q.itu_zone, q.continent};
 }
 
 // "INSERT INTO qsos (c1,c2,...) VALUES (?,?,...);" built from kColumns so the
@@ -96,7 +98,8 @@ bool LogBook::createSchema(sqlite3* db) {
         "  rst_rcvd TEXT, name     TEXT, qth      TEXT, locator  TEXT,"
         "  power    TEXT, qsl_sent TEXT, qsl_rcvd TEXT, comment  TEXT,"
         "  lotw_sent TEXT, lotw_sent_date TEXT,"
-        "  lotw_rcvd TEXT, lotw_rcvd_date TEXT);";
+        "  lotw_rcvd TEXT, lotw_rcvd_date TEXT,"
+        "  country TEXT, cq_zone TEXT, itu_zone TEXT, continent TEXT);";
     char* err = nullptr;
     if (sqlite3_exec(db, sql, nullptr, nullptr, &err) != SQLITE_OK) {
         sqlite3_free(err);
@@ -210,6 +213,10 @@ void LogBook::reload() {
         q.lotw_sent_date = columnText(stmt, 18);
         q.lotw_rcvd      = columnText(stmt, 19);
         q.lotw_rcvd_date = columnText(stmt, 20);
+        q.country        = columnText(stmt, 21);
+        q.cq_zone        = columnText(stmt, 22);
+        q.itu_zone       = columnText(stmt, 23);
+        q.continent      = columnText(stmt, 24);
         cache_.push_back(std::move(q));
     }
     sqlite3_finalize(stmt);
