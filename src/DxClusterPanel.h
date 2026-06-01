@@ -79,9 +79,6 @@ private:
     std::map<Key, Glib::RefPtr<BandMapItem>> items_;
     sigc::connection expiryTimer_;
 
-    // Per-bound-listitem connections for the count cell's property updates.
-    std::map<Gtk::ListItem*, std::vector<sigc::connection>> countConns_;
-
     sigc::signal<void(const DxSpot&)>       signalActivate_;
     sigc::signal<void(const std::string&)>  signalCommand_;
     sigc::signal<void()>                    signalConnectToggle_;
