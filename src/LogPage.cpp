@@ -603,7 +603,10 @@ void LogPage::applyQrzLookup(const QrzResult& r) {
     // returns nothing for some fields doesn't wipe what the user typed.
     if (!r.name.empty())    name_.set_text(r.name);
     if (!r.qth.empty())     qth_.set_text(r.qth);
-    if (!r.locator.empty()) locator_.set_text(r.locator);
+    // Fill the locator only when empty, so a grid already entered (e.g. from a
+    // DX spot or typed by hand) isn't overwritten by the operator's home grid.
+    if (!r.locator.empty() && ui::entryText(locator_).empty())
+        locator_.set_text(r.locator);
 }
 
 void LogPage::buildKeyerBar(Gtk::Box& parent) {
