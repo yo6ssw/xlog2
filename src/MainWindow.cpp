@@ -121,6 +121,14 @@ MainWindow::MainWindow() {
     // Resume listening for QSOs over UDP if it was enabled last session.
     if (udpEnabled_)
         startUdpListening();
+
+    // Connect to the rig at startup if configured to.
+    if (rigAutoConnect_) {
+        if (rig_.start(rigModel_, rigDevice_, rigPollMs_))
+            setStatus("Connected to rig (model " + std::to_string(rigModel_) + ").");
+        else
+            setStatus("Rig auto-connect failed: " + rig_.lastError());
+    }
 }
 
 void MainWindow::buildActions() {
@@ -623,22 +631,25 @@ void MainWindow::onRigConnect() {
     field("Hamlib model:", *modelEntry, 0);
     field("Device:",       *deviceEntry, 1);
     field("Poll (ms):",    *pollEntry, 2);
+    auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
+    autoCheck->set_active(rigAutoConnect_);
+    grid->attach(*autoCheck, 1, 3);
 
     auto* hint = Gtk::make_managed<Gtk::Label>(
         "Model is a Hamlib rig id (e.g. 1 = dummy, 2 = NET rigctl).\n"
         "Find yours with `rigctl --list`. Device is ignored for the dummy.");
     hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 3, 2, 1);
+    grid->attach(*hint, 0, 4, 2, 1);
 
     auto* connect = Gtk::make_managed<Gtk::Button>("Connect");
     connect->set_halign(Gtk::Align::END);
-    grid->attach(*connect, 1, 4);
+    grid->attach(*connect, 1, 5);
 
     win->set_child(*grid);
     win->signal_hide().connect([win]() { delete win; });
 
     connect->signal_clicked().connect(
-        [this, modelEntry, deviceEntry, pollEntry, win]() {
+        [this, modelEntry, deviceEntry, pollEntry, autoCheck, win]() {
             try {
                 rigModel_  = std::stoi(modelEntry->get_text().raw());
                 rigDevice_ = deviceEntry->get_text().raw();
@@ -647,6 +658,7 @@ void MainWindow::onRigConnect() {
                 setStatus("Invalid rig settings.");
                 return;
             }
+            rigAutoConnect_ = autoCheck->get_active();
             if (rig_.start(rigModel_, rigDevice_, rigPollMs_))
                 setStatus("Connected to rig (model " + std::to_string(rigModel_) +
                           "). Polling frequency.");
@@ -1188,6 +1200,7 @@ void MainWindow::saveSettings() {
     keyfile->set_integer("rig", "model", rigModel_);
     keyfile->set_string("rig", "device", rigDevice_);
     keyfile->set_integer("rig", "poll_ms", rigPollMs_);
+    keyfile->set_boolean("rig", "autoconnect", rigAutoConnect_);
 
     keyfile->set_string("lotw", "username", lotwUser_);
     keyfile->set_string("lotw", "password", lotwPassword_);
@@ -1268,6 +1281,8 @@ void MainWindow::loadSettings() {
                     rigDevice_ = settings_->get_string("rig", "device").raw();
                 if (settings_->has_key("rig", "poll_ms"))
                     rigPollMs_ = settings_->get_integer("rig", "poll_ms");
+                if (settings_->has_key("rig", "autoconnect"))
+                    rigAutoConnect_ = settings_->get_boolean("rig", "autoconnect");
             }
             if (settings_->has_group("lotw")) {
                 if (settings_->has_key("lotw", "username"))
