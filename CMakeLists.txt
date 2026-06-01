@@ -34,6 +34,7 @@ add_executable(xlog2
     src/CwKeyer.cpp
     src/DxCluster.cpp
     src/DxClusterPanel.cpp
+    src/Dxcc.cpp
 )
 
 target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)

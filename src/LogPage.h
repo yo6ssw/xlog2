@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Dxcc.h"
 #include "LogBook.h"
 #include "Qrz.h"
 #include "QsoItem.h"
@@ -105,6 +106,7 @@ private:
     void onLookupCall();  // QRZ icon in the callsign entry
     void onSetNow();
     void updateDupeIndicator();
+    void updateDxccIndicator();  // derive DXCC entity/zones from the call field
     void status(const Glib::ustring& msg) { signalStatus_.emit(msg); }
 
     LogBook logbook_;
@@ -130,6 +132,12 @@ private:
     Gtk::CheckButton qslSent_, qslRcvd_;
     Gtk::Button   addButton_, deleteButton_, clearButton_;
     Gtk::Label    dupeLabel_;
+    Gtk::Label    dxccLabel_;
+
+    // Effective DXCC fields for the call in the form (cty.dat lookup, falling
+    // back to the loaded record's values when no country file matches).
+    std::string dxccCountry_, dxccCqZone_, dxccItuZone_, dxccContinent_;
+    std::string loadedCountry_, loadedCqZone_, loadedItuZone_, loadedContinent_;
 
     // Network keyer (cwdaemon) message buttons.
     std::array<std::string, 9> cwMessages_{};

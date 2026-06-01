@@ -72,6 +72,10 @@ void setField(Qso& q, const std::string& name, const std::string& value) {
     else if (name == "lotw_qslsdate") q.lotw_sent_date = dateFromAdif(value);
     else if (name == "lotw_qsl_rcvd") q.lotw_rcvd = toUpper(value);
     else if (name == "lotw_qslrdate") q.lotw_rcvd_date = dateFromAdif(value);
+    else if (name == "country")    q.country   = value;
+    else if (name == "cqz")        q.cq_zone   = value;
+    else if (name == "ituz")       q.itu_zone  = value;
+    else if (name == "cont")       q.continent = toUpper(value);
     else if (name == "comment" || name == "notes") q.comment = value;
     // unknown fields are silently ignored
 }
@@ -165,6 +169,10 @@ std::string write(const std::vector<Qso>& qsos) {
         writeField(os, "QTH",      q.qth);
         writeField(os, "GRIDSQUARE", q.locator);
         writeField(os, "TX_PWR",   q.power);
+        writeField(os, "COUNTRY",  q.country);
+        writeField(os, "CQZ",      q.cq_zone);
+        writeField(os, "ITUZ",     q.itu_zone);
+        writeField(os, "CONT",     q.continent);
         writeField(os, "QSL_SENT", q.qsl_sent);
         writeField(os, "QSL_RCVD", q.qsl_rcvd);
         writeField(os, "LOTW_QSL_SENT", q.lotw_sent);
