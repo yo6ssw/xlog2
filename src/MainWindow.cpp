@@ -989,8 +989,11 @@ void MainWindow::onKeyerSettings() {
 // --- DX cluster --------------------------------------------------------------
 
 void MainWindow::applyDxDock() {
-    paned_.unset_start_child();
-    paned_.unset_end_child();
+    // Clear both slots by setting the child properties to null — portable across
+    // gtkmm versions (Paned::unset_start_child()/unset_end_child() are 4.16+,
+    // but the PPA builds against gtkmm 4.14 on Ubuntu 24.04 LTS).
+    paned_.property_start_child().set_value(nullptr);
+    paned_.property_end_child().set_value(nullptr);
     const bool horizontal = (cfg().dxDock == "left" || cfg().dxDock == "right");
     paned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
                                       : Gtk::Orientation::VERTICAL);
