@@ -27,17 +27,36 @@ void RigController::start(int model, const std::string& device, int pollMs) {
     // rig_open() can block for the connect timeout (e.g. a network rig with no
     // listener, or a slow serial port); do it on the worker so start() returns
     // immediately and the UI thread keeps running.
-    thread_ = std::thread(&RigController::worker, this);
+    run_ = std::make_shared<Run>();
+    thread_ = std::thread(&RigController::worker, this, run_);
 }
 
 void RigController::stop() {
-    if (running_.exchange(false)) {
-        if (thread_.joinable())
-            thread_.join();  // the worker closes the rig as its last action
-        return;
+    running_.store(false);
+
+    // Decide, under the run's lock, whether the worker can be joined quickly or
+    // must be abandoned. If it has reached the poll loop (`opened`), the loop
+    // exits within a poll slice and closes the rig, so join() is fast. If it is
+    // still inside the blocking rig_open(), joining would stall shutdown until
+    // the connection times out — so mark it abandoned and detach instead; the
+    // worker then self-cleans via the shared Run without touching us.
+    bool detach = false;
+    if (run_) {
+        std::lock_guard<std::mutex> lock(run_->mutex);
+        if (!run_->opened) {
+            run_->abandoned = true;
+            detach = true;
+        }
     }
-    // No worker was running (e.g. rig opened but polling never started): close
-    // on this thread as a fallback.
+    if (thread_.joinable()) {
+        if (detach)
+            thread_.detach();
+        else
+            thread_.join();  // the worker closes the rig as its last action
+    }
+    run_.reset();
+
+    // Fallback: a rig handle with no worker to close it (defensive).
     if (rig_) {
         rig_close(asRig(rig_));
         rig_cleanup(asRig(rig_));
@@ -53,8 +72,11 @@ void RigController::setFrequency(double mhz) {
     hasPendingFreq_ = true;
 }
 
-void RigController::worker() {
-    // Open the rig here (off the UI thread) and report the outcome.
+void RigController::worker(std::shared_ptr<Run> run) {
+    // Report the connection outcome on the UI thread. Only ever called while the
+    // run is not abandoned (so the controller — hence ui_ — is still alive); the
+    // posted closure additionally drops itself if the controller is gone by the
+    // time it runs.
     auto report = [this](bool ok) {
         ui_.post([this, w = std::weak_ptr<bool>(alive_), ok, err = lastError_]() {
             if (!w.expired() && onConnectResult)
@@ -64,9 +86,12 @@ void RigController::worker() {
 
     RIG* rig = rig_init(static_cast<rig_model_t>(pendingModel_));
     if (!rig) {
+        std::lock_guard<std::mutex> lock(run->mutex);
+        if (run->abandoned)
+            return;  // controller detached us; touch nothing
         lastError_ = "rig_init failed (unknown model " + std::to_string(pendingModel_) + ")";
         running_.store(false);
-        report(false);
+        report(false);  // under the lock so a racing stop() can't free us mid-report
         return;
     }
     if (!pendingDevice_.empty())
@@ -79,15 +104,31 @@ void RigController::worker() {
     rig_set_conf(rig, rig_token_lookup(rig, "poll_interval"), "0");
     rig_set_conf(rig, rig_token_lookup(rig, "async"), "0");
 
-    const int rc = rig_open(rig);
-    if (rc != RIG_OK) {
-        lastError_ = rigerror(rc);
-        rig_cleanup(rig);
-        running_.store(false);
-        report(false);
-        return;
+    const int rc = rig_open(rig);  // may block for the whole connect timeout
+
+    // Hand off under the run's lock: stop() inspects `opened`/`abandoned` under
+    // the same lock, so exactly one of {join, detach} happens and the worker
+    // touches controller state only when it will be joined.
+    {
+        std::lock_guard<std::mutex> lock(run->mutex);
+        if (run->abandoned) {
+            // Detached during the open. Clean up only our local handle and exit
+            // without referencing any controller member.
+            if (rc == RIG_OK)
+                rig_close(rig);
+            rig_cleanup(rig);
+            return;
+        }
+        if (rc != RIG_OK) {
+            lastError_ = rigerror(rc);
+            rig_cleanup(rig);
+            running_.store(false);
+            report(false);  // under the lock (see above)
+            return;
+        }
+        rig_ = rig;
+        run->opened = true;  // committed: stop() will join from here on
     }
-    rig_ = rig;
     report(true);
 
     while (running_.load()) {
