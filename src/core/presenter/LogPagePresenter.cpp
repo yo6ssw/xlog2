@@ -74,8 +74,10 @@ void LogPagePresenter::clearForm() {
     editingId_ = 0;
     loaded_ = {};
     FormData f;
-    f.date    = timeutil::utcNow("%Y-%m-%d");
-    f.time_on = timeutil::utcNow("%H:%M");
+    f.date     = timeutil::utcNow("%Y-%m-%d");
+    f.time_on  = timeutil::utcNow("%H:%M");
+    f.rst_sent = "599";  // sensible default; the operator edits per contact
+    f.rst_rcvd = "599";
     view_.setFormData(f);
     view_.setEditing(false);
     view_.clearSelection();
