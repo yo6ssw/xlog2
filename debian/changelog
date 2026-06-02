@@ -1,0 +1,6 @@
+xlog2 (0.1.0~noble1) noble; urgency=medium
+
+  * Initial PPA release: xlog2-gtk (GTK 4) and xlog2-qt (Qt) frontends over a
+    shared toolkit-neutral core.
+
+ -- Adrian Scripca <benishor@gmail.com>  Mon, 02 Jun 2026 12:00:00 +0000

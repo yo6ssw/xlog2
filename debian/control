@@ -1,0 +1,40 @@
+Source: xlog2
+Section: hamradio
+Priority: optional
+Maintainer: Adrian Scripca <benishor@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+ cmake,
+ pkg-config,
+ libgtkmm-4.0-dev,
+ qt6-base-dev,
+ libsqlite3-dev,
+ libhamlib-dev,
+ libcurl4-openssl-dev
+Standards-Version: 4.6.2
+Homepage: https://github.com/yo6ssw/xlog2
+Rules-Requires-Root: no
+
+Package: xlog2-gtk
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: tqsl
+Description: amateur-radio logging program (GTK 4 frontend)
+ xlog2 is an amateur-radio logger: it logs QSOs to SQLite, exchanges ADIF,
+ receives logged QSOs over UDP (WSJT-X / fldigi / JTAlert), controls a radio
+ via Hamlib, looks up calls on QRZ.com, drives a network CW keyer, shows a
+ DX-cluster band map, and syncs with ARRL's Logbook of The World.
+ .
+ This package provides the GTK 4 (gtkmm) frontend, xlog2-gtk.
+
+Package: xlog2-qt
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: tqsl
+Description: amateur-radio logging program (Qt frontend)
+ xlog2 is an amateur-radio logger: it logs QSOs to SQLite, exchanges ADIF,
+ receives logged QSOs over UDP (WSJT-X / fldigi / JTAlert), controls a radio
+ via Hamlib, looks up calls on QRZ.com, drives a network CW keyer, shows a
+ DX-cluster band map, and syncs with ARRL's Logbook of The World.
+ .
+ This package provides the Qt Widgets frontend, xlog2-qt. It reads and writes
+ the same logbooks and settings as xlog2-gtk.

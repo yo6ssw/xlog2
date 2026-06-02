@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=xlog2 (Qt)
+GenericName=Amateur-radio logger
+Comment=Log QSOs, exchange ADIF, control a rig, sync with LoTW
+Exec=xlog2-qt
+Terminal=false
+Categories=HamRadio;Network;Utility;
+Keywords=ham;amateur radio;QSO;logbook;ADIF;hamlib;LoTW;

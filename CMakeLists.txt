@@ -87,6 +87,7 @@ if(XLOG_BUILD_GTK)
         target_compile_options(xlog2-gtk PRIVATE -Wall -Wextra)
     endif()
     install(TARGETS xlog2-gtk RUNTIME DESTINATION bin)
+    install(FILES packaging/xlog2-gtk.desktop DESTINATION share/applications)
 endif()
 
 # ---------------------------------------------------------------------------
@@ -120,4 +121,5 @@ if(XLOG_BUILD_QT)
         target_compile_options(xlog2-qt PRIVATE -Wall -Wextra)
     endif()
     install(TARGETS xlog2-qt RUNTIME DESTINATION bin)
+    install(FILES packaging/xlog2-qt.desktop DESTINATION share/applications)
 endif()
