@@ -21,7 +21,7 @@ void ensureCss() {
         return;
     installed = true;
     auto provider = Gtk::CssProvider::create();
-    provider->load_from_string(
+    const Glib::ustring css =
         ".dupe-warning { color: #c01c28; font-weight: bold; }\n"
         ".dxcc-entity { color: #1c71d8; font-weight: bold; }\n"
         "entry.dupe { background-image: none; background-color: #f7d4d4; }\n"
@@ -42,7 +42,14 @@ void ensureCss() {
         "  background-image: linear-gradient(to bottom,\n"
         "      shade(@theme_bg_color, 0.90), shade(@theme_bg_color, 1.02));\n"
         "  box-shadow: inset 0 1px shade(@theme_bg_color, 0.70);\n"
-        "}\n");
+        "}\n";
+    // load_from_string() is gtkmm 4.16+; fall back to load_from_data() on the
+    // 4.14 (Ubuntu 24.04 LTS) that the PPA builds against.
+#if GTKMM_CHECK_VERSION(4, 16, 0)
+    provider->load_from_string(css);
+#else
+    provider->load_from_data(css);
+#endif
     if (auto display = Gdk::Display::get_default())
         Gtk::StyleContext::add_provider_for_display(
             display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
