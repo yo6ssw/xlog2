@@ -77,6 +77,11 @@ void QtLogPage::buildUi() {
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setSortingEnabled(true);
+    // setSortingEnabled() defaults the sort indicator to column 0 descending,
+    // which would put the newest QSO on top. Revert to the model's source order
+    // (LogBook's date,time_on,id ascending → newest at the bottom, like gtkmm);
+    // the user can still click a header to sort.
+    table_->sortByColumn(-1, Qt::AscendingOrder);
     table_->verticalHeader()->setVisible(false);
     auto* header = table_->horizontalHeader();
     header->setStretchLastSection(true);
