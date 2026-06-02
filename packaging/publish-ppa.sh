@@ -25,7 +25,7 @@ KEYID="18B97354B106F3841ADEC0CF85BED1A01D653065"  # sign with this key by finger
                               # (the key's UID is "Adrian Scripca (benishor) <…>",
                               #  which debsign can't match from the bare changelog
                               #  identity, so select it explicitly)
-SERIES=(noble resolute)       # Ubuntu series to publish for (24.04 LTS, 26.04 LTS)
+SERIES=(noble plucky resolute)  # Ubuntu series to publish for (24.04, 25.04, 26.04)
 REV=1                         # per-series revision; bump to re-upload a version
 export DEBFULLNAME DEBEMAIL
 
