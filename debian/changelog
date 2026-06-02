@@ -1,3 +1,9 @@
+xlog2 (0.2.0) noble; urgency=medium
+
+  * Release 0.2.0.
+
+ -- Adrian Scripca <benishor@gmail.com>  Tue, 02 Jun 2026 14:47:46 +0300
+
 xlog2 (0.1.0) noble; urgency=medium
 
   * Initial PPA release: xlog2-gtk (GTK 4) and xlog2-qt (Qt) frontends over a
