@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ILogPageView.h"
+#include "IniFile.h"
 #include "LogPagePresenter.h"
 #include "Qrz.h"
 #include "QsoItem.h"
@@ -59,8 +60,8 @@ public:
     LogPagePresenter& presenter() { return presenter_; }
 
     // Shared column layout (order/width/visibility) persistence.
-    void applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile);
-    void storeColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile);
+    void applyColumnLayout(const IniFile& ini);
+    void storeColumnLayout(IniFile& ini);
 
     // Shell-facing signals (bridged from the presenter's hooks).
     sigc::signal<void()>& signalChanged() { return signalChanged_; }

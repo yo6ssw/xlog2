@@ -648,6 +648,15 @@ void QtMainWindow::loadSettings() {
             else
                 delete page;
         }
+        // Restore the previously-active tab.
+        const std::string active = ini.getString("session", "active");
+        if (!active.empty())
+            for (int i = 0; i < tabs_->count(); ++i)
+                if (auto* p = qobject_cast<QtLogPage*>(tabs_->widget(i));
+                    p && p->path() == active) {
+                    tabs_->setCurrentIndex(i);
+                    break;
+                }
     }
 
     applyKeyerConfig();

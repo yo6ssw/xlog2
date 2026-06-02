@@ -574,31 +574,21 @@ void LogPage::showSearch() {
     searchEntry_.grab_focus();
 }
 
-void LogPage::applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {
-    if (!keyfile)
-        return;
+void LogPage::applyColumnLayout(const IniFile& ini) {
     for (const auto& [id, col] : columns_) {
-        try {
-            if (keyfile->has_group("width") && keyfile->has_key("width", id)) {
-                const int width = keyfile->get_integer("width", id);
-                if (width > 0)
-                    col->set_fixed_width(width);
-            }
-            if (keyfile->has_group("visible") && keyfile->has_key("visible", id))
-                col->set_visible(keyfile->get_boolean("visible", id));
-        } catch (const Glib::Error&) {
+        if (ini.hasKey("width", id)) {
+            const int width = ini.getInt("width", id, 0);
+            if (width > 0)
+                col->set_fixed_width(width);
         }
+        if (ini.hasKey("visible", id))
+            col->set_visible(ini.getBool("visible", id, true));
     }
-    try {
-        if (keyfile->has_group("columns") && keyfile->has_key("columns", "order"))
-            applyColumnOrder(ui::splitSemicolons(keyfile->get_string("columns", "order")));
-    } catch (const Glib::Error&) {
-    }
+    if (ini.hasKey("columns", "order"))
+        applyColumnOrder(ui::splitSemicolons(ini.getString("columns", "order")));
 }
 
-void LogPage::storeColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {
-    if (!keyfile)
-        return;
+void LogPage::storeColumnLayout(IniFile& ini) {
     std::string order;
     auto displayed = columnView_.get_columns();
     for (guint i = 0; i < displayed->get_n_items(); ++i) {
@@ -612,12 +602,12 @@ void LogPage::storeColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {
             }
         }
     }
-    keyfile->set_string("columns", "order", order);
+    ini.setString("columns", "order", order);
     for (const auto& [id, col] : columns_) {
         const int width = col->get_fixed_width();
         if (width > 0)
-            keyfile->set_integer("width", id, width);
-        keyfile->set_boolean("visible", id, col->get_visible());
+            ini.setInt("width", id, width);
+        ini.setBool("visible", id, col->get_visible());
     }
 }
 

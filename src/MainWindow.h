@@ -139,5 +139,5 @@ private:
     Glib::RefPtr<Gio::SimpleAction> dxDockAction_;
 
     // Loaded settings, used to apply the shared column layout to new pages.
-    Glib::RefPtr<Glib::KeyFile> settings_;
+    IniFile settings_;
 };
