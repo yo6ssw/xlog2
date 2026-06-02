@@ -3,7 +3,6 @@
 #include "Bands.h"
 #include "UiUtil.h"
 
-#include <gdk/gdkkeysyms.h>
 
 #include <cctype>
 #include <cstdio>
@@ -541,22 +540,9 @@ void LogPage::buildKeyerBar(Gtk::Box& parent) {
     bar->append(*stop);
     parent.append(*bar);
 
-    // F1–F9 fire the messages while focus is anywhere within this page. Use the
-    // CAPTURE phase so these win over the GtkPaned (added for the DX-cluster
-    // panel) default bindings on F6/F8, which would otherwise eat F8.
-    auto ctrl = Gtk::ShortcutController::create();
-    ctrl->set_scope(Gtk::ShortcutScope::LOCAL);
-    ctrl->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
-    for (int i = 0; i < 9; ++i) {
-        auto action = Gtk::CallbackAction::create(
-            [this, i](Gtk::Widget&, const Glib::VariantBase&) {
-                presenter_.onSendCwClicked(i);
-                return true;
-            });
-        ctrl->add_shortcut(
-            Gtk::Shortcut::create(Gtk::KeyvalTrigger::create(GDK_KEY_F1 + i), action));
-    }
-    add_controller(ctrl);
+    // The F1–F9 keyer accelerators are installed once on the MainWindow (so they
+    // fire from anywhere in the window, including the DX-cluster panel) and
+    // routed to the active page. See MainWindow's constructor.
 }
 
 void LogPage::setCwButtons(const std::array<std::string, 9>& messages) {
