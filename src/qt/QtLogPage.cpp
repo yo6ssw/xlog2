@@ -8,12 +8,10 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
-#include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
 #include <QPushButton>
-#include <QShortcut>
 #include <QSortFilterProxyModel>
 #include <QTableView>
 #include <QVBoxLayout>
@@ -180,15 +178,9 @@ void QtLogPage::buildUi() {
         connect(b, &QPushButton::clicked, this, [this, i]() { presenter_.onSendCwClicked(i); });
         cwButtons_[i] = b;
         keyerBar->addWidget(b);
-
-        // F1..F9 keyboard shortcut, scoped to this page (not window-wide): with
-        // several tabs open, window-wide shortcuts for the same keys would be
-        // ambiguous and Qt would fire none. WidgetWithChildrenShortcut means
-        // only the focused (active) tab triggers its own — mirroring the gtkmm
-        // page-local ShortcutController. onSendCwClicked() guards empty slots.
-        auto* sc = new QShortcut(QKeySequence(Qt::Key_F1 + i), this);
-        sc->setContext(Qt::WidgetWithChildrenShortcut);
-        connect(sc, &QShortcut::activated, this, [this, i]() { presenter_.onSendCwClicked(i); });
+        // The F1..F9 keyboard accelerators are registered once on QtMainWindow
+        // (window-wide), so they fire from anywhere in the window — including the
+        // DX-cluster dock — routed to the active tab. See QtMainWindow.
     }
     auto* stopButton = new QPushButton("Stop");
     connect(stopButton, &QPushButton::clicked, this, [this]() { presenter_.onAbortCwClicked(); });

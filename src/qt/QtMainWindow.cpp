@@ -23,6 +23,7 @@
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QShortcut>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabWidget>
@@ -121,6 +122,19 @@ QtMainWindow::QtMainWindow()
             [this]() { onClusterConnectToggle(); });
 
     buildMenus();
+
+    // F1..F9 keyer accelerators, registered once on the window (window-wide) so
+    // they fire from anywhere — the log page or the DX-cluster dock — and route
+    // to the active tab's presenter (whose form data feeds the CW expansion).
+    // A single registration avoids the per-tab ambiguity that window-wide
+    // shortcuts on each page would cause. onSendCwClicked() guards empty slots.
+    for (int i = 0; i < 9; ++i) {
+        auto* sc = new QShortcut(QKeySequence(Qt::Key_F1 + i), this);
+        connect(sc, &QShortcut::activated, this, [this, i]() {
+            if (auto* p = currentPage())
+                p->presenter().onSendCwClicked(i);
+        });
+    }
 
     // Service-result routing through the presenter (toolkit-neutral).
     listener_.setCallback([this](const std::vector<Qso>& qsos, const std::string& src) {
