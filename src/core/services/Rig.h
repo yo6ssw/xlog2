@@ -43,12 +43,25 @@ public:
     const std::string& lastError() const { return lastError_; }
 
 private:
-    void worker();
+    // Per-connection-attempt handshake between the worker and stop(), in a
+    // shared object so a detached (still-connecting) worker can outlive the
+    // controller safely. rig_open() can block for the connect timeout; if the
+    // user quits meanwhile, stop() must not wait for it — it abandons the worker
+    // (detach) rather than join, and the worker self-cleans without touching any
+    // controller state once `abandoned` is set.
+    struct Run {
+        std::mutex mutex;
+        bool       abandoned = false;  // stop() gave up waiting; worker must self-clean
+        bool       opened    = false;  // worker reached the poll loop; stop() may join
+    };
+
+    void worker(std::shared_ptr<Run> run);
     void deliverUpdate();  // UI thread
 
     IUiDispatcher&     ui_;
     void* rig_ = nullptr;  // opaque RIG* (kept void* to keep hamlib out of the header)
     std::thread        thread_;
+    std::shared_ptr<Run> run_;
     std::atomic<bool>  running_{false};
     int                pollMs_ = 500;
     int                pendingModel_ = 1;     // connection params, read by worker
