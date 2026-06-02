@@ -1,0 +1,11 @@
+#!/usr/bin/make -f
+# Build both frontends from the one source tree; debian/*.install splits the
+# installed files into the xlog2-gtk and xlog2-qt binary packages.
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+%:
+	dh $@ --buildsystem=cmake
+
+override_dh_auto_configure:
+	dh_auto_configure -- -DXLOG_BUILD_GTK=ON -DXLOG_BUILD_QT=ON
