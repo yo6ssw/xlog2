@@ -1118,22 +1118,28 @@ bool MainWindow::onCloseRequest() {
 }
 
 void MainWindow::saveSettings() {
-    auto keyfile = Glib::KeyFile::create();
-    try {
-        keyfile->load_from_file(layoutFilePath());
-    } catch (const Glib::Error&) {
+    IniFile ini;
+    ini.loadFromFile(layoutFilePath());  // preserve any groups we don't manage
+
+    // Capture the live paned divider so Settings::store can persist it (it only
+    // records the divider while the panel is shown).
+    if (cfg().dxVisible) {
+        const int pos = paned_.get_position();
+        if (pos > 0)
+            cfg().dxPanelPos = pos;
     }
+    cfg().store(ini);  // udp/rig/lotw/qrz/keyer/dxcluster scalars
 
     // Window geometry (no position under GTK4; avoid recording maximized size).
     if (!is_maximized()) {
-        keyfile->set_integer("window", "width", get_width());
-        keyfile->set_integer("window", "height", get_height());
+        ini.setInt("window", "width", get_width());
+        ini.setInt("window", "height", get_height());
     }
-    keyfile->set_boolean("window", "maximized", is_maximized());
+    ini.setBool("window", "maximized", is_maximized());
 
     // Shared column layout from the current page.
     if (auto* page = currentPage())
-        page->storeColumnLayout(keyfile);
+        page->storeColumnLayout(ini);
 
     // Session: file-backed tabs, in display order, plus the active one's path.
     std::string open;
@@ -1148,45 +1154,8 @@ void MainWindow::saveSettings() {
     }
     if (auto* cur = currentPage(); cur && cur->isFileBacked())
         active = cur->path();
-    keyfile->set_string("session", "open", open);
-    keyfile->set_string("session", "active", active);
-
-    keyfile->set_integer("udp", "port", cfg().udpPort);
-    keyfile->set_boolean("udp", "enabled", cfg().udpEnabled);
-    keyfile->set_integer("rig", "model", cfg().rigModel);
-    keyfile->set_string("rig", "device", cfg().rigDevice);
-    keyfile->set_integer("rig", "poll_ms", cfg().rigPollMs);
-    keyfile->set_boolean("rig", "autoconnect", cfg().rigAutoConnect);
-
-    keyfile->set_string("lotw", "username", cfg().lotwUser);
-    keyfile->set_string("lotw", "password", cfg().lotwPassword);
-    keyfile->set_string("lotw", "station_location", cfg().lotwStation);
-    keyfile->set_string("lotw", "tqsl_path", cfg().tqslPath);
-    keyfile->set_string("lotw", "last_download", cfg().lotwLastDownload);
-
-    keyfile->set_string("qrz", "username", cfg().qrzUser);
-    keyfile->set_string("qrz", "password", cfg().qrzPassword);
-
-    keyfile->set_string("keyer", "host", cfg().keyerHost);
-    keyfile->set_integer("keyer", "port", cfg().keyerPort);
-    keyfile->set_integer("keyer", "speed", cfg().keyerSpeed);
-    for (int i = 0; i < 9; ++i)
-        keyfile->set_string("keyer", "message" + std::to_string(i + 1),
-                            cfg().keyerMessages[i]);
-
-    keyfile->set_string("dxcluster", "host", cfg().dxHost);
-    keyfile->set_integer("dxcluster", "port", cfg().dxPort);
-    keyfile->set_string("dxcluster", "login", cfg().dxLogin);
-    keyfile->set_string("dxcluster", "dock", cfg().dxDock);
-    keyfile->set_boolean("dxcluster", "visible", cfg().dxVisible);
-    keyfile->set_boolean("dxcluster", "autoconnect", cfg().dxAutoConnect);
-    // Only record the divider while the panel is shown; a hidden panel's
-    // position is meaningless and would clobber the last good value.
-    if (cfg().dxVisible) {
-        const int pos = paned_.get_position();
-        if (pos > 0)
-            keyfile->set_integer("dxcluster", "position", pos);
-    }
+    ini.setString("session", "open", open);
+    ini.setString("session", "active", active);
 
     try {
         Gio::File::create_for_path(Glib::path_get_dirname(layoutFilePath()))
@@ -1194,7 +1163,7 @@ void MainWindow::saveSettings() {
     } catch (const Glib::Error&) {
     }
     try {
-        Glib::file_set_contents(layoutFilePath(), keyfile->to_data());
+        Glib::file_set_contents(layoutFilePath(), ini.toString());
         // The file holds a plaintext LoTW password — restrict to the owner.
         ::chmod(layoutFilePath().c_str(), S_IRUSR | S_IWUSR);
     } catch (const Glib::Error&) {
@@ -1202,108 +1171,27 @@ void MainWindow::saveSettings() {
 }
 
 void MainWindow::loadSettings() {
-    settings_ = Glib::KeyFile::create();
-    bool loaded = false;
-    try {
-        loaded = settings_->load_from_file(layoutFilePath());
-    } catch (const Glib::Error&) {
-        loaded = false;
-    }
+    const bool loaded = settings_.loadFromFile(layoutFilePath());
+    // Scalar config (udp/rig/lotw/qrz/keyer/dxcluster) is parsed by the core.
+    presenter_.settings = Settings::load(settings_);
 
-    if (loaded) {
-        try {
-            if (settings_->has_group("window")) {
-                if (settings_->has_key("window", "width") &&
-                    settings_->has_key("window", "height")) {
-                    const int w = settings_->get_integer("window", "width");
-                    const int h = settings_->get_integer("window", "height");
-                    if (w > 0 && h > 0)
-                        set_default_size(w, h);
-                }
-                if (settings_->has_key("window", "maximized") &&
-                    settings_->get_boolean("window", "maximized"))
-                    maximize();
-            }
-            if (settings_->has_group("udp")) {
-                if (settings_->has_key("udp", "port"))
-                    cfg().udpPort = settings_->get_integer("udp", "port");
-                if (settings_->has_key("udp", "enabled"))
-                    cfg().udpEnabled = settings_->get_boolean("udp", "enabled");
-            }
-            if (settings_->has_group("rig")) {
-                if (settings_->has_key("rig", "model"))
-                    cfg().rigModel = settings_->get_integer("rig", "model");
-                if (settings_->has_key("rig", "device"))
-                    cfg().rigDevice = settings_->get_string("rig", "device").raw();
-                if (settings_->has_key("rig", "poll_ms"))
-                    cfg().rigPollMs = settings_->get_integer("rig", "poll_ms");
-                if (settings_->has_key("rig", "autoconnect"))
-                    cfg().rigAutoConnect = settings_->get_boolean("rig", "autoconnect");
-            }
-            if (settings_->has_group("lotw")) {
-                if (settings_->has_key("lotw", "username"))
-                    cfg().lotwUser = settings_->get_string("lotw", "username").raw();
-                if (settings_->has_key("lotw", "password"))
-                    cfg().lotwPassword = settings_->get_string("lotw", "password").raw();
-                if (settings_->has_key("lotw", "station_location"))
-                    cfg().lotwStation = settings_->get_string("lotw", "station_location").raw();
-                if (settings_->has_key("lotw", "tqsl_path"))
-                    cfg().tqslPath = settings_->get_string("lotw", "tqsl_path").raw();
-                if (settings_->has_key("lotw", "last_download"))
-                    cfg().lotwLastDownload = settings_->get_string("lotw", "last_download").raw();
-            }
-            if (settings_->has_group("qrz")) {
-                if (settings_->has_key("qrz", "username"))
-                    cfg().qrzUser = settings_->get_string("qrz", "username").raw();
-                if (settings_->has_key("qrz", "password"))
-                    cfg().qrzPassword = settings_->get_string("qrz", "password").raw();
-            }
-            if (settings_->has_group("keyer")) {
-                if (settings_->has_key("keyer", "host"))
-                    cfg().keyerHost = settings_->get_string("keyer", "host").raw();
-                if (settings_->has_key("keyer", "port"))
-                    cfg().keyerPort = settings_->get_integer("keyer", "port");
-                if (settings_->has_key("keyer", "speed"))
-                    cfg().keyerSpeed = settings_->get_integer("keyer", "speed");
-                for (int i = 0; i < 9; ++i) {
-                    const std::string key = "message" + std::to_string(i + 1);
-                    if (settings_->has_key("keyer", key))
-                        cfg().keyerMessages[i] = settings_->get_string("keyer", key).raw();
-                }
-            }
-            if (settings_->has_group("dxcluster")) {
-                if (settings_->has_key("dxcluster", "host"))
-                    cfg().dxHost = settings_->get_string("dxcluster", "host").raw();
-                if (settings_->has_key("dxcluster", "port"))
-                    cfg().dxPort = settings_->get_integer("dxcluster", "port");
-                if (settings_->has_key("dxcluster", "login"))
-                    cfg().dxLogin = settings_->get_string("dxcluster", "login").raw();
-                if (settings_->has_key("dxcluster", "dock"))
-                    cfg().dxDock = settings_->get_string("dxcluster", "dock").raw();
-                if (settings_->has_key("dxcluster", "visible"))
-                    cfg().dxVisible = settings_->get_boolean("dxcluster", "visible");
-                if (settings_->has_key("dxcluster", "autoconnect"))
-                    cfg().dxAutoConnect = settings_->get_boolean("dxcluster", "autoconnect");
-                if (settings_->has_key("dxcluster", "position"))
-                    cfg().dxPanelPos = settings_->get_integer("dxcluster", "position");
-            }
-        } catch (const Glib::Error&) {
+    if (loaded && settings_.hasGroup("window")) {
+        if (settings_.hasKey("window", "width") && settings_.hasKey("window", "height")) {
+            const int w = settings_.getInt("window", "width", 0);
+            const int h = settings_.getInt("window", "height", 0);
+            if (w > 0 && h > 0)
+                set_default_size(w, h);
         }
+        if (settings_.getBool("window", "maximized", false))
+            maximize();
     }
 
     // Restore session tabs.
     std::vector<std::string> open;
     std::string active;
     if (loaded) {
-        try {
-            if (settings_->has_group("session")) {
-                if (settings_->has_key("session", "open"))
-                    open = ui::splitSemicolons(settings_->get_string("session", "open"));
-                if (settings_->has_key("session", "active"))
-                    active = settings_->get_string("session", "active").raw();
-            }
-        } catch (const Glib::Error&) {
-        }
+        open   = ui::splitSemicolons(settings_.getString("session", "open"));
+        active = settings_.getString("session", "active");
     }
     for (const auto& path : open) {
         auto* page = addPage(Gtk::make_managed<LogPage>());
