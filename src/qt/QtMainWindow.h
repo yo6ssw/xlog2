@@ -78,6 +78,7 @@ private:
     void loadSettings();
     void saveSettings();
     void closeEvent(QCloseEvent* e) override;
+    void showEvent(QShowEvent* e) override;  // applies the saved dock size once
 
     QtDispatcher    uiDispatcher_;
     MainPresenter   presenter_;
@@ -97,4 +98,10 @@ private:
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
+
+    // Persisted DX-cluster dock size, applied once on first show (resizeDocks
+    // only takes effect after the window has its laid-out geometry).
+    int               pendingDockSize_   = 0;   // 0 = nothing to restore
+    Qt::Orientation   pendingDockOrient_ = Qt::Vertical;
+    bool              dockSizeRestored_  = false;
 };
