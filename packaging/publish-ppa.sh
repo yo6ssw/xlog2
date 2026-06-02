@@ -21,7 +21,10 @@ set -euo pipefail
 PPA="ppa:benishor/hamtools"
 DEBFULLNAME="Adrian Scripca"
 DEBEMAIL="benishor@gmail.com"
-KEYID=""                      # optional gpg key id/fingerprint; empty = match DEBEMAIL
+KEYID="18B97354B106F3841ADEC0CF85BED1A01D653065"  # sign with this key by fingerprint
+                              # (the key's UID is "Adrian Scripca (benishor) <…>",
+                              #  which debsign can't match from the bare changelog
+                              #  identity, so select it explicitly)
 SERIES=(noble)                # add e.g. (noble jammy plucky)
 REV=1                         # per-series revision; bump to re-upload a version
 export DEBFULLNAME DEBEMAIL
