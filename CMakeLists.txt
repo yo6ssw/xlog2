@@ -105,10 +105,12 @@ if(XLOG_BUILD_QT)
         src/qt/main.cpp
         src/qt/QtLogPage.cpp
         src/qt/QtMainWindow.cpp
+        src/qt/QtDxClusterPanel.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
         src/qt/QtLogPage.h
         src/qt/QtMainWindow.h
+        src/qt/QtDxClusterPanel.h
     )
     set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
     target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)
