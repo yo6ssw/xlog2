@@ -4,7 +4,18 @@ Source: https://github.com/yo6ssw/xlog2
 
 Files: *
 Copyright: 2026 Adrian Scripca <benishor@gmail.com>
-License: TODO
- FIXME: xlog2 has no LICENSE file yet. Set the real license here (e.g. GPL-3+)
- and add a matching LICENSE/COPYING to the repository before a public release.
- A private PPA will still build and host the package as-is.
+License: GPL-3+
+ This program is free software: you can redistribute it and/or modify it
+ under the terms of the GNU General Public License as published by the Free
+ Software Foundation, either version 3 of the License, or (at your option)
+ any later version.
+ .
+ This program is distributed in the hope that it will be useful, but WITHOUT
+ ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
+ .
+ On Debian systems, the full text of the GNU General Public License version 3
+ can be found in the file /usr/share/common-licenses/GPL-3.
+ .
+ NOTE: the repository still needs a top-level LICENSE/COPYING file with the
+ full GPL-3 text to match this declaration.
