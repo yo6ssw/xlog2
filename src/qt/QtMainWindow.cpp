@@ -192,6 +192,7 @@ QtLogPage* QtMainWindow::addPage(QtLogPage* page, const QString& label) {
 
 void QtMainWindow::registerPage(QtLogPage* page) {
     page->setCwMessages(cfg().keyerMessages);
+    page->applyColumnLayout(loadedIni_);  // shared column order/width/visibility
     connect(page, &QtLogPage::changed, this, [this, page]() {
         updateTabTitle(page);
         updateWindowTitle();
@@ -628,6 +629,7 @@ void QtMainWindow::loadSettings() {
     IniFile ini;
     const bool loaded = ini.loadFromFile(layoutFilePath());
     presenter_.settings = Settings::load(ini);
+    loadedIni_ = ini;  // kept so new tabs get the shared column layout
 
     if (loaded && ini.hasGroup("window")) {
         const int w = ini.getInt("window", "width", 1024);
@@ -657,8 +659,10 @@ void QtMainWindow::loadSettings() {
 
 void QtMainWindow::saveSettings() {
     IniFile ini;
-    ini.loadFromFile(layoutFilePath());  // preserve groups we don't manage (e.g. columns)
+    ini.loadFromFile(layoutFilePath());
     cfg().store(ini);
+    if (auto* p = currentPage())
+        p->storeColumnLayout(ini);  // shared column order/width/visibility
 
     if (!isMaximized()) {
         ini.setInt("window", "width", width());

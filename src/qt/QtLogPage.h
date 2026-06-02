@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ILogPageView.h"
+#include "IniFile.h"
 #include "LogPagePresenter.h"
 #include "QsoTableModel.h"
 #include "Qrz.h"
@@ -44,6 +45,11 @@ public:
     void setCwMessages(const std::array<std::string, 9>& m) { presenter_.setCwMessages(m); }
     void backfillDxcc()                      { presenter_.backfillDxcc(); }
     void beginSearch()                       { showSearch(); }
+
+    // Shared column layout (order/width/visibility) persistence, using the same
+    // [columns]/[width]/[visible] groups and stable column ids as the gtkmm view.
+    void applyColumnLayout(const IniFile& ini);
+    void storeColumnLayout(IniFile& ini) const;
 
     // --- ILogPageView ---
     FormData formData() const override;
