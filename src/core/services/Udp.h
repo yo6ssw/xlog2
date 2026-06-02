@@ -1,14 +1,15 @@
 #pragma once
 
+#include "IUiDispatcher.h"
 #include "Qso.h"
 
-#include <glibmm/main.h>
-#include <sigc++/connection.h>
-
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 // Decodes a single UDP datagram into QSO records. Recognises WSJT-X's binary
@@ -18,16 +19,19 @@
 std::vector<Qso> decodeDatagram(const std::uint8_t* data, std::size_t len,
                                 std::string& source);
 
-// Listens on a UDP port, integrated with the GLib main loop, and reports any
-// decoded QSOs through a callback. This is xlog's network-logging idea: other
-// programs (WSJT-X, fldigi, JTAlert, …) send logged contacts and they are
-// added to the logbook automatically.
+// Listens on a UDP port and reports any decoded QSOs through a callback. This is
+// xlog's network-logging idea: other programs (WSJT-X, fldigi, JTAlert, …) send
+// logged contacts and they are added to the logbook automatically.
+//
+// A worker thread blocks in recv(); decoded QSOs are marshalled to the UI thread
+// via the injected dispatcher, so the callback always fires on the UI thread.
+// A self-pipe unblocks the worker promptly on stop().
 class UdpListener {
 public:
     using Callback =
         std::function<void(const std::vector<Qso>&, const std::string& source)>;
 
-    UdpListener() = default;
+    explicit UdpListener(IUiDispatcher& ui) : ui_(ui) {}
     ~UdpListener();
     UdpListener(const UdpListener&)            = delete;
     UdpListener& operator=(const UdpListener&) = delete;
@@ -38,14 +42,20 @@ public:
     bool start(int port, std::string& error);
     void stop();
 
-    bool isListening() const { return fd_ >= 0; }
+    bool isListening() const { return running_.load(); }
     int  port() const { return port_; }
 
 private:
-    bool onReadable(Glib::IOCondition condition);
+    void worker();
 
-    int              fd_   = -1;
-    int              port_ = 0;
-    sigc::connection ioConn_;
-    Callback         callback_;
+    IUiDispatcher&    ui_;
+    int               fd_   = -1;
+    int               wake_[2] = {-1, -1};  // self-pipe: write to wake the worker
+    int               port_ = 0;
+    std::atomic<bool> running_{false};
+    std::thread       thread_;
+    Callback          callback_;
+
+    // Liveness token for posted closures (see RigController).
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

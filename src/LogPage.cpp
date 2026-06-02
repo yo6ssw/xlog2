@@ -1,7 +1,6 @@
 #include "LogPage.h"
 
 #include "Bands.h"
-#include "Dxcc.h"
 #include "UiUtil.h"
 
 #include <gdk/gdkkeysyms.h>
@@ -50,24 +49,17 @@ void ensureCss() {
             display, provider, GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
 }
 
-// Format MHz without trailing zeros, e.g. 14.250000 -> "14.25".
-std::string formatMhz(double mhz) {
-    char buf[32];
-    std::snprintf(buf, sizeof(buf), "%.6f", mhz);
-    std::string s = buf;
-    if (s.find('.') != std::string::npos) {
-        while (!s.empty() && s.back() == '0')
-            s.pop_back();
-        if (!s.empty() && s.back() == '.')
-            s.pop_back();
-    }
-    return s;
-}
-
 } // namespace
 
-LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL) {
+LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL), presenter_(*this) {
     ensureCss();
+
+    // Bridge the presenter's shell-facing hooks to this view's signals.
+    presenter_.onChanged    = [this]() { signalChanged_.emit(); };
+    presenter_.onStatus     = [this](const std::string& s) { signalStatus_.emit(s); };
+    presenter_.onLookupCall = [this](const std::string& c) { signalLookupCall_.emit(c); };
+    presenter_.onSendCw     = [this](const std::string& t) { signalSendCw_.emit(t); };
+    presenter_.onAbortCw    = [this]() { signalAbortCw_.emit(); };
 
     buildLogView();
     buildSearch();
@@ -81,8 +73,7 @@ LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL) {
 
     buildEntryForm();
 
-    refreshList();
-    clearForm();
+    presenter_.start();  // populate rows + reset the form (widgets now exist)
 }
 
 Glib::RefPtr<Gtk::ColumnViewColumn> LogPage::makeColumn(
@@ -318,8 +309,7 @@ void LogPage::onSearchChanged() {
 }
 
 void LogPage::beginSearch() {
-    searchBar_.set_search_mode(true);
-    searchEntry_.grab_focus();
+    showSearch();
 }
 
 void LogPage::buildEntryForm() {
@@ -355,7 +345,7 @@ void LogPage::buildEntryForm() {
     };
 
     auto* nowButton = Gtk::make_managed<Gtk::Button>("Now");
-    nowButton->signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onSetNow));
+    nowButton->signal_clicked().connect([this]() { presenter_.onSetNow(); });
 
     // Dates and times are stored (and exchanged via ADIF/LoTW) as UTC; spell
     // that out so they aren't entered as local time.
@@ -372,7 +362,7 @@ void LogPage::buildEntryForm() {
     call_.set_icon_tooltip_text("Look up this callsign on QRZ.com",
                                 Gtk::Entry::IconPosition::SECONDARY);
     call_.signal_icon_press().connect(
-        [this](Gtk::Entry::IconPosition) { onLookupCall(); });
+        [this](Gtk::Entry::IconPosition) { presenter_.onLookupCallClicked(); });
 
     field("Band",     band_,    1, 1);
     field("Mode",     mode_,    2, 1);
@@ -422,191 +412,113 @@ void LogPage::buildEntryForm() {
 
     append(*frame);
 
-    addButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
-    deleteButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::onDeleteSelected));
-    clearButton_.signal_clicked().connect(sigc::mem_fun(*this, &LogPage::clearForm));
-    freq_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::onFrequencyChanged));
-    call_.signal_activate().connect(sigc::mem_fun(*this, &LogPage::onAddOrUpdate));
+    addButton_.signal_clicked().connect([this]() { presenter_.onAddOrUpdate(); });
+    deleteButton_.signal_clicked().connect([this]() { presenter_.onDelete(); });
+    clearButton_.signal_clicked().connect([this]() { presenter_.onClear(); });
+    freq_.signal_changed().connect([this]() { if (!loadingForm_) presenter_.onFreqChanged(); });
+    call_.signal_activate().connect([this]() { presenter_.onAddOrUpdate(); });
 
     // Live dupe detection + DXCC lookup as the key fields change.
-    call_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
-    call_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDxccIndicator));
-    date_.signal_changed().connect(sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+    call_.signal_changed().connect([this]() { if (!loadingForm_) presenter_.onCallChanged(); });
+    date_.signal_changed().connect([this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
     band_.property_selected().signal_changed().connect(
-        sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
+        [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
     mode_.property_selected().signal_changed().connect(
-        sigc::mem_fun(*this, &LogPage::updateDupeIndicator));
-}
-
-void LogPage::refreshList() {
-    store_->remove_all();
-    for (const auto& q : logbook_.qsos())
-        store_->append(QsoItem::create(q));
-    updateDupeIndicator();
+        [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
 }
 
 void LogPage::onSelectionChanged() {
     auto* item = dynamic_cast<QsoItem*>(selection_->get_selected_item().get());
     if (!item)
         return;  // deselection — leave the form alone
-    qsoToForm(item->qso);
-    editingId_ = item->qso.id;
-    addButton_.set_label("Update QSO");
-    deleteButton_.set_sensitive(true);
-    updateDupeIndicator();
+    presenter_.onRowSelected(item->qso.id);
 }
 
-Qso LogPage::formToQso() const {
-    Qso q;
-    q.id       = editingId_;
-    q.date     = ui::entryText(date_);
-    q.time_on  = ui::entryText(timeOn_);
-    q.time_off = ui::entryText(timeOff_);
-    q.call     = ui::entryText(call_);
-    q.band     = ui::dropdownText(band_, bandModel_);
-    q.mode     = ui::dropdownText(mode_, modeModel_);
-    q.freq     = ui::entryText(freq_);
-    q.rst_sent = ui::entryText(rstSent_);
-    q.rst_rcvd = ui::entryText(rstRcvd_);
-    q.name     = ui::entryText(name_);
-    q.qth      = ui::entryText(qth_);
-    q.locator  = ui::entryText(locator_);
-    q.power    = ui::entryText(power_);
-    q.qsl_sent = qslSent_.get_active() ? "Y" : "N";
-    q.qsl_rcvd = qslRcvd_.get_active() ? "Y" : "N";
-    q.comment  = ui::entryText(comment_);
+// --- ILogPageView: log list --------------------------------------------------
 
-    // DXCC entity/zones are derived from the call (kept current by
-    // updateDxccIndicator), not edited directly.
-    q.country   = dxccCountry_;
-    q.cq_zone   = dxccCqZone_;
-    q.itu_zone  = dxccItuZone_;
-    q.continent = dxccContinent_;
-
-    for (auto& c : q.call) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    for (auto& c : q.locator) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return q;
+void LogPage::setRows(const std::vector<Qso>& qsos) {
+    store_->remove_all();
+    for (const auto& q : qsos)
+        store_->append(QsoItem::create(q));
 }
 
-void LogPage::qsoToForm(const Qso& q) {
-    // Remember the record's stored DXCC fields so updateDxccIndicator can fall
-    // back to them when no country file is loaded. Set before call_ below,
-    // whose change signal triggers updateDxccIndicator.
-    loadedCountry_   = q.country;
-    loadedCqZone_    = q.cq_zone;
-    loadedItuZone_   = q.itu_zone;
-    loadedContinent_ = q.continent;
-
-    date_.set_text(q.date);
-    timeOn_.set_text(q.time_on);
-    timeOff_.set_text(q.time_off);
-    call_.set_text(q.call);
-    freq_.set_text(q.freq);  // set before band so it does not overwrite it
-    ui::setDropdown(band_, bandModel_, q.band);
-    ui::setDropdown(mode_, modeModel_, q.mode);
-    rstSent_.set_text(q.rst_sent);
-    rstRcvd_.set_text(q.rst_rcvd);
-    name_.set_text(q.name);
-    qth_.set_text(q.qth);
-    locator_.set_text(q.locator);
-    power_.set_text(q.power);
-    qslSent_.set_active(q.qsl_sent == "Y");
-    qslRcvd_.set_active(q.qsl_rcvd == "Y");
-    comment_.set_text(q.comment);
-}
-
-void LogPage::clearForm() {
-    editingId_ = 0;
-    loadedCountry_.clear();
-    loadedCqZone_.clear();
-    loadedItuZone_.clear();
-    loadedContinent_.clear();
-    for (Gtk::Entry* e : {&date_, &timeOn_, &timeOff_, &call_, &freq_, &rstSent_,
-                          &rstRcvd_, &name_, &qth_, &locator_, &power_, &comment_})
-        e->set_text("");
-    band_.set_selected(GTK_INVALID_LIST_POSITION);
-    mode_.set_selected(GTK_INVALID_LIST_POSITION);
-    qslSent_.set_active(false);
-    qslRcvd_.set_active(false);
-
-    date_.set_text(ui::utcNow("%Y-%m-%d"));
-    timeOn_.set_text(ui::utcNow("%H:%M"));
-
-    addButton_.set_label("Add QSO");
-    deleteButton_.set_sensitive(false);
+void LogPage::clearSelection() {
     selection_->unselect_all();
-    call_.grab_focus();
 }
 
-void LogPage::onAddOrUpdate() {
-    Qso q = formToQso();
-    if (q.call.empty()) {
-        status("Cannot log a QSO without a callsign.");
-        return;
-    }
-    if (editingId_ != 0) {
-        logbook_.update(q);
-        status("Updated QSO with " + q.call + ".");
+// --- ILogPageView: entry form ------------------------------------------------
+
+FormData LogPage::formData() const {
+    FormData f;
+    f.date     = ui::entryText(date_);
+    f.time_on  = ui::entryText(timeOn_);
+    f.time_off = ui::entryText(timeOff_);
+    f.call     = ui::entryText(call_);
+    f.band     = ui::dropdownText(band_, bandModel_);
+    f.mode     = ui::dropdownText(mode_, modeModel_);
+    f.freq     = ui::entryText(freq_);
+    f.rst_sent = ui::entryText(rstSent_);
+    f.rst_rcvd = ui::entryText(rstRcvd_);
+    f.name     = ui::entryText(name_);
+    f.qth      = ui::entryText(qth_);
+    f.locator  = ui::entryText(locator_);
+    f.power    = ui::entryText(power_);
+    f.comment  = ui::entryText(comment_);
+    f.qsl_sent = qslSent_.get_active();
+    f.qsl_rcvd = qslRcvd_.get_active();
+    return f;
+}
+
+void LogPage::setFormData(const FormData& f) {
+    // Suppress event forwarding while we write widgets: the presenter refreshes
+    // indicators itself after a bulk load.
+    loadingForm_ = true;
+    date_.set_text(f.date);
+    timeOn_.set_text(f.time_on);
+    timeOff_.set_text(f.time_off);
+    call_.set_text(f.call);
+    freq_.set_text(f.freq);  // set before band so it does not overwrite it
+    ui::setDropdown(band_, bandModel_, f.band);
+    ui::setDropdown(mode_, modeModel_, f.mode);
+    rstSent_.set_text(f.rst_sent);
+    rstRcvd_.set_text(f.rst_rcvd);
+    name_.set_text(f.name);
+    qth_.set_text(f.qth);
+    locator_.set_text(f.locator);
+    power_.set_text(f.power);
+    qslSent_.set_active(f.qsl_sent);
+    qslRcvd_.set_active(f.qsl_rcvd);
+    comment_.set_text(f.comment);
+    loadingForm_ = false;
+}
+
+void LogPage::setCall(const std::string& s) { call_.set_text(s); }
+void LogPage::setFreq(const std::string& s) { freq_.set_text(s); }
+void LogPage::setBand(const std::string& s) { ui::setDropdown(band_, bandModel_, s); }
+
+// --- ILogPageView: indicators / button state ---------------------------------
+
+void LogPage::setDupeWarning(const std::string& msg, bool highlight) {
+    dupeLabel_.set_text(msg);
+    if (highlight) {
+        if (!call_.has_css_class("dupe"))
+            call_.add_css_class("dupe");
     } else {
-        logbook_.add(q);
-        status("Logged QSO with " + q.call + ".");
-    }
-    refreshList();
-    clearForm();
-    signalChanged_.emit();
-}
-
-void LogPage::onDeleteSelected() {
-    if (editingId_ == 0) {
-        status("No QSO selected to delete.");
-        return;
-    }
-    logbook_.remove(editingId_);
-    refreshList();
-    clearForm();
-    signalChanged_.emit();
-    status("QSO deleted.");
-}
-
-void LogPage::onFrequencyChanged() {
-    const std::string text = ui::entryText(freq_);
-    if (text.empty())
-        return;
-    try {
-        const double mhz = std::stod(text);
-        const std::string b = bands::forFrequencyMHz(mhz);
-        if (!b.empty())
-            ui::setDropdown(band_, bandModel_, b);
-    } catch (const std::exception&) {
-        // not a number yet; ignore
+        call_.remove_css_class("dupe");
     }
 }
 
-void LogPage::onSetNow() {
-    date_.set_text(ui::utcNow("%Y-%m-%d"));
-    timeOn_.set_text(ui::utcNow("%H:%M"));
+void LogPage::setDxccText(const std::string& s) {
+    dxccLabel_.set_text(s);
 }
 
-void LogPage::onLookupCall() {
-    std::string call = ui::entryText(call_);
-    for (auto& c : call)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    if (call.empty()) {
-        status("Enter a callsign to look up.");
-        return;
-    }
-    signalLookupCall_.emit(call);  // the shell owns the QRZ client + credentials
+void LogPage::setEditing(bool editing) {
+    addButton_.set_label(editing ? "Update QSO" : "Add QSO");
+    deleteButton_.set_sensitive(editing);
 }
 
-void LogPage::applyQrzLookup(const QrzResult& r) {
-    // Only overwrite a field when QRZ actually has a value, so a lookup that
-    // returns nothing for some fields doesn't wipe what the user typed.
-    if (!r.name.empty())    name_.set_text(r.name);
-    if (!r.qth.empty())     qth_.set_text(r.qth);
-    // Fill the locator only when empty, so a grid already entered (e.g. from a
-    // DX spot or typed by hand) isn't overwritten by the operator's home grid.
-    if (!r.locator.empty() && ui::entryText(locator_).empty())
-        locator_.set_text(r.locator);
+void LogPage::focusCall() {
+    call_.grab_focus();
 }
 
 void LogPage::buildKeyerBar(Gtk::Box& parent) {
@@ -618,14 +530,14 @@ void LogPage::buildKeyerBar(Gtk::Box& parent) {
     for (int i = 0; i < 9; ++i) {
         auto* b = Gtk::make_managed<Gtk::Button>("F" + std::to_string(i + 1));
         b->set_sensitive(false);  // enabled once a template is assigned
-        b->signal_clicked().connect([this, i]() { sendCwMessage(i); });
+        b->signal_clicked().connect([this, i]() { presenter_.onSendCwClicked(i); });
         cwButtons_[i] = b;
         bar->append(*b);
     }
 
     auto* stop = Gtk::make_managed<Gtk::Button>("Stop");
     stop->set_tooltip_text("Abort the message being sent");
-    stop->signal_clicked().connect([this]() { signalAbortCw_.emit(); });
+    stop->signal_clicked().connect([this]() { presenter_.onAbortCwClicked(); });
     bar->append(*stop);
     parent.append(*bar);
 
@@ -638,7 +550,7 @@ void LogPage::buildKeyerBar(Gtk::Box& parent) {
     for (int i = 0; i < 9; ++i) {
         auto action = Gtk::CallbackAction::create(
             [this, i](Gtk::Widget&, const Glib::VariantBase&) {
-                sendCwMessage(i);
+                presenter_.onSendCwClicked(i);
                 return true;
             });
         ctrl->add_shortcut(
@@ -647,226 +559,19 @@ void LogPage::buildKeyerBar(Gtk::Box& parent) {
     add_controller(ctrl);
 }
 
-void LogPage::setCwMessages(const std::array<std::string, 9>& msgs) {
-    cwMessages_ = msgs;
+void LogPage::setCwButtons(const std::array<std::string, 9>& messages) {
     for (int i = 0; i < 9; ++i) {
         if (!cwButtons_[i])
             continue;
-        const bool has = !cwMessages_[i].empty();
+        const bool has = !messages[i].empty();
         cwButtons_[i]->set_sensitive(has);
-        cwButtons_[i]->set_tooltip_text(has ? cwMessages_[i] : "(no message set)");
+        cwButtons_[i]->set_tooltip_text(has ? messages[i] : "(no message set)");
     }
 }
 
-std::string LogPage::expandCwTemplate(const std::string& tmpl) const {
-    std::string call = ui::entryText(call_);
-    for (auto& c : call)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-
-    const std::pair<std::string, std::string> subs[] = {
-        {"CALL", call},
-        {"NAME", ui::entryText(name_)},
-        {"QTH",  ui::entryText(qth_)},
-        {"RST",  ui::entryText(rstRcvd_)},  // %RST% = the RST rcvd field
-    };
-
-    std::string out;
-    const size_t n = tmpl.size();
-    size_t i = 0;
-    while (i < n) {
-        if (tmpl[i] == '%') {
-            const size_t end = tmpl.find('%', i + 1);
-            if (end != std::string::npos) {
-                std::string name = tmpl.substr(i + 1, end - i - 1);
-                for (auto& c : name)
-                    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-                bool matched = false;
-                for (const auto& [tok, val] : subs)
-                    if (name == tok) { out += val; matched = true; break; }
-                if (matched) {
-                    i = end + 1;
-                    continue;
-                }
-            }
-            // Unknown or unterminated token: copy the '%' through literally.
-        }
-        out += tmpl[i++];
-    }
-    return out;
-}
-
-void LogPage::sendCwMessage(int index) {
-    if (index < 0 || index >= 9 || cwMessages_[index].empty()) {
-        status("Keyer F" + std::to_string(index + 1) + " has no message set.");
-        return;
-    }
-    const std::string text = expandCwTemplate(cwMessages_[index]);
-    signalSendCw_.emit(text);
-    status("Keyer: " + text);
-}
-
-void LogPage::updateDupeIndicator() {
-    const Qso q = formToQso();
-    const auto dup = logbook_.findDuplicate(q, editingId_);
-    if (dup) {
-        dupeLabel_.set_text("⚠ Dupe — already worked " + dup->call + " on " +
-                            dup->band + " " + dup->mode + " at " + dup->time_on +
-                            " (" + dup->date + ")");
-        if (!call_.has_css_class("dupe"))
-            call_.add_css_class("dupe");
-    } else {
-        dupeLabel_.set_text("");
-        call_.remove_css_class("dupe");
-    }
-}
-
-void LogPage::updateDxccIndicator() {
-    std::string call = ui::entryText(call_);
-    for (auto& c : call)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-
-    const dxcc::Info* info = call.empty() ? nullptr : dxcc::lookup(call);
-    if (info) {
-        dxccCountry_   = info->entity;
-        dxccCqZone_    = info->cqZone  ? std::to_string(info->cqZone)  : std::string{};
-        dxccItuZone_   = info->ituZone ? std::to_string(info->ituZone) : std::string{};
-        dxccContinent_ = info->continent;
-    } else {
-        // No match (or no cty.dat) — keep whatever the loaded record carried so
-        // editing a QSO doesn't silently drop imported DXCC data.
-        dxccCountry_   = loadedCountry_;
-        dxccCqZone_    = loadedCqZone_;
-        dxccItuZone_   = loadedItuZone_;
-        dxccContinent_ = loadedContinent_;
-    }
-
-    if (dxccCountry_.empty()) {
-        dxccLabel_.set_text("");
-        return;
-    }
-    std::string s = dxccCountry_;
-    if (!dxccCqZone_.empty())    s += "  ·  CQ " + dxccCqZone_;
-    if (!dxccItuZone_.empty())   s += "  ·  ITU " + dxccItuZone_;
-    if (!dxccContinent_.empty()) s += "  ·  " + dxccContinent_;
-    dxccLabel_.set_text(s);
-}
-
-void LogPage::newInMemory() {
-    logbook_.newInMemory();
-    refreshList();
-    clearForm();
-    signalChanged_.emit();
-}
-
-bool LogPage::openFile(const std::string& path) {
-    if (!logbook_.open(path))
-        return false;
-    backfillDxcc();  // fill DXCC for any pre-existing QSOs that lack it
-    refreshList();
-    clearForm();
-    signalChanged_.emit();
-    return true;
-}
-
-bool LogPage::saveAs(const std::string& path) {
-    if (!logbook_.saveAs(path))
-        return false;
-    refreshList();
-    signalChanged_.emit();
-    return true;
-}
-
-int LogPage::importAdif(const std::string& adifText) {
-    const int n = logbook_.importAdif(adifText);
-    refreshList();
-    signalChanged_.emit();
-    return n;
-}
-
-std::string LogPage::exportAdif() const {
-    return logbook_.exportAdif();
-}
-
-void LogPage::addExternalQso(const Qso& q) {
-    logbook_.add(q);
-    refreshList();
-    signalChanged_.emit();
-}
-
-void LogPage::setRigFrequency(double mhz) {
-    if (mhz > 0.0)
-        freq_.set_text(formatMhz(mhz));  // triggers band auto-detect
-}
-
-void LogPage::backfillDxcc() {
-    if (!dxcc::available())
-        return;
-    std::vector<Qso> updates;
-    for (const auto& q : logbook_.qsos()) {
-        if (q.call.empty() || !q.country.empty())
-            continue;  // nothing to do, or already filled (idempotent)
-        const dxcc::Info* info = dxcc::lookup(q.call);
-        if (!info)
-            continue;
-        Qso u = q;
-        u.country   = info->entity;
-        u.cq_zone   = info->cqZone  ? std::to_string(info->cqZone)  : std::string{};
-        u.itu_zone  = info->ituZone ? std::to_string(info->ituZone) : std::string{};
-        u.continent = info->continent;
-        updates.push_back(std::move(u));
-    }
-    if (updates.empty())
-        return;
-    logbook_.updateBatch(updates);
-    refreshList();
-    signalChanged_.emit();
-    status("Filled DXCC for " + std::to_string(updates.size()) + " QSO(s).");
-}
-
-void LogPage::applyDxSpot(const std::string& call, double mhz) {
-    std::string up = call;
-    for (auto& c : up)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    call_.set_text(up);
-    setRigFrequency(mhz);  // fills freq and auto-detects the band
-    status("DX spot: " + up + " on " + formatMhz(mhz) + " MHz.");
-}
-
-void LogPage::setRigMode(const std::string& mode) {
-    if (mode.empty())
-        return;
-    for (guint i = 0; i < modeModel_->get_n_items(); ++i) {
-        if (modeModel_->get_string(i).raw() == mode) {
-            mode_.set_selected(i);
-            return;
-        }
-    }
-    // Unknown mode name: leave the current selection untouched.
-}
-
-Glib::ustring LogPage::title() const {
-    return isFileBacked() ? Glib::path_get_basename(path()) : "Untitled";
-}
-
-std::vector<Qso> LogPage::qsosNotLotwSent() const {
-    return logbook_.qsosNotLotwSent();
-}
-
-void LogPage::markLotwSent(const std::vector<long>& ids, const std::string& date) {
-    logbook_.markLotwSent(ids, date);
-    refreshList();
-    signalChanged_.emit();
-}
-
-int LogPage::applyLotwConfirmations(const std::vector<Qso>& confirmed) {
-    const int n = logbook_.applyLotwConfirmations(confirmed);
-    refreshList();
-    signalChanged_.emit();
-    return n;
-}
-
-void LogPage::refresh() {
-    refreshList();
+void LogPage::showSearch() {
+    searchBar_.set_search_mode(true);
+    searchEntry_.grab_focus();
 }
 
 void LogPage::applyColumnLayout(const Glib::RefPtr<Glib::KeyFile>& keyfile) {

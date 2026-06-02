@@ -1,8 +1,10 @@
 #pragma once
 
+#include "StrUtil.h"
+#include "TimeUtil.h"
+
 #include <gtkmm.h>
 
-#include <ctime>
 #include <string>
 #include <vector>
 
@@ -41,29 +43,11 @@ inline void setDropdown(Gtk::DropDown& d, const Glib::RefPtr<Gtk::StringList>& m
 }
 
 inline std::string utcNow(const char* fmt) {
-    std::time_t t = std::time(nullptr);
-    std::tm tm{};
-    gmtime_r(&t, &tm);
-    char buf[32];
-    std::strftime(buf, sizeof(buf), fmt, &tm);
-    return buf;
+    return timeutil::utcNow(fmt);
 }
 
 inline std::vector<std::string> splitSemicolons(const std::string& s) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ';') {
-            if (!cur.empty())
-                out.push_back(cur);
-            cur.clear();
-        } else {
-            cur += c;
-        }
-    }
-    if (!cur.empty())
-        out.push_back(cur);
-    return out;
+    return strutil::splitSemicolons(s);
 }
 
 inline Glib::RefPtr<Gio::ListStore<Gtk::FileFilter>> makeFilters(

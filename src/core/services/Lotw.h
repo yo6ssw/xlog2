@@ -1,9 +1,11 @@
 #pragma once
 
-#include <glibmm/dispatcher.h>
+#include "IUiDispatcher.h"
+#include "ProcessRunner.h"
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -22,7 +24,7 @@ public:
     // Called on the UI thread when a tqsl upload finishes.
     std::function<void(bool ok, const std::string& message)> onUploadDone;
 
-    LotwClient();
+    explicit LotwClient(IUiDispatcher& ui);
     ~LotwClient();
     LotwClient(const LotwClient&)            = delete;
     LotwClient& operator=(const LotwClient&) = delete;
@@ -42,8 +44,10 @@ public:
 
 private:
     void worker(std::string url);
-    void onDispatch();  // UI thread
+    void deliverDownload();  // UI thread
 
+    IUiDispatcher&    ui_;
+    ProcessRunner     uploader_;     // tqsl spawn (async, result on the UI thread)
     std::thread       thread_;
     std::atomic<bool> busy_{false};
 
@@ -52,5 +56,6 @@ private:
     std::string error_;
     bool        hasResult_ = false;
 
-    Glib::Dispatcher dispatcher_;
+    // Liveness token for posted download closures (see RigController).
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };

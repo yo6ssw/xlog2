@@ -1,9 +1,10 @@
 #pragma once
 
-#include <glibmm/dispatcher.h>
+#include "IUiDispatcher.h"
 
 #include <atomic>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
@@ -37,7 +38,7 @@ public:
     // empty and `result` holds the record; otherwise `error` describes why.
     std::function<void(const QrzResult& result, const std::string& error)> onResult;
 
-    QrzClient();
+    explicit QrzClient(IUiDispatcher& ui);
     ~QrzClient();
     QrzClient(const QrzClient&)            = delete;
     QrzClient& operator=(const QrzClient&) = delete;
@@ -50,9 +51,10 @@ public:
 
 private:
     void worker(std::string user, std::string password, std::string callsign);
-    void onDispatch();  // UI thread
+    void deliverResult();  // UI thread
 
-    std::string sessionKey_;  // touched only on the worker thread
+    IUiDispatcher& ui_;
+    std::string    sessionKey_;  // touched only on the worker thread
 
     std::thread       thread_;
     std::atomic<bool> busy_{false};
@@ -62,5 +64,6 @@ private:
     std::string error_;
     bool        hasResult_ = false;
 
-    Glib::Dispatcher dispatcher_;
+    // Liveness token for posted closures (see RigController).
+    std::shared_ptr<bool> alive_ = std::make_shared<bool>(true);
 };
