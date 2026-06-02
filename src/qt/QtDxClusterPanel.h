@@ -17,6 +17,7 @@ class QPlainTextEdit;
 class QLineEdit;
 class QPushButton;
 class QHBoxLayout;
+class QLayout;
 
 // Qt equivalent of the gtkmm DxClusterPanel: a band map that aggregates incoming
 // spots by (frequency, DX call) — grouping reports within +/-200 Hz of the same
@@ -56,7 +57,7 @@ private:
     using Key = std::pair<long, std::string>;
 
     void buildUi();
-    void buildBandChips(QHBoxLayout* into);
+    void buildBandChips(QLayout* into);
     void rebuild();   // prune expired spotters + reconcile the model incrementally
     void insertRow(int pos, const Entry& e);
     void applyMutable(int row, const Entry& e, Clock::time_point now);  // count + tooltip

@@ -106,6 +106,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtLogPage.cpp
         src/qt/QtMainWindow.cpp
         src/qt/QtDxClusterPanel.cpp
+        src/qt/FlowLayout.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
         src/qt/QtLogPage.h
