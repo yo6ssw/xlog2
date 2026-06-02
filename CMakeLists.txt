@@ -99,3 +99,22 @@ if(XLOG_BUILD_QT)
         set(XLOG_BUILD_QT OFF)
     endif()
 endif()
+
+if(XLOG_BUILD_QT)
+    add_executable(xlog2-qt
+        src/qt/main.cpp
+        src/qt/QtLogPage.cpp
+        src/qt/QtMainWindow.cpp
+        src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
+        src/qt/QsoTableModel.h
+        src/qt/QtLogPage.h
+        src/qt/QtMainWindow.h
+    )
+    set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
+    target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)
+    target_link_libraries(xlog2-qt PRIVATE xlog_core Qt6::Widgets)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(xlog2-qt PRIVATE -Wall -Wextra)
+    endif()
+    install(TARGETS xlog2-qt RUNTIME DESTINATION bin)
+endif()
