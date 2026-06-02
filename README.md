@@ -141,5 +141,4 @@ g++ -std=c++20 -Isrc/core/domain -Isrc/core/logic \
 
 ## License
 
-GPL-3.0, like the original xlog. *(A `LICENSE` file still needs to be added to
-the repository.)*
+GPL-3.0, like the original xlog. See [`LICENSE`](LICENSE).
