@@ -25,7 +25,6 @@
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabWidget>
-#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -96,6 +95,7 @@ QtMainWindow::QtMainWindow()
     // DX cluster dock: a band-map panel (spots table on top, telnet console
     // below) matching the gtkmm DxClusterPanel.
     dxDock_  = new QDockWidget("DX cluster", this);
+    dxDock_->setObjectName("dxClusterDock");  // required for saveState/restoreState
     dxPanel_ = new QtDxClusterPanel;
     dxDock_->setWidget(dxPanel_);
     addDockWidget(Qt::BottomDockWidgetArea, dxDock_);
@@ -671,16 +671,19 @@ void QtMainWindow::loadSettings() {
 
     applyKeyerConfig();
 
-    // Honour the persisted DX-cluster dock placement + visibility.
-    const Qt::DockWidgetArea area = dockAreaFromString(cfg().dxDock);
-    addDockWidget(area, dxDock_);  // moves the dock to the saved side
+    // Baseline DX-cluster dock placement/visibility from the shared keys (also
+    // honoured by the gtkmm backend).
+    addDockWidget(dockAreaFromString(cfg().dxDock), dxDock_);
     dxDock_->setVisible(cfg().dxVisible);
-    if (cfg().dxVisible && cfg().dxPanelPos > 0) {
-        // resizeDocks only takes effect once the window is laid out, so defer it
-        // to the first event-loop turn (after show()).
-        const int pos = cfg().dxPanelPos;
-        const Qt::Orientation o = isHorizontalArea(area) ? Qt::Horizontal : Qt::Vertical;
-        QTimer::singleShot(0, this, [this, pos, o]() { resizeDocks({dxDock_}, {pos}, o); });
+    // Restore the precise dock geometry (size + area + visibility) via Qt's own
+    // serialised layout — resizeDocks() is unreliable before the window is laid
+    // out, whereas restoreState() applies cleanly. Qt-specific, so it lives
+    // under a [qt] group; the shared keys above remain the cross-backend intent.
+    if (loaded && ini.hasKey("qt", "dockstate")) {
+        const QByteArray state = QByteArray::fromBase64(
+            QByteArray::fromStdString(ini.getString("qt", "dockstate")));
+        if (!state.isEmpty())
+            restoreState(state);
     }
 
     if (cfg().dxAutoConnect && !cfg().dxHost.empty()) {
@@ -712,6 +715,9 @@ void QtMainWindow::saveSettings() {
         ini.setInt("window", "height", height());
     }
     ini.setBool("window", "maximized", isMaximized());
+
+    // Precise dock geometry (size/area/visibility), restored by restoreState().
+    ini.setString("qt", "dockstate", saveState().toBase64().toStdString());
 
     std::string open, active;
     for (int i = 0; i < tabs_->count(); ++i) {
