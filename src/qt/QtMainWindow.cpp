@@ -31,6 +31,8 @@
 
 #include <sys/stat.h>
 
+#include <QResizeEvent>
+
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -747,8 +749,24 @@ void QtMainWindow::showEvent(QShowEvent* e) {
     QMainWindow::showEvent(e);
     // Apply the persisted DX-cluster dock size once, now that the window has its
     // real laid-out geometry (resizeDocks is a no-op before the window is shown).
-    if (!dockSizeRestored_ && pendingDockSize_ > 0) {
-        dockSizeRestored_ = true;
-        resizeDocks({dxDock_}, {pendingDockSize_}, pendingDockOrient_);
-    }
+    restoreDockSize();
+}
+
+void QtMainWindow::resizeEvent(QResizeEvent* e) {
+    QMainWindow::resizeEvent(e);
+    restoreDockSize();
+}
+
+void QtMainWindow::restoreDockSize() {
+    // Apply the persisted DX-cluster dock size exactly once, as soon as the
+    // window is visible with the pending size set. We hook both showEvent and
+    // resizeEvent because with a maximized window the final (maximized) geometry
+    // arrives via a late resizeEvent — after loadSettings has set the pending
+    // size — whereas showEvent fires earlier (during showMaximized(), before the
+    // dock params are known). resizeDocks only sticks once the window is laid
+    // out, so neither can run pre-show.
+    if (dockSizeRestored_ || pendingDockSize_ <= 0 || !isVisible())
+        return;
+    dockSizeRestored_ = true;
+    resizeDocks({dxDock_}, {pendingDockSize_}, pendingDockOrient_);
 }

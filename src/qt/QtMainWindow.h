@@ -78,7 +78,9 @@ private:
     void loadSettings();
     void saveSettings();
     void closeEvent(QCloseEvent* e) override;
-    void showEvent(QShowEvent* e) override;  // applies the saved dock size once
+    void showEvent(QShowEvent* e) override;
+    void resizeEvent(QResizeEvent* e) override;
+    void restoreDockSize();  // apply the saved DX-cluster dock size once, post-show
 
     QtDispatcher    uiDispatcher_;
     MainPresenter   presenter_;
