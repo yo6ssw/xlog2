@@ -14,8 +14,5 @@ License: GPL-3+
  ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
  FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more details.
  .
- On Debian systems, the full text of the GNU General Public License version 3
- can be found in the file /usr/share/common-licenses/GPL-3.
- .
- NOTE: the repository still needs a top-level LICENSE/COPYING file with the
- full GPL-3 text to match this declaration.
+ The full GPL-3 text ships in the source as the top-level LICENSE file; on
+ Debian systems it is also at /usr/share/common-licenses/GPL-3.
