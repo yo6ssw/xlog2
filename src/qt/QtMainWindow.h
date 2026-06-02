@@ -17,6 +17,7 @@
 class QTabWidget;
 class QLabel;
 class QDockWidget;
+class QActionGroup;
 class QtDxClusterPanel;
 class QtLogPage;
 class LogPagePresenter;
@@ -100,6 +101,7 @@ private:
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
+    QActionGroup*     dxDockGroup_ = nullptr;  // Cluster ▸ Dock radio (top/bottom/left/right)
 
     // Persisted DX-cluster dock size, applied once on first show (resizeDocks
     // only takes effect after the window has its laid-out geometry).

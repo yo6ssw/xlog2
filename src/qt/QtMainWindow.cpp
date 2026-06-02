@@ -10,6 +10,7 @@
 #include "TimeUtil.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
@@ -274,6 +275,7 @@ QtLogPage* QtMainWindow::openDefaultLog() {
 // --- menus -------------------------------------------------------------------
 
 void QtMainWindow::buildMenus() {
+    // Mirrors the gtkmm menu model (labels, order and grouping).
     auto* file = menuBar()->addMenu("&File");
     file->addAction("New Tab", this, &QtMainWindow::onNewTab);
     file->addAction("Open…", this, &QtMainWindow::onOpen);
@@ -285,34 +287,59 @@ void QtMainWindow::buildMenus() {
     file->addSeparator();
     file->addAction("Quit", this, &QWidget::close);
 
-    auto* tools = menuBar()->addMenu("&Tools");
-    auto* find = tools->addAction("Find", this, &QtMainWindow::onFind);
+    auto* log = menuBar()->addMenu("&Log");
+    auto* find = log->addAction("Find…", this, &QtMainWindow::onFind);
     find->setShortcut(QKeySequence::Find);
-    tools->addAction("Statistics", this, &QtMainWindow::onStatistics);
-    tools->addAction("Fill DXCC", this, &QtMainWindow::onFillDxcc);
+    log->addAction("Fill DXCC entities", this, &QtMainWindow::onFillDxcc);
+    log->addAction("Statistics…", this, &QtMainWindow::onStatistics);
 
     auto* net = menuBar()->addMenu("&Network");
-    udpAction_ = net->addAction("UDP logging");
+    udpAction_ = net->addAction("Listen for QSOs (UDP)");
     udpAction_->setCheckable(true);
     connect(udpAction_, &QAction::toggled, this, &QtMainWindow::onToggleUdp);
-    net->addAction("UDP settings…", this, &QtMainWindow::onUdpSettings);
+    net->addAction("UDP port…", this, &QtMainWindow::onUdpSettings);
 
     auto* rig = menuBar()->addMenu("&Rig");
     rig->addAction("Connect…", this, &QtMainWindow::onRigConnect);
     rig->addAction("Disconnect", this, &QtMainWindow::onRigDisconnect);
 
-    auto* lotw = menuBar()->addMenu("&LoTW");
-    lotw->addAction("Upload", this, &QtMainWindow::onLotwUpload);
-    lotw->addAction("Download", this, &QtMainWindow::onLotwDownload);
+    auto* lotw = menuBar()->addMenu("Lo&TW");
+    lotw->addAction("Upload to LoTW…", this, &QtMainWindow::onLotwUpload);
+    lotw->addAction("Download confirmations", this, &QtMainWindow::onLotwDownload);
     lotw->addAction("Settings…", this, &QtMainWindow::onLotwSettings);
 
-    auto* svc = menuBar()->addMenu("&Services");
-    svc->addAction("QRZ.com settings…", this, &QtMainWindow::onQrzSettings);
-    svc->addAction("Keyer settings…", this, &QtMainWindow::onKeyerSettings);
-    svc->addAction("DX cluster connect/disconnect", this, &QtMainWindow::onClusterConnectToggle);
-    svc->addAction("DX cluster settings…", this, &QtMainWindow::onClusterSettings);
+    auto* qrz = menuBar()->addMenu("&QRZ");
+    qrz->addAction("Settings…", this, &QtMainWindow::onQrzSettings);
 
-    menuBar()->addMenu("&Help")->addAction("About", this, &QtMainWindow::onAbout);
+    auto* keyer = menuBar()->addMenu("&Keyer");
+    keyer->addAction("Settings…", this, &QtMainWindow::onKeyerSettings);
+
+    auto* cluster = menuBar()->addMenu("&Cluster");
+    // "Show panel": Qt's built-in dock toggle action auto-syncs its checked
+    // state with the dock's actual visibility.
+    auto* showPanel = dxDock_->toggleViewAction();
+    showPanel->setText("Show panel");
+    cluster->addAction(showPanel);
+    cluster->addAction("Connect / Disconnect", this, &QtMainWindow::onClusterConnectToggle);
+    auto* dock = cluster->addMenu("Dock");
+    dxDockGroup_ = new QActionGroup(this);  // exclusive radio
+    const std::pair<const char*, const char*> sides[] = {
+        {"Top", "top"}, {"Bottom", "bottom"}, {"Left", "left"}, {"Right", "right"}};
+    for (const auto& [label, side] : sides) {
+        auto* a = dock->addAction(label);
+        a->setCheckable(true);
+        a->setData(QString::fromLatin1(side));
+        dxDockGroup_->addAction(a);
+        const std::string s = side;
+        connect(a, &QAction::triggered, this, [this, s]() {
+            cfg().dxDock = s;
+            addDockWidget(dockAreaFromString(s), dxDock_);  // move to the chosen side
+            dxDock_->show();                                // picking a dock implies showing it
+        });
+    }
+    cluster->addAction("Settings…", this, &QtMainWindow::onClusterSettings);
+
+    menuBar()->addMenu("&Help")->addAction("About xlog2", this, &QtMainWindow::onAbout);
 }
 
 void QtMainWindow::onNewTab() {
@@ -704,6 +731,14 @@ void QtMainWindow::loadSettings() {
         pendingDockSize_   = cfg().dxPanelPos;
         pendingDockOrient_ = isHorizontalArea(area) ? Qt::Horizontal : Qt::Vertical;
     }
+    // Reflect the loaded dock side in the Cluster ▸ Dock radio (settings are
+    // loaded after buildMenus, which defaulted them to "bottom").
+    if (dxDockGroup_)
+        for (QAction* a : dxDockGroup_->actions())
+            if (a->data().toString().toStdString() == cfg().dxDock) {
+                a->setChecked(true);
+                break;
+            }
 
     if (cfg().dxAutoConnect && !cfg().dxHost.empty()) {
         dxDock_->show();
