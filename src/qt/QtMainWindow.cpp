@@ -81,6 +81,11 @@ QtMainWindow::QtMainWindow()
 
     tabs_ = new QTabWidget;
     tabs_->setTabsClosable(true);
+    // Let the central log area shrink below its content's natural width so the
+    // DX-cluster dock can take a wide size (and be restored to one). Without an
+    // explicit minimum, QMainWindow treats the page's min-size-hint (~950px) as
+    // a hard floor and clamps the dock — unlike gtkmm's freely-shrinking paned.
+    tabs_->setMinimumWidth(120);
     setCentralWidget(tabs_);
     connect(tabs_, &QTabWidget::tabCloseRequested, this, [this](int i) {
         if (auto* p = qobject_cast<QtLogPage*>(tabs_->widget(i))) {
