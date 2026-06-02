@@ -12,41 +12,90 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
+option(XLOG_BUILD_GTK "Build the gtkmm backend" ON)
+option(XLOG_BUILD_QT  "Build the Qt Widgets backend" ON)
+
 find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
-pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
-pkg_check_modules(CURL REQUIRED IMPORTED_TARGET libcurl)
+pkg_check_modules(CURL   REQUIRED IMPORTED_TARGET libcurl)
 
-add_executable(xlog2
-    src/main.cpp
-    src/XlogApplication.cpp
-    src/MainWindow.cpp
-    src/LogPage.cpp
-    src/LogBook.cpp
-    src/Adif.cpp
-    src/Bands.cpp
-    src/Udp.cpp
-    src/Rig.cpp
-    src/Lotw.cpp
-    src/Qrz.cpp
-    src/CwKeyer.cpp
-    src/DxCluster.cpp
-    src/DxClusterPanel.cpp
-    src/Dxcc.cpp
+# ---------------------------------------------------------------------------
+# xlog_core: the toolkit-neutral core. Deliberately NOT linked against gtkmm or
+# Qt, so any accidental toolkit include in a core source fails to compile — the
+# UI/business-logic boundary is enforced by the build itself.
+# ---------------------------------------------------------------------------
+add_library(xlog_core STATIC
+    src/core/domain/LogBook.cpp
+    src/core/domain/Adif.cpp
+    src/core/domain/Bands.cpp
+    src/core/domain/Dxcc.cpp
+    src/core/logic/DxccDeriver.cpp
+    src/core/logic/CwExpander.cpp
+    src/core/logic/Statistics.cpp
+    src/core/logic/DupeMessage.cpp
+    src/core/logic/QsoMapper.cpp
+    src/core/settings/IniFile.cpp
+    src/core/settings/Settings.cpp
+    src/core/presenter/LogPagePresenter.cpp
+    src/core/presenter/MainPresenter.cpp
+    src/core/platform/ProcessRunner.cpp
+    src/core/services/Rig.cpp
+    src/core/services/Udp.cpp
+    src/core/services/Lotw.cpp
+    src/core/services/Qrz.cpp
+    src/core/services/CwKeyer.cpp
+    src/core/services/DxCluster.cpp
 )
-
-target_include_directories(xlog2 PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(xlog2 PRIVATE
-    PkgConfig::GTKMM
+target_include_directories(xlog_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/domain
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/logic
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/settings
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/platform
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/services
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/view
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/core/presenter
+)
+target_link_libraries(xlog_core PUBLIC
     PkgConfig::SQLITE
     PkgConfig::HAMLIB
     PkgConfig::CURL
     Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    target_compile_options(xlog2 PRIVATE -Wall -Wextra)
+    target_compile_options(xlog_core PRIVATE -Wall -Wextra)
 endif()
 
-install(TARGETS xlog2 RUNTIME DESTINATION bin)
+# ---------------------------------------------------------------------------
+# gtkmm backend
+# ---------------------------------------------------------------------------
+if(XLOG_BUILD_GTK)
+    pkg_check_modules(GTKMM REQUIRED IMPORTED_TARGET gtkmm-4.0)
+
+    add_executable(xlog2-gtk
+        src/main.cpp
+        src/XlogApplication.cpp
+        src/MainWindow.cpp
+        src/LogPage.cpp
+        src/DxClusterPanel.cpp
+    )
+    target_link_libraries(xlog2-gtk PRIVATE xlog_core PkgConfig::GTKMM)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(xlog2-gtk PRIVATE -Wall -Wextra)
+    endif()
+    install(TARGETS xlog2-gtk RUNTIME DESTINATION bin)
+endif()
+
+# ---------------------------------------------------------------------------
+# Qt Widgets backend (sources added in a later phase)
+# ---------------------------------------------------------------------------
+if(XLOG_BUILD_QT)
+    find_package(Qt6 QUIET COMPONENTS Widgets)
+    if(NOT Qt6_FOUND)
+        message(WARNING "Qt6 Widgets not found; skipping the Qt backend")
+        set(XLOG_BUILD_QT OFF)
+    endif()
+endif()

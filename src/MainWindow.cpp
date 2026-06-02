@@ -2,6 +2,7 @@
 
 #include "Adif.h"
 #include "LogPage.h"
+#include "Statistics.h"
 #include "UiUtil.h"
 
 #include <sys/stat.h>
@@ -12,7 +13,13 @@
 #include <sstream>
 #include <stdexcept>
 
-MainWindow::MainWindow() {
+MainWindow::MainWindow()
+    : presenter_(*this),
+      listener_(uiDispatcher_),
+      rig_(uiDispatcher_),
+      lotw_(uiDispatcher_),
+      qrz_(uiDispatcher_),
+      cluster_(uiDispatcher_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -61,54 +68,28 @@ MainWindow::MainWindow() {
     ui::setMargin(statusLabel_, 4);
     vbox->append(statusLabel_);
 
+    // Service results are routed by the presenter (toolkit-neutral).
     listener_.setCallback(
         [this](const std::vector<Qso>& qsos, const std::string& source) {
-            onUdpReceived(qsos, source);
+            presenter_.routeUdp(qsos, source);
         });
     rig_.onUpdate = [this](double mhz, const std::string& mode) {
-        onRigUpdate(mhz, mode);
+        presenter_.routeRigUpdate(mhz, mode);
     };
-
-    lotw_.onDownloadDone = [this](const std::string& adif, const std::string& error) {
-        if (!error.empty()) {
-            setStatus("LoTW download failed: " + error);
-            return;
-        }
-        const auto records = adif::parse(adif);
-        auto* page = currentPage();
-        if (!page)
-            return;
-        const int n = page->applyLotwConfirmations(records);
-        lotwLastDownload_ = ui::utcNow("%Y-%m-%d");
-        if (records.empty())
-            setStatus("LoTW: no confirmations returned (check username/password).");
+    rig_.onConnectResult = [this](bool ok, const std::string& error) {
+        if (ok)
+            setStatus("Connected to rig (model " + std::to_string(cfg().rigModel) + ").");
         else
-            setStatus("LoTW: " + std::to_string(records.size()) +
-                      " record(s) downloaded, " + std::to_string(n) +
-                      " QSO(s) newly confirmed.");
+            setStatus("Rig connect failed: " + error);
+    };
+    lotw_.onDownloadDone = [this](const std::string& adif, const std::string& error) {
+        presenter_.routeLotwDownload(adif, error);
     };
     lotw_.onUploadDone = [this](bool ok, const std::string& message) {
-        if (ok && pendingUploadPage_ && isLivePage(pendingUploadPage_))
-            pendingUploadPage_->markLotwSent(pendingUploadIds_, ui::utcNow("%Y-%m-%d"));
-        pendingUploadPage_ = nullptr;
-        pendingUploadIds_.clear();
-        setStatus(std::string("LoTW upload: ") + message);
+        presenter_.routeLotwUploadResult(ok, message);
     };
-
     qrz_.onResult = [this](const QrzResult& result, const std::string& error) {
-        LogPage* page = pendingLookupPage_;
-        pendingLookupPage_ = nullptr;
-        if (!error.empty()) {
-            setStatus("QRZ lookup: " + error);
-            return;
-        }
-        if (page && isLivePage(page))
-            page->applyQrzLookup(result);
-        std::string msg = "QRZ: " + result.call;
-        if (!result.name.empty())    msg += " — " + result.name;
-        if (!result.country.empty()) msg += " (" + result.country + ")";
-        setStatus(msg);
-        showQrzResult(result);
+        presenter_.routeQrzResult(result, error);
     };
 
     loadSettings();
@@ -119,15 +100,14 @@ MainWindow::MainWindow() {
     setStatus("Ready.");
 
     // Resume listening for QSOs over UDP if it was enabled last session.
-    if (udpEnabled_)
+    if (cfg().udpEnabled)
         startUdpListening();
 
-    // Connect to the rig at startup if configured to.
-    if (rigAutoConnect_) {
-        if (rig_.start(rigModel_, rigDevice_, rigPollMs_))
-            setStatus("Connected to rig (model " + std::to_string(rigModel_) + ").");
-        else
-            setStatus("Rig auto-connect failed: " + rig_.lastError());
+    // Connect to the rig at startup if configured to (non-blocking; the result
+    // arrives via rig_.onConnectResult).
+    if (cfg().rigAutoConnect) {
+        setStatus("Connecting to rig…");
+        rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
     }
 }
 
@@ -246,7 +226,7 @@ LogPage* MainWindow::currentPage() {
 
 LogPage* MainWindow::addPage(LogPage* page) {
     page->applyColumnLayout(settings_);
-    page->setCwMessages(keyerMessages_);
+    page->setCwMessages(cfg().keyerMessages);
     registerTab(page);
     return page;
 }
@@ -273,7 +253,7 @@ LogPage* MainWindow::openDefaultLog() {
 
 void MainWindow::registerTab(LogPage* page) {
     page->signalChanged().connect([this, page]() { onPageChanged(page); });
-    page->signalStatus().connect([this](const Glib::ustring& m) { setStatus(m); });
+    page->signalStatus().connect([this](const Glib::ustring& m) { setStatus(m.raw()); });
     page->signalLookupCall().connect(
         [this, page](const std::string& call) { onQrzLookup(page, call); });
     page->signalSendCw().connect([this](const std::string& text) {
@@ -412,7 +392,7 @@ void MainWindow::onImportAdif() {
             const int n = page->importAdif(content);
             setStatus("Imported " + std::to_string(n) + " QSO(s) from ADIF.");
         } catch (const Glib::Error& e) {
-            setStatus(Glib::ustring("Import failed: ") + e.what());
+            setStatus(std::string("Import failed: ") + e.what());
         }
     });
 }
@@ -432,7 +412,7 @@ void MainWindow::onExportAdif() {
             Glib::file_set_contents(file->get_path(), page->exportAdif());
             setStatus("Exported " + std::to_string(page->qsoCount()) + " QSO(s) to ADIF.");
         } catch (const Glib::Error& e) {
-            setStatus(Glib::ustring("Export failed: ") + e.what());
+            setStatus(std::string("Export failed: ") + e.what());
         }
     });
 }
@@ -441,26 +421,19 @@ void MainWindow::onStatistics() {
     auto* page = currentPage();
     if (!page)
         return;
-    const auto& qsos = page->logbook().qsos();
-    std::map<std::string, int> byBand, byMode;
-    std::set<std::string> calls;
-    for (const auto& q : qsos) {
-        if (!q.band.empty()) ++byBand[q.band];
-        if (!q.mode.empty()) ++byMode[q.mode];
-        if (!q.call.empty()) calls.insert(q.call);
-    }
+    const stats::Statistics st = stats::compute(page->logbook().qsos());
 
     std::ostringstream os;
     os << "Logbook:       " << page->title().raw() << "\n";
-    os << "Total QSOs:    " << qsos.size() << "\n";
-    os << "Unique calls:  " << calls.size() << "\n\n";
+    os << "Total QSOs:    " << st.total << "\n";
+    os << "Unique calls:  " << st.uniqueCalls << "\n\n";
     os << "By band\n";
-    if (byBand.empty()) os << "  (none)\n";
-    for (const auto& [band, n] : byBand)
+    if (st.byBand.empty()) os << "  (none)\n";
+    for (const auto& [band, n] : st.byBand)
         os << "  " << band << ":  " << n << "\n";
     os << "\nBy mode\n";
-    if (byMode.empty()) os << "  (none)\n";
-    for (const auto& [mode, n] : byMode)
+    if (st.byMode.empty()) os << "  (none)\n";
+    for (const auto& [mode, n] : st.byMode)
         os << "  " << mode << ":  " << n << "\n";
 
     auto* win = new Gtk::Window();
@@ -513,34 +486,23 @@ void MainWindow::onToggleUdp() {
 
 void MainWindow::startUdpListening() {
     std::string error;
-    // udpEnabled_ tracks the user's intent and is what gets persisted, so it
+    // cfg().udpEnabled tracks the user's intent and is what gets persisted, so it
     // survives onCloseRequest()'s socket teardown.
-    udpEnabled_ = listener_.start(udpPort_, error);
-    udpAction_->change_state(udpEnabled_);
-    if (udpEnabled_)
-        setStatus("Listening for QSOs on UDP port " + std::to_string(udpPort_) +
+    cfg().udpEnabled = listener_.start(cfg().udpPort, error);
+    udpAction_->change_state(cfg().udpEnabled);
+    if (cfg().udpEnabled)
+        setStatus("Listening for QSOs on UDP port " + std::to_string(cfg().udpPort) +
                   " (WSJT-X / ADIF).");
     else
         setStatus("Could not start UDP listener on port " +
-                  std::to_string(udpPort_) + ": " + error);
+                  std::to_string(cfg().udpPort) + ": " + error);
 }
 
 void MainWindow::stopUdpListening() {
     listener_.stop();
-    udpEnabled_ = false;
+    cfg().udpEnabled = false;
     udpAction_->change_state(false);
     setStatus("Stopped UDP listener.");
-}
-
-void MainWindow::onUdpReceived(const std::vector<Qso>& qsos,
-                               const std::string& source) {
-    auto* page = currentPage();
-    if (!page || qsos.empty())
-        return;
-    for (const auto& q : qsos)
-        page->addExternalQso(q);
-    setStatus("Logged " + std::to_string(qsos.size()) + " QSO(s) from " + source +
-              ": " + qsos.back().call);
 }
 
 void MainWindow::onUdpSettings() {
@@ -558,7 +520,7 @@ void MainWindow::onUdpSettings() {
     row->set_spacing(8);
     row->append(*Gtk::make_managed<Gtk::Label>("Listen port:"));
     auto* entry = Gtk::make_managed<Gtk::Entry>();
-    entry->set_text(std::to_string(udpPort_));
+    entry->set_text(std::to_string(cfg().udpPort));
     entry->set_hexpand(true);
     row->append(*entry);
     box->append(*row);
@@ -580,12 +542,12 @@ void MainWindow::onUdpSettings() {
         try {
             const int p = std::stoi(entry->get_text().raw());
             if (p > 0 && p < 65536) {
-                udpPort_ = p;
+                cfg().udpPort = p;
                 if (listener_.isListening()) {
                     listener_.stop();
                     startUdpListening();  // restart on the new port (updates state)
                 } else {
-                    setStatus("UDP port set to " + std::to_string(udpPort_) + ".");
+                    setStatus("UDP port set to " + std::to_string(cfg().udpPort) + ".");
                 }
             } else {
                 setStatus("Port must be between 1 and 65535.");
@@ -614,12 +576,12 @@ void MainWindow::onRigConnect() {
     ui::setMargin(*grid, 12);
 
     auto* modelEntry = Gtk::make_managed<Gtk::Entry>();
-    modelEntry->set_text(std::to_string(rigModel_));
+    modelEntry->set_text(std::to_string(cfg().rigModel));
     auto* deviceEntry = Gtk::make_managed<Gtk::Entry>();
-    deviceEntry->set_text(rigDevice_);
+    deviceEntry->set_text(cfg().rigDevice);
     deviceEntry->set_placeholder_text("/dev/ttyUSB0");
     auto* pollEntry = Gtk::make_managed<Gtk::Entry>();
-    pollEntry->set_text(std::to_string(rigPollMs_));
+    pollEntry->set_text(std::to_string(cfg().rigPollMs));
 
     auto field = [&](const char* text, Gtk::Widget& w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(text);
@@ -632,7 +594,7 @@ void MainWindow::onRigConnect() {
     field("Device:",       *deviceEntry, 1);
     field("Poll (ms):",    *pollEntry, 2);
     auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
-    autoCheck->set_active(rigAutoConnect_);
+    autoCheck->set_active(cfg().rigAutoConnect);
     grid->attach(*autoCheck, 1, 3);
 
     auto* hint = Gtk::make_managed<Gtk::Label>(
@@ -651,19 +613,17 @@ void MainWindow::onRigConnect() {
     connect->signal_clicked().connect(
         [this, modelEntry, deviceEntry, pollEntry, autoCheck, win]() {
             try {
-                rigModel_  = std::stoi(modelEntry->get_text().raw());
-                rigDevice_ = deviceEntry->get_text().raw();
-                rigPollMs_ = std::max(50, std::stoi(pollEntry->get_text().raw()));
+                cfg().rigModel  = std::stoi(modelEntry->get_text().raw());
+                cfg().rigDevice = deviceEntry->get_text().raw();
+                cfg().rigPollMs = std::max(50, std::stoi(pollEntry->get_text().raw()));
             } catch (const std::exception&) {
                 setStatus("Invalid rig settings.");
                 return;
             }
-            rigAutoConnect_ = autoCheck->get_active();
-            if (rig_.start(rigModel_, rigDevice_, rigPollMs_))
-                setStatus("Connected to rig (model " + std::to_string(rigModel_) +
-                          "). Polling frequency.");
-            else
-                setStatus("Rig connect failed: " + rig_.lastError());
+            cfg().rigAutoConnect = autoCheck->get_active();
+            // Non-blocking; the outcome arrives via rig_.onConnectResult.
+            setStatus("Connecting to rig…");
+            rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
             win->set_visible(false);
         });
 
@@ -679,26 +639,22 @@ void MainWindow::onRigDisconnect() {
     }
 }
 
-void MainWindow::onRigUpdate(double mhz, const std::string& mode) {
-    if (auto* page = currentPage()) {
-        page->setRigFrequency(mhz);
-        page->setRigMode(mode);
-    }
-    std::ostringstream os;
-    os << "Rig: " << mhz << " MHz";
-    if (!mode.empty())
-        os << " " << mode;
-    setStatus(os.str());
+// --- IMainView: shell services for the presenter -----------------------------
+
+LogPagePresenter* MainWindow::currentLog() {
+    auto* page = currentPage();
+    return page ? &page->presenter() : nullptr;
+}
+
+bool MainWindow::isLogLive(LogPagePresenter* log) {
+    for (int i = 0; i < notebook_.get_n_pages(); ++i)
+        if (auto* p = dynamic_cast<LogPage*>(notebook_.get_nth_page(i)))
+            if (&p->presenter() == log)
+                return true;
+    return false;
 }
 
 // --- LoTW --------------------------------------------------------------------
-
-bool MainWindow::isLivePage(LogPage* page) {
-    for (int i = 0; i < notebook_.get_n_pages(); ++i)
-        if (notebook_.get_nth_page(i) == page)
-            return true;
-    return false;
-}
 
 void MainWindow::onLotwUpload() {
     auto* page = currentPage();
@@ -719,18 +675,18 @@ void MainWindow::onLotwUpload() {
         return;
     }
 
-    pendingUploadIds_.clear();
+    std::vector<long> ids;
     for (const auto& q : unsent)
-        pendingUploadIds_.push_back(q.id);
-    pendingUploadPage_ = page;
+        ids.push_back(q.id);
+    presenter_.beginLotwUpload(&page->presenter(), std::move(ids));
 
     setStatus("Signing and uploading " + std::to_string(unsent.size()) +
               " QSO(s) via tqsl…");
-    lotw_.uploadAdifFile(tqslPath_, lotwStation_, tmp);
+    lotw_.uploadAdifFile(cfg().tqslPath, cfg().lotwStation, tmp);
 }
 
 void MainWindow::onLotwDownload() {
-    if (lotwUser_.empty() || lotwPassword_.empty()) {
+    if (cfg().lotwUser.empty() || cfg().lotwPassword.empty()) {
         setStatus("Set your LoTW username and password in LoTW ▸ Settings first.");
         return;
     }
@@ -739,7 +695,7 @@ void MainWindow::onLotwDownload() {
         return;
     }
     setStatus("Downloading LoTW confirmations…");
-    lotw_.downloadConfirmations(lotwUser_, lotwPassword_, lotwLastDownload_);
+    lotw_.downloadConfirmations(cfg().lotwUser, cfg().lotwPassword, cfg().lotwLastDownload);
 }
 
 void MainWindow::onLotwSettings() {
@@ -755,15 +711,15 @@ void MainWindow::onLotwSettings() {
     ui::setMargin(*grid, 12);
 
     auto* userEntry = Gtk::make_managed<Gtk::Entry>();
-    userEntry->set_text(lotwUser_);
+    userEntry->set_text(cfg().lotwUser);
     auto* passEntry = Gtk::make_managed<Gtk::Entry>();
-    passEntry->set_text(lotwPassword_);
+    passEntry->set_text(cfg().lotwPassword);
     passEntry->set_visibility(false);
     auto* stationEntry = Gtk::make_managed<Gtk::Entry>();
-    stationEntry->set_text(lotwStation_);
+    stationEntry->set_text(cfg().lotwStation);
     stationEntry->set_placeholder_text("tqsl station location (optional)");
     auto* tqslEntry = Gtk::make_managed<Gtk::Entry>();
-    tqslEntry->set_text(tqslPath_);
+    tqslEntry->set_text(cfg().tqslPath);
 
     auto field = [&](const char* text, Gtk::Widget& w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(text);
@@ -793,12 +749,12 @@ void MainWindow::onLotwSettings() {
 
     save->signal_clicked().connect(
         [this, userEntry, passEntry, stationEntry, tqslEntry, win]() {
-            lotwUser_     = userEntry->get_text().raw();
-            lotwPassword_ = passEntry->get_text().raw();
-            lotwStation_  = stationEntry->get_text().raw();
-            tqslPath_     = tqslEntry->get_text().raw();
-            if (tqslPath_.empty())
-                tqslPath_ = "tqsl";
+            cfg().lotwUser     = userEntry->get_text().raw();
+            cfg().lotwPassword = passEntry->get_text().raw();
+            cfg().lotwStation  = stationEntry->get_text().raw();
+            cfg().tqslPath     = tqslEntry->get_text().raw();
+            if (cfg().tqslPath.empty())
+                cfg().tqslPath = "tqsl";
             setStatus("LoTW settings saved.");
             win->set_visible(false);
         });
@@ -809,7 +765,7 @@ void MainWindow::onLotwSettings() {
 // --- QRZ.com callsign lookup -------------------------------------------------
 
 void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
-    if (qrzUser_.empty() || qrzPassword_.empty()) {
+    if (cfg().qrzUser.empty() || cfg().qrzPassword.empty()) {
         setStatus("Set your QRZ.com username and password in QRZ ▸ Settings first.");
         return;
     }
@@ -817,9 +773,9 @@ void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
         setStatus("A QRZ lookup is already in progress.");
         return;
     }
-    pendingLookupPage_ = page;
+    presenter_.beginQrzLookup(page ? &page->presenter() : nullptr);
     setStatus("Looking up " + callsign + " on QRZ.com…");
-    qrz_.lookup(qrzUser_, qrzPassword_, callsign);
+    qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
 }
 
 void MainWindow::onQrzSettings() {
@@ -835,9 +791,9 @@ void MainWindow::onQrzSettings() {
     ui::setMargin(*grid, 12);
 
     auto* userEntry = Gtk::make_managed<Gtk::Entry>();
-    userEntry->set_text(qrzUser_);
+    userEntry->set_text(cfg().qrzUser);
     auto* passEntry = Gtk::make_managed<Gtk::Entry>();
-    passEntry->set_text(qrzPassword_);
+    passEntry->set_text(cfg().qrzPassword);
     passEntry->set_visibility(false);
 
     auto field = [&](const char* text, Gtk::Widget& w, int row) {
@@ -865,8 +821,8 @@ void MainWindow::onQrzSettings() {
     win->signal_hide().connect([win]() { delete win; });
 
     save->signal_clicked().connect([this, userEntry, passEntry, win]() {
-        qrzUser_     = userEntry->get_text().raw();
-        qrzPassword_ = passEntry->get_text().raw();
+        cfg().qrzUser     = userEntry->get_text().raw();
+        cfg().qrzPassword = passEntry->get_text().raw();
         setStatus("QRZ.com settings saved.");
         win->set_visible(false);
     });
@@ -926,11 +882,11 @@ void MainWindow::showQrzResult(const QrzResult& result) {
 // --- network keyer (cwdaemon) ------------------------------------------------
 
 void MainWindow::applyKeyerConfig() {
-    keyer_.setEndpoint(keyerHost_, keyerPort_);
-    keyer_.setSpeed(keyerSpeed_);
+    keyer_.setEndpoint(cfg().keyerHost, cfg().keyerPort);
+    keyer_.setSpeed(cfg().keyerSpeed);
     for (int i = 0; i < notebook_.get_n_pages(); ++i)
         if (auto* p = dynamic_cast<LogPage*>(notebook_.get_nth_page(i)))
-            p->setCwMessages(keyerMessages_);
+            p->setCwMessages(cfg().keyerMessages);
 }
 
 void MainWindow::onKeyerSettings() {
@@ -946,11 +902,11 @@ void MainWindow::onKeyerSettings() {
     ui::setMargin(*grid, 12);
 
     auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(keyerHost_);
+    hostEntry->set_text(cfg().keyerHost);
     auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(keyerPort_));
+    portEntry->set_text(std::to_string(cfg().keyerPort));
     auto* speedEntry = Gtk::make_managed<Gtk::Entry>();
-    speedEntry->set_text(keyerSpeed_ > 0 ? std::to_string(keyerSpeed_) : "");
+    speedEntry->set_text(cfg().keyerSpeed > 0 ? std::to_string(cfg().keyerSpeed) : "");
     speedEntry->set_placeholder_text("wpm (blank = leave cwdaemon default)");
 
     auto field = [&](const char* text, Gtk::Widget& w, int row) {
@@ -967,7 +923,7 @@ void MainWindow::onKeyerSettings() {
     std::array<Gtk::Entry*, 9> msgEntries{};
     for (int i = 0; i < 9; ++i) {
         msgEntries[i] = Gtk::make_managed<Gtk::Entry>();
-        msgEntries[i]->set_text(keyerMessages_[i]);
+        msgEntries[i]->set_text(cfg().keyerMessages[i]);
         field(("F" + std::to_string(i + 1) + ":").c_str(), *msgEntries[i], 3 + i);
     }
 
@@ -988,17 +944,17 @@ void MainWindow::onKeyerSettings() {
 
     save->signal_clicked().connect(
         [this, hostEntry, portEntry, speedEntry, msgEntries, win]() {
-            keyerHost_ = hostEntry->get_text().raw();
-            if (keyerHost_.empty())
-                keyerHost_ = "127.0.0.1";
-            try { keyerPort_ = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { keyerPort_ = 6789; }
+            cfg().keyerHost = hostEntry->get_text().raw();
+            if (cfg().keyerHost.empty())
+                cfg().keyerHost = "127.0.0.1";
+            try { cfg().keyerPort = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().keyerPort = 6789; }
             try {
                 const std::string s = speedEntry->get_text().raw();
-                keyerSpeed_ = s.empty() ? 0 : std::stoi(s);
-            } catch (const std::exception&) { keyerSpeed_ = 0; }
+                cfg().keyerSpeed = s.empty() ? 0 : std::stoi(s);
+            } catch (const std::exception&) { cfg().keyerSpeed = 0; }
             for (int i = 0; i < 9; ++i)
-                keyerMessages_[i] = msgEntries[i]->get_text().raw();
+                cfg().keyerMessages[i] = msgEntries[i]->get_text().raw();
             applyKeyerConfig();
             setStatus("Keyer settings saved.");
             win->set_visible(false);
@@ -1012,10 +968,10 @@ void MainWindow::onKeyerSettings() {
 void MainWindow::applyDxDock() {
     paned_.unset_start_child();
     paned_.unset_end_child();
-    const bool horizontal = (dxDock_ == "left" || dxDock_ == "right");
+    const bool horizontal = (cfg().dxDock == "left" || cfg().dxDock == "right");
     paned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
                                       : Gtk::Orientation::VERTICAL);
-    const bool panelFirst = (dxDock_ == "top" || dxDock_ == "left");
+    const bool panelFirst = (cfg().dxDock == "top" || cfg().dxDock == "left");
     if (panelFirst) {
         paned_.set_start_child(dxPanel_);
         paned_.set_end_child(notebook_);
@@ -1028,39 +984,39 @@ void MainWindow::applyDxDock() {
     paned_.set_resize_end_child(panelFirst);
     paned_.set_shrink_start_child(false);
     paned_.set_shrink_end_child(false);
-    dxPanel_.set_visible(dxVisible_);
+    dxPanel_.set_visible(cfg().dxVisible);
 }
 
 void MainWindow::applyDxConfig() {
-    if (dxDock_ != "top" && dxDock_ != "bottom" &&
-        dxDock_ != "left" && dxDock_ != "right")
-        dxDock_ = "bottom";
+    if (cfg().dxDock != "top" && cfg().dxDock != "bottom" &&
+        cfg().dxDock != "left" && cfg().dxDock != "right")
+        cfg().dxDock = "bottom";
     if (dxDockAction_)
-        dxDockAction_->set_state(Glib::Variant<Glib::ustring>::create(dxDock_));
+        dxDockAction_->set_state(Glib::Variant<Glib::ustring>::create(cfg().dxDock));
     if (dxShowAction_)
-        dxShowAction_->set_state(Glib::Variant<bool>::create(dxVisible_));
+        dxShowAction_->set_state(Glib::Variant<bool>::create(cfg().dxVisible));
     applyDxDock();
     // Restore the panel size (divider position). Honoured on first allocation;
     // the persisted window geometry + dock side make it reproduce the size.
-    if (dxPanelPos_ > 0)
-        paned_.set_position(dxPanelPos_);
-    if (dxAutoConnect_ && !dxHost_.empty())
-        cluster_.connectTo(dxHost_, dxPort_, dxLogin_);
+    if (cfg().dxPanelPos > 0)
+        paned_.set_position(cfg().dxPanelPos);
+    if (cfg().dxAutoConnect && !cfg().dxHost.empty())
+        cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
 }
 
 void MainWindow::onClusterToggleShow() {
     // The bool action has already toggled its own state; mirror it.
     bool state = false;
     dxShowAction_->get_state(state);
-    dxVisible_ = state;
-    dxPanel_.set_visible(dxVisible_);
+    cfg().dxVisible = state;
+    dxPanel_.set_visible(cfg().dxVisible);
 }
 
 void MainWindow::onDxDock(const Glib::ustring& side) {
-    dxDock_ = side.raw();
+    cfg().dxDock = side.raw();
     dxDockAction_->set_state(Glib::Variant<Glib::ustring>::create(side));
-    if (!dxVisible_) {  // picking a dock implies wanting the panel shown
-        dxVisible_ = true;
+    if (!cfg().dxVisible) {  // picking a dock implies wanting the panel shown
+        cfg().dxVisible = true;
         dxShowAction_->set_state(Glib::Variant<bool>::create(true));
     }
     applyDxDock();
@@ -1071,16 +1027,16 @@ void MainWindow::onClusterConnect() {
         cluster_.disconnect();
         return;
     }
-    if (dxHost_.empty()) {
+    if (cfg().dxHost.empty()) {
         setStatus("Set a DX cluster host in Cluster ▸ Settings first.");
         return;
     }
-    if (!dxVisible_) {
-        dxVisible_ = true;
+    if (!cfg().dxVisible) {
+        cfg().dxVisible = true;
         dxShowAction_->set_state(Glib::Variant<bool>::create(true));
         applyDxDock();
     }
-    cluster_.connectTo(dxHost_, dxPort_, dxLogin_);
+    cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
 }
 
 void MainWindow::onSpotActivated(const DxSpot& spot) {
@@ -1104,15 +1060,15 @@ void MainWindow::onClusterSettings() {
     ui::setMargin(*grid, 12);
 
     auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(dxHost_);
+    hostEntry->set_text(cfg().dxHost);
     hostEntry->set_placeholder_text("cluster.example.net");
     auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(dxPort_));
+    portEntry->set_text(std::to_string(cfg().dxPort));
     auto* loginEntry = Gtk::make_managed<Gtk::Entry>();
-    loginEntry->set_text(dxLogin_);
+    loginEntry->set_text(cfg().dxLogin);
     loginEntry->set_placeholder_text("your callsign (sent at the login prompt)");
     auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
-    autoCheck->set_active(dxAutoConnect_);
+    autoCheck->set_active(cfg().dxAutoConnect);
 
     auto field = [&](const char* text, Gtk::Widget& w, int row) {
         auto* l = Gtk::make_managed<Gtk::Label>(text);
@@ -1135,11 +1091,11 @@ void MainWindow::onClusterSettings() {
 
     save->signal_clicked().connect(
         [this, hostEntry, portEntry, loginEntry, autoCheck, win]() {
-            dxHost_ = hostEntry->get_text().raw();
-            try { dxPort_ = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { dxPort_ = 7300; }
-            dxLogin_ = loginEntry->get_text().raw();
-            dxAutoConnect_ = autoCheck->get_active();
+            cfg().dxHost = hostEntry->get_text().raw();
+            try { cfg().dxPort = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().dxPort = 7300; }
+            cfg().dxLogin = loginEntry->get_text().raw();
+            cfg().dxAutoConnect = autoCheck->get_active();
             setStatus("DX cluster settings saved.");
             win->set_visible(false);
         });
@@ -1195,38 +1151,38 @@ void MainWindow::saveSettings() {
     keyfile->set_string("session", "open", open);
     keyfile->set_string("session", "active", active);
 
-    keyfile->set_integer("udp", "port", udpPort_);
-    keyfile->set_boolean("udp", "enabled", udpEnabled_);
-    keyfile->set_integer("rig", "model", rigModel_);
-    keyfile->set_string("rig", "device", rigDevice_);
-    keyfile->set_integer("rig", "poll_ms", rigPollMs_);
-    keyfile->set_boolean("rig", "autoconnect", rigAutoConnect_);
+    keyfile->set_integer("udp", "port", cfg().udpPort);
+    keyfile->set_boolean("udp", "enabled", cfg().udpEnabled);
+    keyfile->set_integer("rig", "model", cfg().rigModel);
+    keyfile->set_string("rig", "device", cfg().rigDevice);
+    keyfile->set_integer("rig", "poll_ms", cfg().rigPollMs);
+    keyfile->set_boolean("rig", "autoconnect", cfg().rigAutoConnect);
 
-    keyfile->set_string("lotw", "username", lotwUser_);
-    keyfile->set_string("lotw", "password", lotwPassword_);
-    keyfile->set_string("lotw", "station_location", lotwStation_);
-    keyfile->set_string("lotw", "tqsl_path", tqslPath_);
-    keyfile->set_string("lotw", "last_download", lotwLastDownload_);
+    keyfile->set_string("lotw", "username", cfg().lotwUser);
+    keyfile->set_string("lotw", "password", cfg().lotwPassword);
+    keyfile->set_string("lotw", "station_location", cfg().lotwStation);
+    keyfile->set_string("lotw", "tqsl_path", cfg().tqslPath);
+    keyfile->set_string("lotw", "last_download", cfg().lotwLastDownload);
 
-    keyfile->set_string("qrz", "username", qrzUser_);
-    keyfile->set_string("qrz", "password", qrzPassword_);
+    keyfile->set_string("qrz", "username", cfg().qrzUser);
+    keyfile->set_string("qrz", "password", cfg().qrzPassword);
 
-    keyfile->set_string("keyer", "host", keyerHost_);
-    keyfile->set_integer("keyer", "port", keyerPort_);
-    keyfile->set_integer("keyer", "speed", keyerSpeed_);
+    keyfile->set_string("keyer", "host", cfg().keyerHost);
+    keyfile->set_integer("keyer", "port", cfg().keyerPort);
+    keyfile->set_integer("keyer", "speed", cfg().keyerSpeed);
     for (int i = 0; i < 9; ++i)
         keyfile->set_string("keyer", "message" + std::to_string(i + 1),
-                            keyerMessages_[i]);
+                            cfg().keyerMessages[i]);
 
-    keyfile->set_string("dxcluster", "host", dxHost_);
-    keyfile->set_integer("dxcluster", "port", dxPort_);
-    keyfile->set_string("dxcluster", "login", dxLogin_);
-    keyfile->set_string("dxcluster", "dock", dxDock_);
-    keyfile->set_boolean("dxcluster", "visible", dxVisible_);
-    keyfile->set_boolean("dxcluster", "autoconnect", dxAutoConnect_);
+    keyfile->set_string("dxcluster", "host", cfg().dxHost);
+    keyfile->set_integer("dxcluster", "port", cfg().dxPort);
+    keyfile->set_string("dxcluster", "login", cfg().dxLogin);
+    keyfile->set_string("dxcluster", "dock", cfg().dxDock);
+    keyfile->set_boolean("dxcluster", "visible", cfg().dxVisible);
+    keyfile->set_boolean("dxcluster", "autoconnect", cfg().dxAutoConnect);
     // Only record the divider while the panel is shown; a hidden panel's
     // position is meaningless and would clobber the last good value.
-    if (dxVisible_) {
+    if (cfg().dxVisible) {
         const int pos = paned_.get_position();
         if (pos > 0)
             keyfile->set_integer("dxcluster", "position", pos);
@@ -1270,66 +1226,66 @@ void MainWindow::loadSettings() {
             }
             if (settings_->has_group("udp")) {
                 if (settings_->has_key("udp", "port"))
-                    udpPort_ = settings_->get_integer("udp", "port");
+                    cfg().udpPort = settings_->get_integer("udp", "port");
                 if (settings_->has_key("udp", "enabled"))
-                    udpEnabled_ = settings_->get_boolean("udp", "enabled");
+                    cfg().udpEnabled = settings_->get_boolean("udp", "enabled");
             }
             if (settings_->has_group("rig")) {
                 if (settings_->has_key("rig", "model"))
-                    rigModel_ = settings_->get_integer("rig", "model");
+                    cfg().rigModel = settings_->get_integer("rig", "model");
                 if (settings_->has_key("rig", "device"))
-                    rigDevice_ = settings_->get_string("rig", "device").raw();
+                    cfg().rigDevice = settings_->get_string("rig", "device").raw();
                 if (settings_->has_key("rig", "poll_ms"))
-                    rigPollMs_ = settings_->get_integer("rig", "poll_ms");
+                    cfg().rigPollMs = settings_->get_integer("rig", "poll_ms");
                 if (settings_->has_key("rig", "autoconnect"))
-                    rigAutoConnect_ = settings_->get_boolean("rig", "autoconnect");
+                    cfg().rigAutoConnect = settings_->get_boolean("rig", "autoconnect");
             }
             if (settings_->has_group("lotw")) {
                 if (settings_->has_key("lotw", "username"))
-                    lotwUser_ = settings_->get_string("lotw", "username").raw();
+                    cfg().lotwUser = settings_->get_string("lotw", "username").raw();
                 if (settings_->has_key("lotw", "password"))
-                    lotwPassword_ = settings_->get_string("lotw", "password").raw();
+                    cfg().lotwPassword = settings_->get_string("lotw", "password").raw();
                 if (settings_->has_key("lotw", "station_location"))
-                    lotwStation_ = settings_->get_string("lotw", "station_location").raw();
+                    cfg().lotwStation = settings_->get_string("lotw", "station_location").raw();
                 if (settings_->has_key("lotw", "tqsl_path"))
-                    tqslPath_ = settings_->get_string("lotw", "tqsl_path").raw();
+                    cfg().tqslPath = settings_->get_string("lotw", "tqsl_path").raw();
                 if (settings_->has_key("lotw", "last_download"))
-                    lotwLastDownload_ = settings_->get_string("lotw", "last_download").raw();
+                    cfg().lotwLastDownload = settings_->get_string("lotw", "last_download").raw();
             }
             if (settings_->has_group("qrz")) {
                 if (settings_->has_key("qrz", "username"))
-                    qrzUser_ = settings_->get_string("qrz", "username").raw();
+                    cfg().qrzUser = settings_->get_string("qrz", "username").raw();
                 if (settings_->has_key("qrz", "password"))
-                    qrzPassword_ = settings_->get_string("qrz", "password").raw();
+                    cfg().qrzPassword = settings_->get_string("qrz", "password").raw();
             }
             if (settings_->has_group("keyer")) {
                 if (settings_->has_key("keyer", "host"))
-                    keyerHost_ = settings_->get_string("keyer", "host").raw();
+                    cfg().keyerHost = settings_->get_string("keyer", "host").raw();
                 if (settings_->has_key("keyer", "port"))
-                    keyerPort_ = settings_->get_integer("keyer", "port");
+                    cfg().keyerPort = settings_->get_integer("keyer", "port");
                 if (settings_->has_key("keyer", "speed"))
-                    keyerSpeed_ = settings_->get_integer("keyer", "speed");
+                    cfg().keyerSpeed = settings_->get_integer("keyer", "speed");
                 for (int i = 0; i < 9; ++i) {
                     const std::string key = "message" + std::to_string(i + 1);
                     if (settings_->has_key("keyer", key))
-                        keyerMessages_[i] = settings_->get_string("keyer", key).raw();
+                        cfg().keyerMessages[i] = settings_->get_string("keyer", key).raw();
                 }
             }
             if (settings_->has_group("dxcluster")) {
                 if (settings_->has_key("dxcluster", "host"))
-                    dxHost_ = settings_->get_string("dxcluster", "host").raw();
+                    cfg().dxHost = settings_->get_string("dxcluster", "host").raw();
                 if (settings_->has_key("dxcluster", "port"))
-                    dxPort_ = settings_->get_integer("dxcluster", "port");
+                    cfg().dxPort = settings_->get_integer("dxcluster", "port");
                 if (settings_->has_key("dxcluster", "login"))
-                    dxLogin_ = settings_->get_string("dxcluster", "login").raw();
+                    cfg().dxLogin = settings_->get_string("dxcluster", "login").raw();
                 if (settings_->has_key("dxcluster", "dock"))
-                    dxDock_ = settings_->get_string("dxcluster", "dock").raw();
+                    cfg().dxDock = settings_->get_string("dxcluster", "dock").raw();
                 if (settings_->has_key("dxcluster", "visible"))
-                    dxVisible_ = settings_->get_boolean("dxcluster", "visible");
+                    cfg().dxVisible = settings_->get_boolean("dxcluster", "visible");
                 if (settings_->has_key("dxcluster", "autoconnect"))
-                    dxAutoConnect_ = settings_->get_boolean("dxcluster", "autoconnect");
+                    cfg().dxAutoConnect = settings_->get_boolean("dxcluster", "autoconnect");
                 if (settings_->has_key("dxcluster", "position"))
-                    dxPanelPos_ = settings_->get_integer("dxcluster", "position");
+                    cfg().dxPanelPos = settings_->get_integer("dxcluster", "position");
             }
         } catch (const Glib::Error&) {
         }
@@ -1365,7 +1321,7 @@ void MainWindow::loadSettings() {
     applyDxConfig();
 }
 
-void MainWindow::setStatus(const Glib::ustring& msg) {
+void MainWindow::setStatus(const std::string& msg) {
     statusLabel_.set_text(msg);
 }
 

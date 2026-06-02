@@ -5,6 +5,7 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -102,39 +103,67 @@ bool UdpListener::start(int port, std::string& error) {
         return false;
     }
 
-    const int flags = ::fcntl(fd_, F_GETFL, 0);
-    ::fcntl(fd_, F_SETFL, flags | O_NONBLOCK);
+    if (::pipe(wake_) != 0) {
+        error = std::strerror(errno);
+        ::close(fd_);
+        fd_ = -1;
+        return false;
+    }
 
     port_ = port;
-    ioConn_ = Glib::signal_io().connect(
-        sigc::mem_fun(*this, &UdpListener::onReadable), fd_,
-        Glib::IOCondition::IO_IN);
+    running_.store(true);
+    thread_ = std::thread(&UdpListener::worker, this);
     return true;
 }
 
 void UdpListener::stop() {
-    if (ioConn_.connected())
-        ioConn_.disconnect();
-    if (fd_ >= 0) {
-        ::close(fd_);
-        fd_ = -1;
+    if (running_.exchange(false) && wake_[1] >= 0) {
+        const char b = 1;
+        [[maybe_unused]] ssize_t w = ::write(wake_[1], &b, 1);  // unblock the worker
+    }
+    if (thread_.joinable())
+        thread_.join();
+    for (int* p : {&wake_[0], &wake_[1], &fd_}) {
+        if (*p >= 0) {
+            ::close(*p);
+            *p = -1;
+        }
     }
     port_ = 0;
 }
 
-bool UdpListener::onReadable(Glib::IOCondition) {
+void UdpListener::worker() {
     std::uint8_t buf[65536];
-    for (;;) {
-        const ssize_t n = ::recv(fd_, buf, sizeof(buf), 0);
-        if (n < 0)
-            break;       // EAGAIN: datagram queue drained
-        if (n == 0)
-            continue;    // empty datagram
-        std::string source;
-        const auto qsos =
-            decodeDatagram(buf, static_cast<std::size_t>(n), source);
-        if (!qsos.empty() && callback_)
-            callback_(qsos, source);
+    while (running_.load()) {
+        pollfd fds[2] = {{fd_, POLLIN, 0}, {wake_[0], POLLIN, 0}};
+        const int rc = ::poll(fds, 2, -1);
+        if (rc < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        if (fds[1].revents & POLLIN)
+            break;  // stop() signalled
+        if (!(fds[0].revents & POLLIN))
+            continue;
+
+        // Drain all queued datagrams.
+        for (;;) {
+            const ssize_t n = ::recv(fd_, buf, sizeof(buf), MSG_DONTWAIT);
+            if (n < 0)
+                break;       // EAGAIN: queue drained
+            if (n == 0)
+                continue;    // empty datagram
+            std::string source;
+            auto qsos = decodeDatagram(buf, static_cast<std::size_t>(n), source);
+            if (qsos.empty())
+                continue;
+            // Deliver on the UI thread.
+            ui_.post([this, w = std::weak_ptr<bool>(alive_),
+                      qsos = std::move(qsos), source = std::move(source)]() {
+                if (!w.expired() && callback_)
+                    callback_(qsos, source);
+            });
+        }
     }
-    return true;  // keep watching
 }

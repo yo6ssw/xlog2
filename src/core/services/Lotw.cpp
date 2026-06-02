@@ -1,7 +1,5 @@
 #include "Lotw.h"
 
-#include <giomm/subprocess.h>
-
 #include <curl/curl.h>
 
 #include <mutex>
@@ -30,9 +28,8 @@ std::string urlEscape(CURL* curl, const std::string& s) {
 
 } // namespace
 
-LotwClient::LotwClient() {
+LotwClient::LotwClient(IUiDispatcher& ui) : ui_(ui), uploader_(ui) {
     ensureCurlGlobalInit();
-    dispatcher_.connect(sigc::mem_fun(*this, &LotwClient::onDispatch));
 }
 
 LotwClient::~LotwClient() {
@@ -97,10 +94,13 @@ void LotwClient::worker(std::string url) {
         error_     = std::move(error);
         hasResult_ = true;
     }
-    dispatcher_.emit();
+    ui_.post([this, w = std::weak_ptr<bool>(alive_)]() {
+        if (!w.expired())
+            deliverDownload();
+    });
 }
 
-void LotwClient::onDispatch() {
+void LotwClient::deliverDownload() {
     std::string body;
     std::string error;
     {
@@ -134,23 +134,17 @@ void LotwClient::uploadAdifFile(const std::string& tqslPath,
     }
     argv.push_back(adifPath);
 
-    try {
-        auto proc = Gio::Subprocess::create(argv, Gio::Subprocess::Flags::NONE);
-        proc->wait_check_async(
-            [this, proc](const Glib::RefPtr<Gio::AsyncResult>& result) {
-                try {
-                    proc->wait_check_finish(result);
-                    if (onUploadDone)
-                        onUploadDone(true, "Upload complete.");
-                } catch (const Glib::Error& e) {
-                    if (onUploadDone)
-                        onUploadDone(false, std::string("tqsl failed: ") + e.what());
-                }
-            });
-    } catch (const Glib::Error& e) {
-        if (onUploadDone)
-            onUploadDone(false,
-                         std::string("Could not run tqsl: ") + e.what() +
-                             " — is tqsl installed?");
-    }
+    uploader_.run(argv, [this, w = std::weak_ptr<bool>(alive_)](
+                            const ProcessRunner::Result& r) {
+        if (w.expired() || !onUploadDone)
+            return;
+        if (!r.error.empty())
+            onUploadDone(false, "Could not run tqsl: " + r.error +
+                                    " — is tqsl installed?");
+        else if (r.ok)
+            onUploadDone(true, "Upload complete.");
+        else
+            onUploadDone(false, "tqsl failed (exit " + std::to_string(r.exitCode) +
+                                    "): " + r.output);
+    });
 }

@@ -103,9 +103,8 @@ constexpr const char* kBase = "https://xmldata.qrz.com/xml/current/";
 
 } // namespace
 
-QrzClient::QrzClient() {
+QrzClient::QrzClient(IUiDispatcher& ui) : ui_(ui) {
     ensureCurlGlobalInit();
-    dispatcher_.connect(sigc::mem_fun(*this, &QrzClient::onDispatch));
 }
 
 QrzClient::~QrzClient() {
@@ -221,10 +220,13 @@ void QrzClient::worker(std::string user, std::string password, std::string calls
         error_     = std::move(error);
         hasResult_ = true;
     }
-    dispatcher_.emit();
+    ui_.post([this, w = std::weak_ptr<bool>(alive_)]() {
+        if (!w.expired())
+            deliverResult();
+    });
 }
 
-void QrzClient::onDispatch() {
+void QrzClient::deliverResult() {
     QrzResult result;
     std::string error;
     {
