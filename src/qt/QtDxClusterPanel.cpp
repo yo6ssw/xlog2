@@ -2,6 +2,7 @@
 
 #include "Bands.h"
 #include "Dxcc.h"
+#include "FlowLayout.h"
 
 #include <QHeaderView>
 #include <QHBoxLayout>
@@ -12,6 +13,7 @@
 #include <QTableView>
 #include <QTimer>
 #include <QVBoxLayout>
+#include <QWidget>
 
 #include <algorithm>
 #include <cmath>
@@ -52,11 +54,17 @@ void QtDxClusterPanel::buildUi() {
     controls->addWidget(send);
     outer->addLayout(controls);
 
-    // --- band filter chips ---
-    auto* chips = new QHBoxLayout;
-    buildBandChips(chips);
-    chips->addStretch();
-    outer->addLayout(chips);
+    // --- band filter chips (wrap to multiple rows, like the gtkmm FlowBox) ---
+    auto* chipsWidget = new QWidget;
+    auto* chipsFlow = new FlowLayout(chipsWidget, 0, 4, 4);
+    buildBandChips(chipsFlow);
+    // Let the surrounding vertical layout grow the chip area's height as rows
+    // wrap, instead of clipping it to one line.
+    QSizePolicy sp = chipsWidget->sizePolicy();
+    sp.setHeightForWidth(true);
+    sp.setVerticalPolicy(QSizePolicy::Minimum);
+    chipsWidget->setSizePolicy(sp);
+    outer->addWidget(chipsWidget);
 
     // --- band map table ---
     model_ = new QStandardItemModel(this);
@@ -87,7 +95,7 @@ void QtDxClusterPanel::buildUi() {
     outer->addWidget(console_);
 }
 
-void QtDxClusterPanel::buildBandChips(QHBoxLayout* into) {
+void QtDxClusterPanel::buildBandChips(QLayout* into) {
     for (const auto& band : bands::names()) {
         auto* chip = new QPushButton(QString::fromStdString(band));
         chip->setCheckable(true);
