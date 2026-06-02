@@ -3,6 +3,7 @@
 #include "Adif.h"
 #include "IniFile.h"
 #include "LogPagePresenter.h"
+#include "QtDxClusterPanel.h"
 #include "QtLogPage.h"
 #include "Statistics.h"
 #include "StrUtil.h"
@@ -19,13 +20,12 @@
 #include <QFormLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QListWidget>
 #include <QMenuBar>
 #include <QMessageBox>
-#include <QPlainTextEdit>
 #include <QSpinBox>
 #include <QStatusBar>
 #include <QTabWidget>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -43,6 +43,28 @@ std::string envPath(const char* var, const std::string& fallbackSub) {
         return std::string(v) + "/xlog2";
     const char* home = std::getenv("HOME");
     return std::string(home ? home : ".") + "/" + fallbackSub + "/xlog2";
+}
+
+// The DX-cluster dock side persists as top|bottom|left|right (shared with the
+// gtkmm "dock" preference).
+Qt::DockWidgetArea dockAreaFromString(const std::string& s) {
+    if (s == "top")   return Qt::TopDockWidgetArea;
+    if (s == "left")  return Qt::LeftDockWidgetArea;
+    if (s == "right") return Qt::RightDockWidgetArea;
+    return Qt::BottomDockWidgetArea;
+}
+
+std::string stringFromDockArea(Qt::DockWidgetArea a) {
+    switch (a) {
+        case Qt::TopDockWidgetArea:   return "top";
+        case Qt::LeftDockWidgetArea:  return "left";
+        case Qt::RightDockWidgetArea: return "right";
+        default:                      return "bottom";
+    }
+}
+
+bool isHorizontalArea(Qt::DockWidgetArea a) {
+    return a == Qt::LeftDockWidgetArea || a == Qt::RightDockWidgetArea;
 }
 
 }  // namespace
@@ -71,26 +93,24 @@ QtMainWindow::QtMainWindow()
     status_ = new QLabel("Ready.");
     statusBar()->addWidget(status_, 1);
 
-    // DX cluster dock (console + spot list).
-    auto* dock = new QDockWidget("DX cluster", this);
-    auto* dockBody = new QWidget;
-    auto* dockLayout = new QVBoxLayout(dockBody);
-    dxConsole_ = new QPlainTextEdit;
-    dxConsole_->setReadOnly(true);
-    dxSpots_ = new QListWidget;
-    dockLayout->addWidget(dxConsole_, 2);
-    dockLayout->addWidget(dxSpots_, 1);
-    dock->setWidget(dockBody);
-    addDockWidget(Qt::BottomDockWidgetArea, dock);
-    dock->hide();
-    connect(dxSpots_, &QListWidget::itemActivated, this, [this](QListWidgetItem* it) {
-        if (auto* log = currentLog()) {
-            const QString call = it->data(Qt::UserRole).toString();
-            const double mhz = it->data(Qt::UserRole + 1).toDouble();
-            log->applyDxSpot(call.toStdString(), mhz);
-            rig_.setFrequency(mhz);
-        }
-    });
+    // DX cluster dock: a band-map panel (spots table on top, telnet console
+    // below) matching the gtkmm DxClusterPanel.
+    dxDock_  = new QDockWidget("DX cluster", this);
+    dxPanel_ = new QtDxClusterPanel;
+    dxDock_->setWidget(dxPanel_);
+    addDockWidget(Qt::BottomDockWidgetArea, dxDock_);
+    dxDock_->hide();
+    connect(dxPanel_, &QtDxClusterPanel::activateSpot, this,
+            [this](const QString& call, double mhz) {
+                if (auto* log = currentLog()) {
+                    log->applyDxSpot(call.toStdString(), mhz);
+                    rig_.setFrequency(mhz);
+                }
+            });
+    connect(dxPanel_, &QtDxClusterPanel::sendCommand, this,
+            [this](const QString& cmd) { cluster_.sendCommand(cmd.toStdString()); });
+    connect(dxPanel_, &QtDxClusterPanel::connectToggle, this,
+            [this]() { onClusterConnectToggle(); });
 
     buildMenus();
 
@@ -114,23 +134,13 @@ QtMainWindow::QtMainWindow()
     qrz_.onResult = [this](const QrzResult& r, const std::string& err) {
         presenter_.routeQrzResult(r, err);
     };
-    cluster_.onLine = [this](const std::string& l) {
-        dxConsole_->appendPlainText(QString::fromStdString(l));
-    };
+    cluster_.onLine = [this](const std::string& l) { dxPanel_->addLine(l); };
     cluster_.onStatus = [this](const std::string& s) {
-        dxConsole_->appendPlainText(QString::fromStdString(s));
+        dxPanel_->addLine(s);
+        dxPanel_->setConnected(cluster_.isConnected());
         setStatus(s);
     };
-    cluster_.onSpot = [this](const DxSpot& s) {
-        auto* it = new QListWidgetItem(
-            QString("%1  %2  %3")
-                .arg(QString::fromStdString(s.dxCall), -12)
-                .arg(s.freqKHz / 1000.0, 0, 'f', 3)
-                .arg(QString::fromStdString(s.comment)));
-        it->setData(Qt::UserRole, QString::fromStdString(s.dxCall));
-        it->setData(Qt::UserRole + 1, s.freqKHz / 1000.0);
-        dxSpots_->addItem(it);
-    };
+    cluster_.onSpot = [this](const DxSpot& s) { dxPanel_->addSpot(s); };
 
     loadSettings();
     if (tabs_->count() == 0)
@@ -589,7 +599,7 @@ void QtMainWindow::onClusterConnectToggle() {
         return;
     }
     if (cfg().dxHost.empty()) { setStatus("Set a DX cluster host in its settings first."); return; }
-    findChild<QDockWidget*>()->show();
+    dxDock_->show();
     cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
 }
 
@@ -660,8 +670,21 @@ void QtMainWindow::loadSettings() {
     }
 
     applyKeyerConfig();
+
+    // Honour the persisted DX-cluster dock placement + visibility.
+    const Qt::DockWidgetArea area = dockAreaFromString(cfg().dxDock);
+    addDockWidget(area, dxDock_);  // moves the dock to the saved side
+    dxDock_->setVisible(cfg().dxVisible);
+    if (cfg().dxVisible && cfg().dxPanelPos > 0) {
+        // resizeDocks only takes effect once the window is laid out, so defer it
+        // to the first event-loop turn (after show()).
+        const int pos = cfg().dxPanelPos;
+        const Qt::Orientation o = isHorizontalArea(area) ? Qt::Horizontal : Qt::Vertical;
+        QTimer::singleShot(0, this, [this, pos, o]() { resizeDocks({dxDock_}, {pos}, o); });
+    }
+
     if (cfg().dxAutoConnect && !cfg().dxHost.empty()) {
-        findChild<QDockWidget*>()->show();
+        dxDock_->show();
         cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
     }
 }
@@ -669,6 +692,17 @@ void QtMainWindow::loadSettings() {
 void QtMainWindow::saveSettings() {
     IniFile ini;
     ini.loadFromFile(layoutFilePath());
+
+    // Capture the live DX-cluster dock state so Settings::store persists it.
+    const Qt::DockWidgetArea area = dockWidgetArea(dxDock_);
+    if (area != Qt::NoDockWidgetArea)
+        cfg().dxDock = stringFromDockArea(area);
+    cfg().dxVisible = dxDock_->isVisible();
+    if (cfg().dxVisible) {
+        const int sz = isHorizontalArea(area) ? dxDock_->width() : dxDock_->height();
+        if (sz > 0)
+            cfg().dxPanelPos = sz;
+    }
     cfg().store(ini);
     if (auto* p = currentPage())
         p->storeColumnLayout(ini);  // shared column order/width/visibility

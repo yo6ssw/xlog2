@@ -16,8 +16,8 @@
 
 class QTabWidget;
 class QLabel;
-class QPlainTextEdit;
-class QListWidget;
+class QDockWidget;
+class QtDxClusterPanel;
 class QtLogPage;
 class LogPagePresenter;
 
@@ -92,9 +92,9 @@ private:
     // applied to newly-created tabs (mirrors the gtkmm shell).
     IniFile         loadedIni_;
 
-    QTabWidget*     tabs_   = nullptr;
-    QLabel*         status_ = nullptr;
-    QPlainTextEdit* dxConsole_ = nullptr;
-    QListWidget*    dxSpots_   = nullptr;
-    QAction*        udpAction_ = nullptr;
+    QTabWidget*       tabs_    = nullptr;
+    QLabel*           status_  = nullptr;
+    QDockWidget*      dxDock_  = nullptr;
+    QtDxClusterPanel* dxPanel_ = nullptr;
+    QAction*          udpAction_ = nullptr;
 };
