@@ -5,6 +5,8 @@
 #include "Statistics.h"
 #include "UiUtil.h"
 
+#include <gdk/gdkkeysyms.h>
+
 #include <sys/stat.h>
 
 #include <algorithm>
@@ -28,6 +30,27 @@ MainWindow::MainWindow()
     signal_close_request().connect(sigc::mem_fun(*this, &MainWindow::onCloseRequest), false);
 
     buildActions();
+
+    // F1–F9 keyer accelerators, installed once on the window so they fire from
+    // anywhere — the log page or the DX-cluster panel — routed to the active
+    // tab's presenter (whose form data feeds the CW expansion). CAPTURE phase so
+    // they win over the GtkPaned's default F6/F8 bindings; LOCAL scope on the
+    // toplevel covers every focused descendant. onSendCwClicked() guards empty
+    // slots.
+    auto keyerShortcuts = Gtk::ShortcutController::create();
+    keyerShortcuts->set_scope(Gtk::ShortcutScope::LOCAL);
+    keyerShortcuts->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+    for (int i = 0; i < 9; ++i) {
+        auto action = Gtk::CallbackAction::create(
+            [this, i](Gtk::Widget&, const Glib::VariantBase&) {
+                if (auto* page = currentPage())
+                    page->presenter().onSendCwClicked(i);
+                return true;
+            });
+        keyerShortcuts->add_shortcut(
+            Gtk::Shortcut::create(Gtk::KeyvalTrigger::create(GDK_KEY_F1 + i), action));
+    }
+    add_controller(keyerShortcuts);
 
     auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
     set_child(*vbox);
