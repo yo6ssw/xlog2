@@ -10,10 +10,29 @@
 #include <QHeaderView>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenu>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
 #include <QVBoxLayout>
+
+#include "StrUtil.h"
+
+namespace {
+// Stable column ids in logical (model) order — identical to the gtkmm view's
+// ids, so a saved layout is interchangeable between the two backends.
+const char* const kColIds[] = {
+    "date", "on", "off", "call", "country", "cont", "band", "mode", "freq",
+    "rst_s", "rst_r", "name", "qth", "loc", "pwr", "qsl", "lotw", "cqz", "comment"};
+constexpr int kColCount = static_cast<int>(sizeof(kColIds) / sizeof(kColIds[0]));
+
+int logicalForId(const std::string& id) {
+    for (int i = 0; i < kColCount; ++i)
+        if (id == kColIds[i])
+            return i;
+    return -1;
+}
+}  // namespace
 
 QtLogPage::QtLogPage(QWidget* parent) : QWidget(parent), presenter_(*this) {
     // Bridge the presenter's shell-facing hooks to Qt signals.
@@ -58,8 +77,26 @@ void QtLogPage::buildUi() {
     table_->setSelectionMode(QAbstractItemView::SingleSelection);
     table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
     table_->setSortingEnabled(true);
-    table_->horizontalHeader()->setStretchLastSection(true);
     table_->verticalHeader()->setVisible(false);
+    auto* header = table_->horizontalHeader();
+    header->setStretchLastSection(true);
+    header->setSectionsMovable(true);  // drag to reorder
+    // Right-click the header to toggle column visibility (parity with the gtkmm
+    // header context menu).
+    header->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(header, &QWidget::customContextMenuRequested, this,
+            [this, header](const QPoint& pos) {
+                QMenu menu;
+                for (int i = 0; i < kColCount; ++i) {
+                    auto* a = menu.addAction(
+                        model_->headerData(i, Qt::Horizontal, Qt::DisplayRole).toString());
+                    a->setCheckable(true);
+                    a->setChecked(!header->isSectionHidden(i));
+                    connect(a, &QAction::toggled, this,
+                            [header, i](bool on) { header->setSectionHidden(i, !on); });
+                }
+                menu.exec(header->mapToGlobal(pos));
+            });
     outer->addWidget(table_, 1);
 
     connect(search_, &QLineEdit::textChanged, this,
@@ -255,4 +292,52 @@ void QtLogPage::focusCall() { call_->setFocus(); }
 void QtLogPage::showSearch() {
     search_->show();
     search_->setFocus();
+}
+
+// --- column layout -----------------------------------------------------------
+
+void QtLogPage::applyColumnLayout(const IniFile& ini) {
+    auto* h = table_->horizontalHeader();
+    for (int i = 0; i < kColCount; ++i) {
+        const std::string id = kColIds[i];
+        if (ini.hasKey("width", id)) {
+            const int w = ini.getInt("width", id, 0);
+            if (w > 0)
+                h->resizeSection(i, w);
+        }
+        if (ini.hasKey("visible", id))
+            h->setSectionHidden(i, !ini.getBool("visible", id, true));
+    }
+    if (ini.hasKey("columns", "order")) {
+        int target = 0;
+        for (const auto& id : strutil::splitSemicolons(ini.getString("columns", "order"))) {
+            const int logical = logicalForId(id);
+            if (logical < 0)
+                continue;
+            const int cur = h->visualIndex(logical);
+            if (cur >= 0 && cur != target)
+                h->moveSection(cur, target);
+            ++target;
+        }
+    }
+}
+
+void QtLogPage::storeColumnLayout(IniFile& ini) const {
+    auto* h = table_->horizontalHeader();
+    std::string order;
+    for (int v = 0; v < kColCount; ++v) {
+        const int logical = h->logicalIndex(v);
+        if (logical < 0 || logical >= kColCount)
+            continue;
+        if (!order.empty())
+            order += ';';
+        order += kColIds[logical];
+    }
+    ini.setString("columns", "order", order);
+    for (int i = 0; i < kColCount; ++i) {
+        const int w = h->sectionSize(i);
+        if (w > 0)
+            ini.setInt("width", kColIds[i], w);
+        ini.setBool("visible", kColIds[i], !h->isSectionHidden(i));
+    }
 }

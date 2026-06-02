@@ -88,6 +88,10 @@ private:
     CwKeyer         keyer_;
     DxCluster       cluster_;
 
+    // The settings loaded at startup, kept so the shared column layout can be
+    // applied to newly-created tabs (mirrors the gtkmm shell).
+    IniFile         loadedIni_;
+
     QTabWidget*     tabs_   = nullptr;
     QLabel*         status_ = nullptr;
     QPlainTextEdit* dxConsole_ = nullptr;
