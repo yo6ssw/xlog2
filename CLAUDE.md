@@ -2,107 +2,143 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-xlog2 is a GTK4 amateur-radio logging program (a clone of `xlog`) written in C++20 with CMake. It logs QSOs to SQLite, exchanges ADIF, listens for QSOs over UDP, controls a radio via Hamlib, and syncs with ARRL's LoTW.
+xlog2 is a C++20/CMake amateur-radio logging program (a clone of `xlog`). It
+logs QSOs to SQLite, exchanges ADIF, receives QSOs over UDP, controls a radio
+via Hamlib, looks up calls on QRZ.com, drives a network CW keyer, shows a
+DX-cluster band map, and syncs with ARRL's LoTW.
+
+It is built as a **toolkit-neutral core library (`xlog_core`) with two
+interchangeable frontends**: `xlog2-gtk` (GTK 4 / gtkmm) and `xlog2-qt`
+(Qt 6 Widgets). Both drive the same core and read/write the same files.
 
 ## Commands
 
 ```sh
-# Configure + build
+# Configure + build (produces build/xlog2-gtk and build/xlog2-qt)
 cmake -S . -B build && cmake --build build -j
 
+# Build one frontend only
+cmake -S . -B build -DXLOG_BUILD_GTK=ON -DXLOG_BUILD_QT=OFF
+cmake -S . -B build -DXLOG_BUILD_GTK=OFF -DXLOG_BUILD_QT=ON
+
 # Run (a display is required; this box uses Wayland)
-GDK_BACKEND=wayland ./build/xlog2
+GDK_BACKEND=wayland ./build/xlog2-gtk
+./build/xlog2-qt
 
 # Dependencies (Debian/Ubuntu)
-sudo apt install build-essential cmake libgtkmm-4.0-dev libsqlite3-dev \
-                 libhamlib-dev libcurl4-openssl-dev
+sudo apt install build-essential cmake pkg-config \
+                 libgtkmm-4.0-dev qt6-base-dev \
+                 libsqlite3-dev libhamlib-dev libcurl4-openssl-dev
 # tqsl (LoTW upload, runtime only): sudo apt install tqsl
 ```
 
 After changing headers or adding/removing source files, do a **clean rebuild**
 (`rm -rf build && cmake -S . -B build && cmake --build build -j`). Incremental
-builds here have produced stale binaries that fail at startup; a clean rebuild
-resolves it.
+builds here have produced stale binaries; a clean rebuild resolves it.
 
 ### Tests
 
-There is no test framework. Tests are written as throwaway `main()` programs
-(historically under `/tmp`) compiled against the specific sources under test:
+There is no test framework. Tests are throwaway `main()` programs compiled
+against `xlog_core` (build it first; it's `build/libxlog_core.a`):
 
 ```sh
-# Pure logic (no GUI): link only what you need
-g++ -std=c++20 -Isrc /tmp/foo_test.cpp src/LogBook.cpp src/Adif.cpp \
-    $(pkg-config --cflags --libs sqlite3) -o /tmp/foo_test && /tmp/foo_test
+g++ -std=c++20 -Isrc/core/domain -Isrc/core/logic -Isrc/core/settings \
+    -Isrc/core/view -Isrc/core/platform -Isrc/core/services -Isrc/core/presenter \
+    /tmp/foo_test.cpp build/libxlog_core.a \
+    $(pkg-config --cflags --libs sqlite3 hamlib libcurl) -lpthread -o /tmp/foo_test
 ```
 
-Anything touching gtkmm/giomm objects (incl. `Glib::Dispatcher`, `ColumnView`,
-`Gio::Subprocess`) **must run inside a real `Gtk::Application`** — calling the C
-`gtk_init()` skips gtkmm's wrapper-table registration and breaks
-`get_object()`/casts. Pattern: create the app, do the work in a
-`signal_activate()` handler, drive async work with
-`Glib::MainContext::get_default()->iteration(false)` in a bounded loop, then
-`app->quit()`. Run with `GDK_BACKEND=wayland`.
+Because the core is toolkit-free, **presenters and logic are testable with no
+GUI** — implement the view interface (`ILogPageView`/`IMainView`) as a stub that
+records calls, drive the presenter, and assert. (See the RST-default and
+dupe/DXCC checks done this way.) The Qt frontend can be exercised headlessly
+with `QtTest` + `QT_QPA_PLATFORM=offscreen|wayland`; gtkmm widget code, if ever
+tested, must run inside a real `Gtk::Application` (the C `gtk_init()` skips
+gtkmm's wrapper-table registration and breaks casts).
 
 ## Architecture
 
-**Shell vs. page.** `MainWindow` (`src/MainWindow.*`) is a thin shell:
-menu bar, a `Gtk::Notebook` of tabs, the status line, and the long-lived
-service objects (`UdpListener`, `RigController`, `LotwClient`). Each tab is a
-`LogPage` (`src/LogPage.*`) that owns one logbook's entire UI + state: a
-`LogBook`, the `ColumnView`, the entry form, and live dupe detection. Menu
-actions resolve `currentPage()` and delegate. A `LogPage` reports back to the
-shell via two signals — `signalChanged()` (content/path changed → update tab
-label/title/session) and `signalStatus()` (status-line text). When adding a
-per-logbook feature, it almost always belongs in `LogPage`, not `MainWindow`.
+**Core vs. frontends (Passive-View MVP).** `xlog_core` (`src/core/`) contains
+*all* business logic and has **no gtkmm/Qt on its include path** — the boundary
+is enforced by the build, so a stray toolkit include in core fails to compile.
+Each frontend provides only thin *views* plus a couple of platform adapters.
 
-**Data + storage.** `Qso` (`src/Qso.h`) is the flat record. `LogBook`
-(`src/LogBook.*`) wraps a SQLite DB and keeps an in-memory `cache_` (the source
-the UI reads); every `add/update/remove` commits immediately and reloads the
-cache. The column set is defined **once** in the `kColumns` array — INSERT and
-SELECT SQL are generated from it (`insertSql()`/`selectSql()`), so adding a
-field means: add it to `Qso`, to `kColumns`, to `fieldsOf()`, to the CREATE in
-`createSchema()`, and to the `reload()` column reads. `createSchema()` also runs
-`ALTER TABLE ADD COLUMN` for every column (ignoring "duplicate" errors) to
-migrate older `.xlog` files. A `LogBook` starts in-memory; `MainWindow` opens a
-persistent default at `$XDG_DATA_HOME/xlog2/default.xlog` so logged QSOs survive
-restarts. *New Tab* is a transient in-memory log until *Save As*.
+- **Presenters** (`src/core/presenter/`) own the logic. `LogPagePresenter` holds
+  one logbook's state (a `LogBook`, the entry-form mapping, live dupe + DXCC
+  indicators, CW expansion, CRUD). `MainPresenter` holds shell-level config
+  (`Settings`) and routes service results to the current tab.
+- **View interfaces** (`src/core/view/`): `ILogPageView`, `IMainView`, and the
+  `FormData` DTO. Presenters call these; the frontend implements them.
+- **gtkmm views** (`src/`): `LogPage`/`MainWindow` implement the interfaces with
+  gtkmm widgets; `XlogApplication` is the `Gtk::Application`; `GlibDispatcher` is
+  the UI-thread adapter.
+- **Qt views** (`src/qt/`): `QtLogPage`/`QtMainWindow` implement the same
+  interfaces with Qt Widgets; `QtDispatcher` is the adapter; `QsoTableModel`,
+  `QtDxClusterPanel` and `FlowLayout` are Qt-specific helpers.
 
-**ADIF** (`src/Adif.*`) is the interchange format: `parse()`/`write()` map
-between the ADIF wire form (`YYYYMMDD`/`HHMM`) and `Qso` (`YYYY-MM-DD`/`HH:MM`).
-It is reused everywhere QSOs cross a boundary (import/export, UDP, LoTW).
+When adding a per-logbook feature, it belongs in `LogPagePresenter`, not the
+views. Shell-level routing belongs in `MainPresenter`. Only widget plumbing
+goes in the frontends.
 
-**Concurrency model — never block the GTK main loop.** Three patterns coexist:
-- **Non-blocking socket on the main loop:** `UdpListener` (`src/Udp.*`) watches
-  a UDP fd with `Glib::signal_io` — no thread. Decodes WSJT-X "Logged ADIF"
-  packets and raw ADIF datagrams.
-- **Worker thread → `Glib::Dispatcher`:** `RigController` (`src/Rig.*`, Hamlib
-  polling) and `LotwClient` download (`src/Lotw.*`, libcurl) run blocking work
-  on a `std::thread` and marshal results to the UI thread via a
-  `Glib::Dispatcher`. The library handle is only touched on the worker thread;
-  callbacks (`onUpdate`, `onDownloadDone`, …) fire on the UI thread.
-- **`Gio::Subprocess` async:** `LotwClient` upload spawns ARRL's `tqsl`
-  (`wait_check_async`) — no thread, exit status delivered on the main loop.
+**Data + storage.** `Qso` (`src/core/domain/Qso.h`) is the flat record. `LogBook`
+(`src/core/domain/LogBook.*`) wraps a SQLite DB and keeps an in-memory `cache_`
+(ordered by `date, time_on, id`) that the UI reads; every `add/update/remove`
+commits immediately and reloads the cache. The column set is defined **once** in
+the `kColumns` array — INSERT/SELECT SQL is generated from it, and `createSchema`
+runs `ALTER TABLE ADD COLUMN` per column (ignoring "duplicate" errors) to migrate
+older `.xlog` files. Adding a field means touching: `Qso`, `kColumns`,
+`fieldsOf()`, the CREATE in `createSchema()`, the `reload()` reads, `FormData` +
+`QsoMapper` if it's on the entry form, and each frontend's column list
+(gtkmm `LogPage::buildLogView`'s `add(...)`; Qt `QsoTableModel`). A `LogBook`
+starts in-memory; the shell opens a persistent default at
+`$XDG_DATA_HOME/xlog2/default.xlog`. *New Tab* is in-memory until *Save As*.
 
-**ColumnView.** Rows are `QsoItem` (`src/QsoItem.h`), a `Glib::Object` wrapper
-required to put `Qso`s in a `Gio::ListStore`. Columns are built with
-per-column getter lambdas via `LogPage::makeColumn`. Each column has a stable
-string id (decoupled from its display title) used for layout persistence.
+**ADIF** (`src/core/domain/Adif.*`) maps between the ADIF wire form
+(`YYYYMMDD`/`HHMM`) and `Qso` (`YYYY-MM-DD`/`HH:MM`); reused everywhere QSOs
+cross a boundary (import/export, UDP, LoTW).
 
-**Settings.** One `Glib::KeyFile` at `$XDG_CONFIG_HOME/xlog2/layout.ini` holds
-everything: `[window]` geometry (size + maximized; **position is unsupported on
-GTK4/Wayland**), shared column `[columns]`/`[width]`/`[visible]` layout,
-`[session]` open files + active tab, `[udp]`, `[rig]`, and `[lotw]`. Saved from
-`MainWindow::onCloseRequest` (a `signal_close_request` handler, so widgets are
-still alive) and applied in `loadSettings`. The file is `chmod 0600` because
-`[lotw]` stores the download password in plain text.
+**Concurrency — never block the UI thread.** All services live in
+`src/core/services/` and are toolkit-neutral: blocking work runs on a
+`std::thread` and results are marshalled to the UI thread via an injected
+`IUiDispatcher` (`GlibDispatcher` for gtkmm, `QtDispatcher` — a queued
+`QMetaObject::invokeMethod` — for Qt).
+- `RigController` (Hamlib) — `rig_open()` (which can block on an unreachable
+  network rig) runs **on the worker**; `start()` returns immediately and reports
+  via `onConnectResult`. `stop()` detaches a still-connecting worker (via a
+  shared `Run` handshake) rather than hang at shutdown.
+- `UdpListener` and `DxCluster` — worker thread doing blocking POSIX sockets
+  (`recv`/`poll`/`getaddrinfo`), woken for stop/commands via a self-pipe. (These
+  are the main **POSIX-specific** code, relevant to any future Windows port.)
+- `LotwClient` — download via libcurl on a worker; upload spawns ARRL's `tqsl`
+  via the neutral `ProcessRunner` (`posix_spawn` + `waitpid`).
+- Posted closures hold a `weak_ptr` liveness token so a result arriving after
+  the controller/view is gone is dropped.
 
-**Widget lifetime.** Child widgets use `Gtk::make_managed<>` (parent-owned).
-Top-level windows that are heap-allocated (the main window, About/Stats/settings
-dialogs) set `set_hide_on_close(true)` and `delete` themselves from a
-`signal_hide` handler — this is the idiom used throughout; follow it for new
-dialogs. The app id is `ro.scripca.xlog2`.
+**Settings.** A neutral `IniFile` (`src/core/settings/`) reads/writes
+`$XDG_CONFIG_HOME/xlog2/layout.ini`; the scalar config maps to the `Settings`
+struct (`Settings::load/store`). Window geometry, the shared column layout
+(`[columns]`/`[width]`/`[visible]`, stable per-column ids) and `[session]` tabs
+live in the ini too. Both frontends `chmod 0600` it (the `[lotw]` download
+password is plain text). gtkmm saves from `MainWindow::onCloseRequest`; Qt from
+`QtMainWindow::closeEvent`.
 
-**Deprecation stance.** Code deliberately uses non-deprecated GTK4 APIs
-(`ColumnView` not `TreeView`, `DropDown` not `ComboBoxText`, `FileDialog` not
-`FileChooserDialog`, `CssProvider::load_from_string`). Prefer the same when
-extending.
+**Frontend-specific notes.**
+- *gtkmm:* rows are `QsoItem` (a `Glib::Object`) in a `Gio::ListStore` →
+  `FilterListModel` → `ColumnView`; child widgets are `Gtk::make_managed<>`;
+  heap top-levels set `set_hide_on_close(true)` and `delete` from `signal_hide`.
+  Use non-deprecated GTK4 APIs (`ColumnView` not `TreeView`, `DropDown` not
+  `ComboBoxText`, `FileDialog` not `FileChooserDialog`). App id `ro.scripca.xlog2`.
+- *Qt:* `QsoTableModel` + `QSortFilterProxyModel`; the log shows source order
+  (newest at bottom) via `sortByColumn(-1)`; the DX dock size is restored from
+  the `position` setting via `resizeDocks` in show/resize events (it must run
+  after the window has its laid-out, possibly maximized, size); F1–F9 are
+  window-wide `QShortcut`s routed to the active tab.
+
+## Versioning, packaging & releasing
+
+SemVer; the version's single source of truth is `project(VERSION ...)` in
+`CMakeLists.txt`. See **`VERSIONING.md`**. Cut a release with
+`packaging/release.sh X.Y.Z` (bumps version + `debian/changelog`, commits, tags
+`vX.Y.Z`). `debian/` builds one source package into the `xlog2-gtk` and
+`xlog2-qt` binaries; `packaging/publish-ppa.sh` uploads signed source packages
+to `ppa:benishor/hamtools`.

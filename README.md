@@ -1,91 +1,145 @@
 # xlog2
 
-A small **amateur-radio logging program** for the desktop — a clone of the
-classic [xlog](http://www.nongnu.org/xlog/), rebuilt with **GTK 4** (via
-gtkmm-4), **C++20** and **CMake**.
+A desktop **amateur-radio logging program** — a clone of the classic
+[xlog](http://www.nongnu.org/xlog/), rebuilt in **C++20** with **CMake**.
 
-It keeps a logbook of QSOs in a SQLite database and can import/export the
-standard **ADIF** interchange format.
+xlog2 ships **two interchangeable frontends** over one shared, toolkit-neutral
+core library:
+
+- **`xlog2-gtk`** — a **GTK 4** (gtkmm-4) UI.
+- **`xlog2-qt`** — a **Qt 6 Widgets** UI.
+
+Both read and write the same logbooks (`.xlog`) and the same settings file, so
+you can switch between them freely.
 
 ## Features
 
-- Tabular log view (GTK 4 `ColumnView`) with date, time, call, band, mode,
-  frequency, reports, name, QTH, locator, power, QSL status and comments.
-  Columns can be reordered (drag a header, or right-click it for Move
-  Left/Right · Hide · Show All) and resized; the layout is remembered.
+- Tabular log view with date, time, call, band, mode, frequency, reports, name,
+  QTH, locator, power, QSL status and comments. Columns can be reordered (drag a
+  header or use its context menu) and resized; the layout is remembered and
+  shared between both frontends.
 - Entry form to add, edit and delete QSOs; click a row to load it for editing.
+  RST sent/received default to `599`.
 - **Multiple logbooks in tabs** — open several `.xlog` files at once; the
-  previously open files are reopened on the next launch.
+  previously open files (and the active tab) are reopened on the next launch.
 - **Duplicate detection** — flags in red when the contact being entered was
   already worked on the same band and mode that UTC day.
-- Frequency → band auto-detection as you type.
-- "Now" button to stamp the current UTC date/time.
+- Frequency → band auto-detection as you type; a "Now" button stamps the
+  current UTC date/time.
 - SQLite-backed logbooks (`.xlog`), saved immediately as you log. The default
-  logbook lives on disk at `$XDG_DATA_HOME/xlog2/default.xlog` (typically
-  `~/.local/share/xlog2/default.xlog`) and is created/reopened automatically, so
-  your QSOs persist across restarts without an explicit save. *File ▸ New Tab*
-  still opens a transient in-memory log until you *Save As*.
-- ADIF import and export.
-- Per-band / per-mode statistics.
-- UDP network logging: auto-logs QSOs pushed by WSJT-X ("Logged ADIF")
-  or any program sending raw ADIF datagrams (*Network* menu). The listen port
-  and whether listening is enabled are remembered, so it resumes on startup.
+  logbook lives at `$XDG_DATA_HOME/xlog2/default.xlog`
+  (`~/.local/share/xlog2/default.xlog`) and is reopened automatically. *New Tab*
+  opens a transient in-memory log until *Save As*.
+- ADIF import and export; per-band / per-mode statistics.
+- **UDP network logging** — auto-logs QSOs pushed by WSJT-X ("Logged ADIF") or
+  any program sending raw ADIF datagrams.
 - **Hamlib rig control** — polls the radio's frequency/mode and auto-fills the
-  entry form (*Rig ▸ Connect…*). Enter a Hamlib model id (e.g. `1` for the
-  built-in dummy rig, useful for testing) and a serial device.
-- **LoTW (Logbook of The World)** integration (*LoTW* menu):
-  - *Upload* signs and submits new QSOs via ARRL's `tqsl` tool, then marks them
-    as sent.
-  - *Download confirmations* fetches your confirmed QSOs over HTTPS and marks
-    matching contacts confirmed (matched on call+band+mode+date, ±30 min).
-  - A `LoTW` column shows `✓` confirmed / `↑` uploaded.
-- Remembers your column layout (order, width, visibility), window size and
-  open tabs between runs, stored in `~/.config/xlog2/layout.ini`. (Window
-  *position* is not restored — GTK4/Wayland provides no API to query or set it.)
-  Note: the LoTW download password is stored there in **plain text** (file mode
-  `0600`); the upload path uses `tqsl`/your certificate, not this password.
+  entry form. Connecting is non-blocking, so an unreachable rig never freezes
+  the UI.
+- **DXCC lookup** — entity / CQ-ITU zones / continent from `cty.dat` (drop one
+  at `$XDG_DATA_HOME/xlog2/cty.dat`).
+- **QRZ.com** callsign lookup (name/QTH/grid prefill).
+- **Network CW keyer** (cwdaemon) with F1–F9 message macros (the function keys
+  work from anywhere in the window, including the DX-cluster panel).
+- **DX-cluster** (telnet) band map: spots aggregated by frequency with a
+  spotter count, band-filter chips, and double-click to tune.
+- **LoTW** — *Upload* signs/submits new QSOs via ARRL's `tqsl`; *Download
+  confirmations* fetches confirmed QSOs and marks matches (call+band+mode+date).
+  A `LoTW` column shows `✓` confirmed / `↑` uploaded.
+- Remembers column layout, window size and open tabs in
+  `~/.config/xlog2/layout.ini`. (Window *position* isn't restored — GTK4/Wayland
+  has no API for it.) The LoTW download password is stored there in **plain
+  text** (file mode `0600`); LoTW upload uses `tqsl`/your certificate instead.
 
 ## Building
 
-You need a C++20 compiler, CMake ≥ 3.16, and the development packages for
-gtkmm-4, SQLite, Hamlib and libcurl.
+A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib and
+libcurl, plus gtkmm-4 (for the GTK frontend) and/or Qt 6 (for the Qt frontend).
 
 On Debian/Ubuntu:
 
 ```sh
-sudo apt install build-essential cmake libgtkmm-4.0-dev libsqlite3-dev \
-                 libhamlib-dev libcurl4-openssl-dev
+sudo apt install build-essential cmake pkg-config \
+    libgtkmm-4.0-dev qt6-base-dev \
+    libsqlite3-dev libhamlib-dev libcurl4-openssl-dev
+# Optional, runtime only — for LoTW upload:
+sudo apt install tqsl
 ```
-
-To upload to LoTW you also need ARRL's signing tool, `tqsl` (`sudo apt install
-tqsl`), with your certificate and station location configured once in it.
 
 Then:
 
 ```sh
-cmake -S . -B build
-cmake --build build -j
-./build/xlog2
+cmake -S . -B build && cmake --build build -j
 ```
+
+This builds both frontends — `build/xlog2-gtk` and `build/xlog2-qt`. Build just
+one with the options:
+
+```sh
+cmake -S . -B build -DXLOG_BUILD_GTK=ON -DXLOG_BUILD_QT=OFF   # GTK only
+cmake -S . -B build -DXLOG_BUILD_GTK=OFF -DXLOG_BUILD_QT=ON   # Qt only
+```
+
+Run:
+
+```sh
+GDK_BACKEND=wayland ./build/xlog2-gtk
+./build/xlog2-qt
+```
+
+> After changing headers or adding/removing source files, prefer a **clean
+> rebuild** (`rm -rf build && cmake -S . -B build && cmake --build build -j`).
 
 ## Layout
 
-| File                 | Responsibility                                  |
-|----------------------|-------------------------------------------------|
-| `src/Qso.h`          | The QSO data model.                             |
-| `src/Bands.*`        | Band/mode tables and frequency→band lookup.     |
-| `src/Adif.*`         | ADIF parsing and serialisation.                 |
-| `src/LogBook.*`      | SQLite-backed storage, CRUD and dupe lookup.    |
-| `src/Udp.*`          | UDP listener + WSJT-X/ADIF datagram decoding.   |
-| `src/Rig.*`          | Hamlib rig polling on a worker thread.          |
-| `src/Lotw.*`         | LoTW download (libcurl) + tqsl upload.          |
-| `src/QsoItem.h`      | `Glib::Object` wrapper for the `ColumnView`.    |
-| `src/UiUtil.h`       | Small shared UI helpers.                         |
-| `src/LogPage.*`      | One logbook tab: log view + entry form + dupes. |
-| `src/MainWindow.*`   | Shell: menu, notebook of tabs, UDP, rig.        |
-| `src/XlogApplication.*` | The `Gtk::Application`.                       |
-| `src/main.cpp`       | Entry point.                                    |
+```
+src/core/        toolkit-neutral library `xlog_core` (no gtkmm/Qt):
+  domain/          Qso, LogBook (SQLite), Adif, Bands, Dxcc, DxSpot
+  logic/           QsoMapper, DxccDeriver, CwExpander, Statistics, DupeMessage,
+                   StrUtil, TimeUtil
+  settings/        Settings + IniFile (the layout.ini codec)
+  platform/        IUiDispatcher (UI-thread marshalling), ProcessRunner
+  services/        Rig (Hamlib), Udp, Lotw, Qrz, CwKeyer, DxCluster
+  presenter/       LogPagePresenter, MainPresenter — all business logic
+  view/            ILogPageView, IMainView, FormData (interfaces + DTOs)
+
+src/             gtkmm frontend: MainWindow, LogPage, DxClusterPanel,
+                 XlogApplication, GlibDispatcher, UiUtil, main.cpp
+src/qt/          Qt frontend: QtMainWindow, QtLogPage, QtDxClusterPanel,
+                 QsoTableModel, FlowLayout, QtDispatcher, main.cpp
+
+debian/          Debian packaging (one source → xlog2-gtk + xlog2-qt binaries)
+packaging/       .desktop files, release.sh, publish-ppa.sh
+```
+
+The core links only SQLite/Hamlib/libcurl/threads — never a GUI toolkit — so the
+UI/business-logic boundary is enforced by the build. See
+[`CLAUDE.md`](CLAUDE.md) for the detailed design notes.
+
+## Packaging & releasing
+
+- **Versioning:** Semantic Versioning; see [`VERSIONING.md`](VERSIONING.md). The
+  version's single source of truth is `project(VERSION ...)` in `CMakeLists.txt`;
+  releases are annotated `vX.Y.Z` git tags.
+- **Cut a release:** `packaging/release.sh X.Y.Z` (bumps version + changelog,
+  commits, tags), then `git push origin master --follow-tags`.
+- **Publish to the PPA:** `packaging/publish-ppa.sh` builds signed Debian source
+  packages and uploads them to `ppa:benishor/hamtools`, which builds the
+  binaries. Needs `devscripts`, `debhelper`, `dput` and a GPG key registered on
+  Launchpad; pass `--no-upload` to build without uploading.
+
+## Tests
+
+No test framework; tests are throwaway `main()` programs linked against
+`xlog_core`. Pure logic needs no GUI:
+
+```sh
+g++ -std=c++20 -Isrc/core/domain -Isrc/core/logic \
+    /tmp/foo_test.cpp build/libxlog_core.a \
+    $(pkg-config --cflags --libs sqlite3 hamlib libcurl) -o /tmp/foo_test
+```
 
 ## License
 
-GPL-3.0, like the original xlog.
+GPL-3.0, like the original xlog. *(A `LICENSE` file still needs to be added to
+the repository.)*
