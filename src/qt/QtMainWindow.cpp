@@ -283,6 +283,7 @@ void QtMainWindow::buildMenus() {
     file->addAction("Close Tab", this, &QtMainWindow::onCloseTab);
     file->addSeparator();
     file->addAction("Import ADIF…", this, &QtMainWindow::onImportAdif);
+    file->addAction("Import xlog log…", this, &QtMainWindow::onImportXlog);
     file->addAction("Export ADIF…", this, &QtMainWindow::onExportAdif);
     file->addSeparator();
     file->addAction("Quit", this, &QWidget::close);
@@ -399,6 +400,21 @@ void QtMainWindow::onImportAdif() {
     ss << in.rdbuf();
     const int n = page->importAdif(ss.str());
     setStatus("Imported " + std::to_string(n) + " QSO(s).");
+}
+
+void QtMainWindow::onImportXlog() {
+    auto* page = currentPage();
+    if (!page)
+        return;
+    const QString path = QFileDialog::getOpenFileName(this, "Import xlog log", {},
+                                                      "xlog logs (*.xlog);;All files (*)");
+    if (path.isEmpty())
+        return;
+    std::ifstream in(path.toStdString());
+    std::stringstream ss;
+    ss << in.rdbuf();
+    const int n = page->importXlog(ss.str());
+    setStatus("Imported " + std::to_string(n) + " QSO(s) from xlog.");
 }
 
 void QtMainWindow::onExportAdif() {

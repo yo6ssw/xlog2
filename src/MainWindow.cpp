@@ -140,6 +140,7 @@ void MainWindow::buildActions() {
     add_action("saveas", sigc::mem_fun(*this, &MainWindow::onSaveAs));
     add_action("closetab", sigc::mem_fun(*this, &MainWindow::onCloseTab));
     add_action("import", sigc::mem_fun(*this, &MainWindow::onImportAdif));
+    add_action("importxlog", sigc::mem_fun(*this, &MainWindow::onImportXlog));
     add_action("export", sigc::mem_fun(*this, &MainWindow::onExportAdif));
     add_action("stats",  sigc::mem_fun(*this, &MainWindow::onStatistics));
     add_action("find",   sigc::mem_fun(*this, &MainWindow::onFind));
@@ -182,6 +183,7 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     fileMenu->append("_Close Tab", "win.closetab");
     auto adifSection = Gio::Menu::create();
     adifSection->append("_Import ADIF…", "win.import");
+    adifSection->append("Import _xlog log…", "win.importxlog");
     adifSection->append("_Export ADIF…", "win.export");
     fileMenu->append_section(adifSection);
     auto quitSection = Gio::Menu::create();
@@ -414,6 +416,27 @@ void MainWindow::onImportAdif() {
             const std::string content = Glib::file_get_contents(file->get_path());
             const int n = page->importAdif(content);
             setStatus("Imported " + std::to_string(n) + " QSO(s) from ADIF.");
+        } catch (const Glib::Error& e) {
+            setStatus(std::string("Import failed: ") + e.what());
+        }
+    });
+}
+
+void MainWindow::onImportXlog() {
+    auto* page = currentPage();
+    if (!page)
+        return;
+    auto dialog = Gtk::FileDialog::create();
+    dialog->set_title("Import xlog log");
+    dialog->set_filters(ui::makeFilters("xlog logs", {"*.xlog"}));
+    dialog->open(*this, [this, dialog, page](const Glib::RefPtr<Gio::AsyncResult>& result) {
+        try {
+            auto file = dialog->open_finish(result);
+            if (!file)
+                return;
+            const std::string content = Glib::file_get_contents(file->get_path());
+            const int n = page->importXlog(content);
+            setStatus("Imported " + std::to_string(n) + " QSO(s) from xlog.");
         } catch (const Glib::Error& e) {
             setStatus(std::string("Import failed: ") + e.what());
         }

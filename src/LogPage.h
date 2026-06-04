@@ -29,6 +29,7 @@ public:
     bool openFile(const std::string& path)   { return presenter_.openFile(path); }
     bool saveAs(const std::string& path)     { return presenter_.saveAs(path); }
     int  importAdif(const std::string& text) { return presenter_.importAdif(text); }
+    int  importXlog(const std::string& text) { return presenter_.importXlog(text); }
     std::string exportAdif() const           { return presenter_.exportAdif(); }
 
     const LogBook& logbook() const   { return presenter_.logbook(); }

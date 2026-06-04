@@ -36,6 +36,7 @@ public:
     bool openFile(const std::string& path);
     bool saveAs(const std::string& path);
     int  importAdif(const std::string& adifText);
+    int  importXlog(const std::string& xlogText);
     std::string exportAdif() const;
 
     const LogBook& logbook() const { return logbook_; }
