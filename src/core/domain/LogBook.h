@@ -51,6 +51,10 @@ public:
     // Imports ADIF text, inserting each record. Returns the number added.
     int importAdif(const std::string& adifText);
 
+    // Imports native xlog ("Flog") text, inserting each record. Returns the
+    // number added.
+    int importXlog(const std::string& xlogText);
+
     // Serialises the whole logbook to ADIF text.
     std::string exportAdif() const;
 
@@ -80,6 +84,9 @@ private:
     bool createSchema(sqlite3* db);
     void reload();
     void close();
+
+    // Inserts every QSO in one transaction, then reloads. Returns the count.
+    int insertAll(const std::vector<Qso>& qsos);
 
     sqlite3*         db_ = nullptr;
     std::string      path_;   // empty => in-memory

@@ -234,6 +234,13 @@ int LogPagePresenter::importAdif(const std::string& adifText) {
     return n;
 }
 
+int LogPagePresenter::importXlog(const std::string& xlogText) {
+    const int n = logbook_.importXlog(xlogText);
+    refreshList();
+    changed();
+    return n;
+}
+
 std::string LogPagePresenter::exportAdif() const {
     return logbook_.exportAdif();
 }

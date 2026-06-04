@@ -97,6 +97,14 @@ starts in-memory; the shell opens a persistent default at
 (`YYYYMMDD`/`HHMM`) and `Qso` (`YYYY-MM-DD`/`HH:MM`); reused everywhere QSOs
 cross a boundary (import/export, UDP, LoTW).
 
+**Original-xlog import** (`src/core/domain/Xlog.*`) reads the native fixed-width
+text format of the original `xlog` program (`.xlog` "Flog" files): a header line
+names the columns and their widths are derived from it. `LogBook::importXlog`
+funnels through the same `insertAll()` path as `importAdif`. Note xlog keeps the
+frequency in MHz in its `BAND` column (so it maps to `Qso::freq`, with the band
+name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
+`RST`/`MYRST` are sent/received.
+
 **Concurrency — never block the UI thread.** All services live in
 `src/core/services/` and are toolkit-neutral: blocking work runs on a
 `std::thread` and results are marshalled to the UI thread via an injected

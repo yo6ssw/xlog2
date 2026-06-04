@@ -1,6 +1,7 @@
 #include "LogBook.h"
 
 #include "Adif.h"
+#include "Xlog.h"
 
 #include <sqlite3.h>
 
@@ -328,8 +329,7 @@ bool LogBook::remove(long id) {
     return ok;
 }
 
-int LogBook::importAdif(const std::string& adifText) {
-    const std::vector<Qso> parsed = adif::parse(adifText);
+int LogBook::insertAll(const std::vector<Qso>& parsed) {
     if (parsed.empty() || !db_)
         return 0;
 
@@ -351,6 +351,14 @@ int LogBook::importAdif(const std::string& adifText) {
 
     reload();
     return count;
+}
+
+int LogBook::importAdif(const std::string& adifText) {
+    return insertAll(adif::parse(adifText));
+}
+
+int LogBook::importXlog(const std::string& xlogText) {
+    return insertAll(xlog::parse(xlogText));
 }
 
 std::string LogBook::exportAdif() const {

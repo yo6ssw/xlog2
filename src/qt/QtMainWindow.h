@@ -52,6 +52,7 @@ private:
     void onSaveAs();
     void onCloseTab();
     void onImportAdif();
+    void onImportXlog();
     void onExportAdif();
     void onStatistics();
     void onFind();

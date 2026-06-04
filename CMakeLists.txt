@@ -29,6 +29,7 @@ pkg_check_modules(CURL   REQUIRED IMPORTED_TARGET libcurl)
 add_library(xlog_core STATIC
     src/core/domain/LogBook.cpp
     src/core/domain/Adif.cpp
+    src/core/domain/Xlog.cpp
     src/core/domain/Bands.cpp
     src/core/domain/Dxcc.cpp
     src/core/logic/DxccDeriver.cpp
