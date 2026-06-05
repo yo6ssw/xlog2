@@ -43,6 +43,8 @@ you can switch between them freely.
   work from anywhere in the window, including the DX-cluster panel).
 - **DX-cluster** (telnet) band map: spots aggregated by frequency with a
   spotter count, band-filter chips, and double-click to tune.
+- **Rig audio** — plays a `cwsd` `audio_stream_server` Opus-over-UDP stream of
+  the receiver audio through a local ALSA device.
 - **LoTW** — *Upload* signs/submits new QSOs via ARRL's `tqsl`; *Download
   confirmations* fetches confirmed QSOs and marks matches (call+band+mode+date).
   A `LoTW` column shows `✓` confirmed / `↑` uploaded.
@@ -53,15 +55,17 @@ you can switch between them freely.
 
 ## Building
 
-A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib and
-libcurl, plus gtkmm-4 (for the GTK frontend) and/or Qt 6 (for the Qt frontend).
+A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib,
+libcurl, Opus and ALSA, plus gtkmm-4 (for the GTK frontend) and/or Qt 6 (for the
+Qt frontend).
 
 On Debian/Ubuntu:
 
 ```sh
 sudo apt install build-essential cmake pkg-config \
     libgtkmm-4.0-dev qt6-base-dev \
-    libsqlite3-dev libhamlib-dev libcurl4-openssl-dev
+    libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
+    libopus-dev libasound2-dev
 # Optional, runtime only — for LoTW upload:
 sudo apt install tqsl
 ```
@@ -99,7 +103,7 @@ src/core/        toolkit-neutral library `xlog_core` (no gtkmm/Qt):
                    StrUtil, TimeUtil
   settings/        Settings + IniFile (the layout.ini codec)
   platform/        IUiDispatcher (UI-thread marshalling), ProcessRunner
-  services/        Rig (Hamlib), Udp, Lotw, Qrz, CwKeyer, DxCluster
+  services/        Rig (Hamlib), Udp, Lotw, Qrz, CwKeyer, DxCluster, Audio
   presenter/       LogPagePresenter, MainPresenter — all business logic
   view/            ILogPageView, IMainView, FormData (interfaces + DTOs)
 
@@ -112,8 +116,8 @@ debian/          Debian packaging (one source → xlog2-gtk + xlog2-qt binaries)
 packaging/       .desktop files, release.sh, publish-ppa.sh
 ```
 
-The core links only SQLite/Hamlib/libcurl/threads — never a GUI toolkit — so the
-UI/business-logic boundary is enforced by the build. See
+The core links only SQLite/Hamlib/libcurl/Opus/ALSA/threads — never a GUI
+toolkit — so the UI/business-logic boundary is enforced by the build. See
 [`CLAUDE.md`](CLAUDE.md) for the detailed design notes.
 
 ## Packaging & releasing

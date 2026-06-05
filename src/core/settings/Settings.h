@@ -33,6 +33,14 @@ struct Settings {
     int         keyerSpeed = 0;       // 0 = leave cwdaemon's default
     std::array<std::string, 9> keyerMessages{};
 
+    // [audio] — cwsd Opus-over-UDP rig audio stream
+    bool        audioEnabled    = false;
+    std::string audioHost       = "127.0.0.1";
+    int         audioPort       = 7355;
+    int         audioSampleRate = 48000;  // must match the server (opus rate)
+    int         audioChannels   = 1;      // must match the server
+    std::string audioDevice     = "default";  // ALSA playback device
+
     // [dxcluster]
     std::string dxHost;
     int         dxPort = 7300;

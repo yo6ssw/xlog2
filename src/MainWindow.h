@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio.h"
 #include "CwKeyer.h"
 #include "DxCluster.h"
 #include "DxClusterPanel.h"
@@ -87,6 +88,12 @@ private:
     void onKeyerSettings();
     void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages
 
+    // --- rig audio stream (cwsd) ---
+    void onToggleAudio();      // start/stop toggle
+    void startAudioStream();
+    void stopAudioStream();
+    void onAudioSettings();
+
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
     void onClusterSettings();
@@ -127,8 +134,10 @@ private:
     QrzClient                       qrz_;
     CwKeyer                         keyer_;
     DxCluster                       cluster_;
+    AudioStreamClient               audio_;
 
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
+    Glib::RefPtr<Gio::SimpleAction> audioAction_;
 
     // DX cluster panel + layout. dxPanel_ is a value member (like notebook_) so
     // it survives being reparented between paned slots when the dock side

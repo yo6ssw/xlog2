@@ -20,6 +20,8 @@ find_package(Threads REQUIRED)
 pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
 pkg_check_modules(CURL   REQUIRED IMPORTED_TARGET libcurl)
+pkg_check_modules(OPUS   REQUIRED IMPORTED_TARGET opus)   # rig audio stream client (decode)
+pkg_check_modules(ALSA   REQUIRED IMPORTED_TARGET alsa)   # rig audio stream client (playback)
 
 # ---------------------------------------------------------------------------
 # xlog_core: the toolkit-neutral core. Deliberately NOT linked against gtkmm or
@@ -48,6 +50,7 @@ add_library(xlog_core STATIC
     src/core/services/Qrz.cpp
     src/core/services/CwKeyer.cpp
     src/core/services/DxCluster.cpp
+    src/core/services/Audio.cpp
 )
 target_include_directories(xlog_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src
@@ -64,6 +67,8 @@ target_link_libraries(xlog_core PUBLIC
     PkgConfig::SQLITE
     PkgConfig::HAMLIB
     PkgConfig::CURL
+    PkgConfig::OPUS
+    PkgConfig::ALSA
     Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

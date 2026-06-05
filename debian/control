@@ -9,7 +9,9 @@ Build-Depends: debhelper-compat (= 13),
  qt6-base-dev,
  libsqlite3-dev,
  libhamlib-dev,
- libcurl4-openssl-dev
+ libcurl4-openssl-dev,
+ libopus-dev,
+ libasound2-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/yo6ssw/xlog2
 Rules-Requires-Root: no

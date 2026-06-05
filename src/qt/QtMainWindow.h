@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Audio.h"
 #include "CwKeyer.h"
 #include "DxCluster.h"
 #include "IMainView.h"
@@ -70,6 +71,9 @@ private:
     void onQrzSettings();
     void onKeyerSettings();
     void applyKeyerConfig();
+    void onToggleAudio(bool on);
+    void startAudioStream();
+    void onAudioSettings();
     void onClusterConnectToggle();
     void onClusterSettings();
 
@@ -92,6 +96,7 @@ private:
     QrzClient       qrz_;
     CwKeyer         keyer_;
     DxCluster       cluster_;
+    AudioStreamClient audio_;
 
     // The settings loaded at startup, kept so the shared column layout can be
     // applied to newly-created tabs (mirrors the gtkmm shell).
@@ -102,6 +107,7 @@ private:
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
+    QAction*          audioAction_ = nullptr;
     QActionGroup*     dxDockGroup_ = nullptr;  // Cluster ▸ Dock radio (top/bottom/left/right)
 
     // Persisted DX-cluster dock size, applied once on first show (resizeDocks

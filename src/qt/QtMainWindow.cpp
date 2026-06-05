@@ -14,6 +14,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
+#include <QComboBox>
 #include <QShowEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -35,6 +36,7 @@
 
 #include <QResizeEvent>
 
+#include <algorithm>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -79,7 +81,8 @@ QtMainWindow::QtMainWindow()
       rig_(uiDispatcher_),
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
-      cluster_(uiDispatcher_) {
+      cluster_(uiDispatcher_),
+      audio_(uiDispatcher_) {
     setWindowTitle("xlog2");
     resize(1024, 700);
 
@@ -164,6 +167,7 @@ QtMainWindow::QtMainWindow()
         setStatus(s);
     };
     cluster_.onSpot = [this](const DxSpot& s) { dxPanel_->addSpot(s); };
+    audio_.onStatus = [this](const std::string& s) { setStatus(s); };
 
     loadSettings();
     if (tabs_->count() == 0)
@@ -176,6 +180,8 @@ QtMainWindow::QtMainWindow()
         setStatus("Connecting to rig…");
         rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
     }
+    if (cfg().audioEnabled)
+        startAudioStream();
 }
 
 // --- IMainView ---------------------------------------------------------------
@@ -314,6 +320,12 @@ void QtMainWindow::buildMenus() {
 
     auto* keyer = menuBar()->addMenu("&Keyer");
     keyer->addAction("Settings…", this, &QtMainWindow::onKeyerSettings);
+
+    auto* audio = menuBar()->addMenu("&Audio");
+    audioAction_ = audio->addAction("Play rig audio stream");
+    audioAction_->setCheckable(true);
+    connect(audioAction_, &QAction::toggled, this, &QtMainWindow::onToggleAudio);
+    audio->addAction("Settings…", this, &QtMainWindow::onAudioSettings);
 
     auto* cluster = menuBar()->addMenu("&Cluster");
     // "Show panel": Qt's built-in dock toggle action auto-syncs its checked
@@ -653,6 +665,73 @@ void QtMainWindow::onKeyerSettings() {
             cfg().keyerMessages[i] = msgs[i]->text().toStdString();
         applyKeyerConfig();
         setStatus("Keyer settings saved.");
+    }
+}
+
+// --- rig audio stream (cwsd) -------------------------------------------------
+
+void QtMainWindow::onToggleAudio(bool on) {
+    if (on)
+        startAudioStream();
+    else {
+        audio_.stop();
+        cfg().audioEnabled = false;
+    }
+}
+
+void QtMainWindow::startAudioStream() {
+    AudioStreamConfig ac;
+    ac.host       = cfg().audioHost;
+    ac.port       = cfg().audioPort;
+    ac.sampleRate = cfg().audioSampleRate;
+    ac.channels   = cfg().audioChannels;
+    ac.device     = cfg().audioDevice;
+    audio_.start(ac);
+    cfg().audioEnabled = true;  // user intent, persisted; survives teardown
+    if (audioAction_) {
+        QSignalBlocker block(audioAction_);
+        audioAction_->setChecked(true);
+    }
+}
+
+void QtMainWindow::onAudioSettings() {
+    QDialog dlg(this);
+    dlg.setWindowTitle("Rig audio stream (cwsd)");
+    auto* form = new QFormLayout(&dlg);
+    auto* host = new QLineEdit(QString::fromStdString(cfg().audioHost));
+    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().audioPort);
+    auto* rate = new QComboBox;
+    for (int r : {8000, 12000, 16000, 24000, 48000})
+        rate->addItem(QString::number(r), r);
+    rate->setCurrentIndex(std::max(0, rate->findData(cfg().audioSampleRate)));
+    auto* chan = new QSpinBox; chan->setRange(1, 2); chan->setValue(cfg().audioChannels);
+    auto* device = new QLineEdit(QString::fromStdString(cfg().audioDevice));
+    device->setPlaceholderText("ALSA playback device, e.g. default");
+    form->addRow("Host:", host);
+    form->addRow("Port:", port);
+    form->addRow("Sample rate:", rate);
+    form->addRow("Channels:", chan);
+    form->addRow("Playback device:", device);
+    auto* hint = new QLabel(
+        "Sample rate and channels must match the cwsd `audio` section.\n"
+        "cwsd's default port is 7355.");
+    form->addRow(hint);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+    form->addRow(bb);
+    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() == QDialog::Accepted) {
+        cfg().audioHost = host->text().toStdString();
+        if (cfg().audioHost.empty()) cfg().audioHost = "127.0.0.1";
+        cfg().audioPort = port->value();
+        cfg().audioSampleRate = rate->currentData().toInt();
+        cfg().audioChannels = chan->value();
+        cfg().audioDevice = device->text().toStdString();
+        if (cfg().audioDevice.empty()) cfg().audioDevice = "default";
+        if (audio_.isStreaming())
+            startAudioStream();  // restart on the new settings
+        else
+            setStatus("Rig audio stream settings saved.");
     }
 }
 
