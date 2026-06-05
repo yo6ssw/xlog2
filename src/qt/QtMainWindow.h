@@ -8,6 +8,7 @@
 #include "MainPresenter.h"
 #include "Qrz.h"
 #include "QtDispatcher.h"
+#include "RemotePaddleKeyer.h"
 #include "Rig.h"
 #include "Udp.h"
 
@@ -74,6 +75,9 @@ private:
     void onToggleAudio(bool on);
     void startAudioStream();
     void onAudioSettings();
+    void onTogglePaddle(bool on);
+    void startPaddleKeyer();
+    void onPaddleSettings();
     void onClusterConnectToggle();
     void onClusterSettings();
 
@@ -86,6 +90,9 @@ private:
     void closeEvent(QCloseEvent* e) override;
     void showEvent(QShowEvent* e) override;
     void resizeEvent(QResizeEvent* e) override;
+    // App-wide filter so the `[`/`]` paddle keys work regardless of focus while
+    // the remote paddle keyer is active (and pass through normally otherwise).
+    bool eventFilter(QObject* obj, QEvent* ev) override;
     void restoreDockSize();  // apply the saved DX-cluster dock size once, post-show
 
     QtDispatcher    uiDispatcher_;
@@ -97,6 +104,7 @@ private:
     CwKeyer         keyer_;
     DxCluster       cluster_;
     AudioStreamClient audio_;
+    RemotePaddleKeyer paddle_;
 
     // The settings loaded at startup, kept so the shared column layout can be
     // applied to newly-created tabs (mirrors the gtkmm shell).
@@ -109,6 +117,7 @@ private:
     QtDxClusterPanel* dxPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
     QAction*          audioAction_ = nullptr;
+    QAction*          paddleAction_ = nullptr;
     QActionGroup*     dxDockGroup_ = nullptr;  // Cluster ▸ Dock radio (top/bottom/left/right)
 
     // Persisted DX-cluster dock size, applied once on first show (resizeDocks

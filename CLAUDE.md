@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 xlog2 is a C++20/CMake amateur-radio logging program (a clone of `xlog`). It
 logs QSOs to SQLite, exchanges ADIF, receives QSOs over UDP, controls a radio
-via Hamlib, looks up calls on QRZ.com, drives a network CW keyer, shows a
-DX-cluster band map, and syncs with ARRL's LoTW.
+via Hamlib, looks up calls on QRZ.com, drives a network CW keyer (text via
+cwdaemon, plus real paddle keying via cwsd's remote_key), shows a DX-cluster
+band map, and syncs with ARRL's LoTW.
 
 It is built as a **toolkit-neutral core library (`xlog_core`) with two
 interchangeable frontends**: `xlog2-gtk` (GTK 4 / gtkmm) and `xlog2-qt`
@@ -130,6 +131,34 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   running decoded-frame count (`onStats`) ~once a second, shown as a live
   indicator in each shell's status bar. (Links `opus` + `asound`; the only audio
   code in xlog2.)
+- `RemotePaddleKeyer` (`src/core/services/RemotePaddleKeyer.*`, wire format in
+  `RemoteKeyProtocol.h`) — operator-side client for **cwsd's `remote_key`
+  service: real paddle keying over the internet**. Unlike `CwKeyer` (which sends
+  *text* for cwdaemon to key), the iambic keyer runs *here*, on jitter-free local
+  paddle input, and streams finished key edges (key-down/key-up) timestamped on a
+  per-session monotonic clock; cwsd replays them behind a fixed playout delay, so
+  jitter never distorts the Morse. The worker ticks the element generator at
+  ~1 ms and sends each edge as a UDP datagram carrying recent edges as
+  loss-recovery history (cwsd dedups by timestamp), plus a keepalive (<cwsd's
+  silence timeout) while idle. Paddle contacts arrive from the UI thread via
+  lock-free `setDit`/`setDah`; **for testing, the `[` and `]` keys** simulate
+  dit/dah (gtkmm: a CAPTURE-phase `EventControllerKey`; Qt: an app-wide
+  `eventFilter`), intercepted only while the keyer is active so the brackets type
+  normally otherwise. Config lives in the `[paddle]` settings block, is edited
+  from the **Keyer ▸ Remote paddle keying / Paddle settings…** menu, and
+  auto-resumes at startup. A second thread renders a **click-free local sidetone**
+  (ramped-envelope sine) to ALSA, gated by the same key transitions, so the
+  operator gets instant feel while the on-air signal lags by cwsd's playout delay;
+  it is independent, so a missing audio device never stalls keying. (Reuses the
+  `asound` link already pulled in for the audio stream.) It also reports a
+  **transmit on/off** state via `onTransmit` (latched on the first key-down,
+  released after a hang past the last key-up so it bridges character/word gaps);
+  the shell wires that to `AudioStreamClient::setMuted` (gated by the
+  `[paddle] mute_audio` setting) so the rig-audio stream is silenced while keying
+  — semi-break-in, since otherwise you'd hear your own delayed signal fighting the
+  local sidetone. `setMuted` keeps decoding/feeding ALSA with silence (no
+  unsubscribe, no unmute glitch). *Scaffold note:* iambic memory gives iambic-A;
+  full iambic-B is a TODO.
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.
 
