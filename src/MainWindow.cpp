@@ -88,9 +88,17 @@ MainWindow::MainWindow()
         setStatus(s);
     };
 
+    auto* statusBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     statusLabel_.set_xalign(0.0);
+    statusLabel_.set_hexpand(true);
     ui::setMargin(statusLabel_, 4);
-    vbox->append(statusLabel_);
+    statusBox->append(statusLabel_);
+    // A dedicated indicator on the right so the live frame counter doesn't fight
+    // with transient status messages.
+    audioIndicator_.set_xalign(1.0);
+    ui::setMargin(audioIndicator_, 4);
+    statusBox->append(audioIndicator_);
+    vbox->append(*statusBox);
 
     // Service results are routed by the presenter (toolkit-neutral).
     listener_.setCallback(
@@ -116,6 +124,9 @@ MainWindow::MainWindow()
         presenter_.routeQrzResult(result, error);
     };
     audio_.onStatus = [this](const std::string& s) { setStatus(s); };
+    audio_.onStats  = [this](unsigned long frames) {
+        audioIndicator_.set_text("♪ " + std::to_string(frames) + " frames");
+    };
 
     loadSettings();
     if (notebook_.get_n_pages() == 0)
@@ -1050,6 +1061,7 @@ void MainWindow::stopAudioStream() {
     audio_.stop();
     cfg().audioEnabled = false;
     audioAction_->change_state(false);
+    audioIndicator_.set_text("");
 }
 
 void MainWindow::onAudioSettings() {

@@ -8,6 +8,7 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -142,19 +143,25 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
 
     using clock = std::chrono::steady_clock;
     auto nextKeepalive = clock::now();  // send one immediately to subscribe
+    auto nextStats     = clock::now() + std::chrono::seconds(1);
+    unsigned long framesDecoded = 0;
 
     postStatus("Audio: streaming from " + cfg.host + ":" + std::to_string(cfg.port) + ".");
 
     while (running_.load()) {
         const auto now = clock::now();
+        if (now >= nextStats) {
+            postStats(framesDecoded);  // periodic live counter, even while idle
+            nextStats = now + std::chrono::seconds(1);
+        }
         if (now >= nextKeepalive) {
             const std::uint8_t ka = 0;
             [[maybe_unused]] ssize_t s = ::send(fd, &ka, 1, 0);  // any datagram (re)subscribes
             nextKeepalive = now + std::chrono::milliseconds(kKeepaliveMs);
         }
-        const auto untilKa = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                 nextKeepalive - now).count();
-        const int timeoutMs = untilKa > 0 ? static_cast<int>(untilKa) : 0;
+        const auto until = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::min(nextKeepalive, nextStats) - now).count();
+        const int timeoutMs = until > 0 ? static_cast<int>(until) : 0;
 
         pollfd fds[2] = {{fd, POLLIN, 0}, {wake_[0], POLLIN, 0}};
         const int rc = ::poll(fds, 2, timeoutMs);
@@ -198,6 +205,7 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                                            pcmBuf.data(), kMaxFrame, 0);
             if (frames < 0)
                 continue;  // corrupt packet
+            ++framesDecoded;
             const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
             if (w == -EPIPE) {
                 snd_pcm_prepare(pcm);  // underrun: recover and keep going
@@ -218,5 +226,11 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
 void AudioStreamClient::postStatus(const std::string& s) {
     ui_.post([this, w = std::weak_ptr<bool>(alive_), s]() {
         if (!w.expired() && onStatus) onStatus(s);
+    });
+}
+
+void AudioStreamClient::postStats(unsigned long frames) {
+    ui_.post([this, w = std::weak_ptr<bool>(alive_), frames]() {
+        if (!w.expired() && onStats) onStats(frames);
     });
 }

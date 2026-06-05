@@ -126,8 +126,10 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   small keepalive every ~2 s (cwsd drops silent subscribers), and for each
   datagram (4-byte big-endian sequence + Opus packet) Opus-decodes and writes to
   an **ALSA** playback device — opened lazily on the worker so a missing device
-  never blocks. `sampleRate`/`channels` must match the server. (Links `opus` +
-  `asound`; the only audio code in xlog2.)
+  never blocks. `sampleRate`/`channels` must match the server. It also posts a
+  running decoded-frame count (`onStats`) ~once a second, shown as a live
+  indicator in each shell's status bar. (Links `opus` + `asound`; the only audio
+  code in xlog2.)
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.
 
