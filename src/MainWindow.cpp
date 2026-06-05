@@ -21,7 +21,8 @@ MainWindow::MainWindow()
       rig_(uiDispatcher_),
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
-      cluster_(uiDispatcher_) {
+      cluster_(uiDispatcher_),
+      audio_(uiDispatcher_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -114,6 +115,7 @@ MainWindow::MainWindow()
     qrz_.onResult = [this](const QrzResult& result, const std::string& error) {
         presenter_.routeQrzResult(result, error);
     };
+    audio_.onStatus = [this](const std::string& s) { setStatus(s); };
 
     loadSettings();
     if (notebook_.get_n_pages() == 0)
@@ -132,6 +134,10 @@ MainWindow::MainWindow()
         setStatus("Connecting to rig…");
         rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
     }
+
+    // Resume the rig audio stream if it was playing last session.
+    if (cfg().audioEnabled)
+        startAudioStream();
 }
 
 void MainWindow::buildActions() {
@@ -164,6 +170,9 @@ void MainWindow::buildActions() {
     add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
 
     add_action("keyersettings", sigc::mem_fun(*this, &MainWindow::onKeyerSettings));
+
+    audioAction_ = add_action_bool("audio", sigc::mem_fun(*this, &MainWindow::onToggleAudio), false);
+    add_action("audiosettings", sigc::mem_fun(*this, &MainWindow::onAudioSettings));
 
     dxShowAction_ = add_action_bool(
         "dxshow", sigc::mem_fun(*this, &MainWindow::onClusterToggleShow), false);
@@ -220,6 +229,11 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto keyerMenu = Gio::Menu::create();
     keyerMenu->append("_Settings…", "win.keyersettings");
     menu->append_submenu("_Keyer", keyerMenu);
+
+    auto audioMenu = Gio::Menu::create();
+    audioMenu->append("_Play rig audio stream", "win.audio");
+    audioMenu->append("_Settings…", "win.audiosettings");
+    menu->append_submenu("_Audio", audioMenu);
 
     auto clusterMenu = Gio::Menu::create();
     clusterMenu->append("_Show panel", "win.dxshow");
@@ -1009,6 +1023,111 @@ void MainWindow::onKeyerSettings() {
     win->present();
 }
 
+// --- rig audio stream (cwsd) -------------------------------------------------
+
+void MainWindow::onToggleAudio() {
+    if (!audio_.isStreaming())
+        startAudioStream();
+    else
+        stopAudioStream();
+}
+
+void MainWindow::startAudioStream() {
+    AudioStreamConfig ac;
+    ac.host       = cfg().audioHost;
+    ac.port       = cfg().audioPort;
+    ac.sampleRate = cfg().audioSampleRate;
+    ac.channels   = cfg().audioChannels;
+    ac.device     = cfg().audioDevice;
+    audio_.start(ac);
+    // cfg().audioEnabled tracks the user's intent (what gets persisted), so it
+    // survives onCloseRequest()'s teardown — mirrors the UDP listener.
+    cfg().audioEnabled = true;
+    audioAction_->change_state(true);
+}
+
+void MainWindow::stopAudioStream() {
+    audio_.stop();
+    cfg().audioEnabled = false;
+    audioAction_->change_state(false);
+}
+
+void MainWindow::onAudioSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("Rig audio stream (cwsd)");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
+    hostEntry->set_text(cfg().audioHost);
+    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
+    portEntry->set_text(std::to_string(cfg().audioPort));
+    auto* rateEntry = Gtk::make_managed<Gtk::Entry>();
+    rateEntry->set_text(std::to_string(cfg().audioSampleRate));
+    auto* chanEntry = Gtk::make_managed<Gtk::Entry>();
+    chanEntry->set_text(std::to_string(cfg().audioChannels));
+    auto* deviceEntry = Gtk::make_managed<Gtk::Entry>();
+    deviceEntry->set_text(cfg().audioDevice);
+    deviceEntry->set_placeholder_text("ALSA playback device, e.g. default");
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("Host:", *hostEntry, 0);
+    field("Port:", *portEntry, 1);
+    field("Sample rate:", *rateEntry, 2);
+    field("Channels:", *chanEntry, 3);
+    field("Playback device:", *deviceEntry, 4);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Plays a cwsd Opus-over-UDP rig-audio stream. The sample rate (an Opus\n"
+        "rate: 8000/12000/16000/24000/48000) and channel count must match the\n"
+        "cwsd `audio` section. cwsd's default port is 7355.");
+    hint->set_xalign(0.0);
+    grid->attach(*hint, 0, 5, 2, 1);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 6);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect(
+        [this, hostEntry, portEntry, rateEntry, chanEntry, deviceEntry, win]() {
+            cfg().audioHost = hostEntry->get_text().raw();
+            if (cfg().audioHost.empty())
+                cfg().audioHost = "127.0.0.1";
+            try { cfg().audioPort = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().audioPort = 7355; }
+            try { cfg().audioSampleRate = std::stoi(rateEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().audioSampleRate = 48000; }
+            try { cfg().audioChannels = std::stoi(chanEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().audioChannels = 1; }
+            cfg().audioDevice = deviceEntry->get_text().raw();
+            if (cfg().audioDevice.empty())
+                cfg().audioDevice = "default";
+            // Restart on the new settings if currently playing.
+            if (audio_.isStreaming())
+                startAudioStream();
+            else
+                setStatus("Rig audio stream settings saved.");
+            win->set_visible(false);
+        });
+
+    win->present();
+}
+
 // --- DX cluster --------------------------------------------------------------
 
 void MainWindow::applyDxDock() {
@@ -1161,6 +1280,7 @@ std::string MainWindow::layoutFilePath() const {
 bool MainWindow::onCloseRequest() {
     rig_.stop();
     listener_.stop();
+    audio_.stop();
     cluster_.disconnect();  // close the socket while the panel is still alive
     saveSettings();
     return false;  // proceed with the default close (hide) handling

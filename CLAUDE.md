@@ -28,7 +28,8 @@ GDK_BACKEND=wayland ./build/xlog2-gtk
 # Dependencies (Debian/Ubuntu)
 sudo apt install build-essential cmake pkg-config \
                  libgtkmm-4.0-dev qt6-base-dev \
-                 libsqlite3-dev libhamlib-dev libcurl4-openssl-dev
+                 libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
+                 libopus-dev libasound2-dev
 # tqsl (LoTW upload, runtime only): sudo apt install tqsl
 ```
 
@@ -119,6 +120,14 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   are the main **POSIX-specific** code, relevant to any future Windows port.)
 - `LotwClient` — download via libcurl on a worker; upload spawns ARRL's `tqsl`
   via the neutral `ProcessRunner` (`posix_spawn` + `waitpid`).
+- `AudioStreamClient` (`src/core/services/Audio.*`) — subscribes to a **cwsd**
+  `audio_stream_server` Opus-over-UDP rig-audio stream and plays it back. A
+  worker owns a connected UDP socket (woken for stop via a self-pipe), sends a
+  small keepalive every ~2 s (cwsd drops silent subscribers), and for each
+  datagram (4-byte big-endian sequence + Opus packet) Opus-decodes and writes to
+  an **ALSA** playback device — opened lazily on the worker so a missing device
+  never blocks. `sampleRate`/`channels` must match the server. (Links `opus` +
+  `asound`; the only audio code in xlog2.)
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.
 

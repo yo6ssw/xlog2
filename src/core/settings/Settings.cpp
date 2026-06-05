@@ -27,6 +27,13 @@ Settings Settings::load(const IniFile& ini) {
         s.keyerMessages[i] =
             ini.getString("keyer", "message" + std::to_string(i + 1), s.keyerMessages[i]);
 
+    s.audioEnabled    = ini.getBool("audio", "enabled", s.audioEnabled);
+    s.audioHost       = ini.getString("audio", "host", s.audioHost);
+    s.audioPort       = ini.getInt("audio", "port", s.audioPort);
+    s.audioSampleRate = ini.getInt("audio", "sample_rate", s.audioSampleRate);
+    s.audioChannels   = ini.getInt("audio", "channels", s.audioChannels);
+    s.audioDevice     = ini.getString("audio", "device", s.audioDevice);
+
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
     s.dxPort        = ini.getInt("dxcluster", "port", s.dxPort);
     s.dxLogin       = ini.getString("dxcluster", "login", s.dxLogin);
@@ -61,6 +68,13 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("keyer", "speed", keyerSpeed);
     for (int i = 0; i < 9; ++i)
         ini.setString("keyer", "message" + std::to_string(i + 1), keyerMessages[i]);
+
+    ini.setBool("audio", "enabled", audioEnabled);
+    ini.setString("audio", "host", audioHost);
+    ini.setInt("audio", "port", audioPort);
+    ini.setInt("audio", "sample_rate", audioSampleRate);
+    ini.setInt("audio", "channels", audioChannels);
+    ini.setString("audio", "device", audioDevice);
 
     ini.setString("dxcluster", "host", dxHost);
     ini.setInt("dxcluster", "port", dxPort);
