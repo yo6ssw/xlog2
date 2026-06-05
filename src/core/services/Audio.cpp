@@ -96,6 +96,7 @@ void AudioStreamClient::start(const AudioStreamConfig& cfg) {
         postStatus("Audio: " + std::string(std::strerror(errno)));
         return;
     }
+    muted_.store(false);  // a fresh stream starts audible
     running_.store(true);
     thread_ = std::thread(&AudioStreamClient::worker, this, cfg);
 }
@@ -206,6 +207,10 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
             if (frames < 0)
                 continue;  // corrupt packet
             ++framesDecoded;
+            // Muted (e.g. transmitting): keep the decoder and ALSA fed but output
+            // silence, so unmuting resumes instantly with no underrun glitch.
+            if (muted_.load(std::memory_order_relaxed))
+                std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});
             const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
             if (w == -EPIPE) {
                 snd_pcm_prepare(pcm);  // underrun: recover and keep going

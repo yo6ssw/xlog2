@@ -33,6 +33,18 @@ struct Settings {
     int         keyerSpeed = 0;       // 0 = leave cwdaemon's default
     std::array<std::string, 9> keyerMessages{};
 
+    // [paddle] — cwsd remote_key real paddle keying over UDP
+    bool        paddleEnabled = false;
+    std::string paddleHost    = "127.0.0.1";
+    int         paddlePort    = 6790;
+    int         paddleWpm     = 20;
+    bool        paddleIambicB = false;     // false = iambic A
+    bool        paddleSidetone = true;     // local sidetone on/off
+    int         paddleToneHz   = 600;      // local sidetone frequency
+    int         paddleLevel    = 50;       // local sidetone volume, 0..100
+    std::string paddleSidetoneDevice = "default";  // ALSA playback device
+    bool        paddleMuteAudio = true;    // mute the rig-audio stream while keying
+
     // [audio] — cwsd Opus-over-UDP rig audio stream
     bool        audioEnabled    = false;
     std::string audioHost       = "127.0.0.1";

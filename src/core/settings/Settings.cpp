@@ -27,6 +27,17 @@ Settings Settings::load(const IniFile& ini) {
         s.keyerMessages[i] =
             ini.getString("keyer", "message" + std::to_string(i + 1), s.keyerMessages[i]);
 
+    s.paddleEnabled = ini.getBool("paddle", "enabled", s.paddleEnabled);
+    s.paddleHost    = ini.getString("paddle", "host", s.paddleHost);
+    s.paddlePort    = ini.getInt("paddle", "port", s.paddlePort);
+    s.paddleWpm     = ini.getInt("paddle", "wpm", s.paddleWpm);
+    s.paddleIambicB = ini.getBool("paddle", "iambic_b", s.paddleIambicB);
+    s.paddleSidetone = ini.getBool("paddle", "sidetone", s.paddleSidetone);
+    s.paddleToneHz  = ini.getInt("paddle", "tone_hz", s.paddleToneHz);
+    s.paddleLevel   = ini.getInt("paddle", "level", s.paddleLevel);
+    s.paddleSidetoneDevice = ini.getString("paddle", "sidetone_device", s.paddleSidetoneDevice);
+    s.paddleMuteAudio = ini.getBool("paddle", "mute_audio", s.paddleMuteAudio);
+
     s.audioEnabled    = ini.getBool("audio", "enabled", s.audioEnabled);
     s.audioHost       = ini.getString("audio", "host", s.audioHost);
     s.audioPort       = ini.getInt("audio", "port", s.audioPort);
@@ -68,6 +79,17 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("keyer", "speed", keyerSpeed);
     for (int i = 0; i < 9; ++i)
         ini.setString("keyer", "message" + std::to_string(i + 1), keyerMessages[i]);
+
+    ini.setBool("paddle", "enabled", paddleEnabled);
+    ini.setString("paddle", "host", paddleHost);
+    ini.setInt("paddle", "port", paddlePort);
+    ini.setInt("paddle", "wpm", paddleWpm);
+    ini.setBool("paddle", "iambic_b", paddleIambicB);
+    ini.setBool("paddle", "sidetone", paddleSidetone);
+    ini.setInt("paddle", "tone_hz", paddleToneHz);
+    ini.setInt("paddle", "level", paddleLevel);
+    ini.setString("paddle", "sidetone_device", paddleSidetoneDevice);
+    ini.setBool("paddle", "mute_audio", paddleMuteAudio);
 
     ini.setBool("audio", "enabled", audioEnabled);
     ini.setString("audio", "host", audioHost);

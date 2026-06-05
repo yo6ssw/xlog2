@@ -22,7 +22,8 @@ MainWindow::MainWindow()
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
       cluster_(uiDispatcher_),
-      audio_(uiDispatcher_) {
+      audio_(uiDispatcher_),
+      paddle_(uiDispatcher_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -52,6 +53,29 @@ MainWindow::MainWindow()
             Gtk::Shortcut::create(Gtk::KeyvalTrigger::create(GDK_KEY_F1 + i), action));
     }
     add_controller(keyerShortcuts);
+
+    // Paddle simulation for the remote paddle keyer: `[` = dit, `]` = dah, held
+    // for the duration of the contact. Only intercepted while the keyer is active,
+    // so the brackets type normally otherwise. CAPTURE phase so the press/release
+    // is seen before any focused entry consumes it.
+    auto paddleKeys = Gtk::EventControllerKey::create();
+    paddleKeys->set_propagation_phase(Gtk::PropagationPhase::CAPTURE);
+    paddleKeys->signal_key_pressed().connect(
+        [this](guint keyval, guint, Gdk::ModifierType) -> bool {
+            if (!paddle_.isActive())
+                return false;
+            if (keyval == GDK_KEY_bracketleft)  { paddle_.setDit(true); return true; }
+            if (keyval == GDK_KEY_bracketright) { paddle_.setDah(true); return true; }
+            return false;
+        },
+        false);
+    paddleKeys->signal_key_released().connect(
+        [this](guint keyval, guint, Gdk::ModifierType) {
+            if (keyval == GDK_KEY_bracketleft)  paddle_.setDit(false);
+            if (keyval == GDK_KEY_bracketright) paddle_.setDah(false);
+        },
+        false);
+    add_controller(paddleKeys);
 
     auto* vbox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
     set_child(*vbox);
@@ -127,6 +151,9 @@ MainWindow::MainWindow()
     audio_.onStats  = [this](unsigned long frames) {
         audioIndicator_.set_text("♪ " + std::to_string(frames) + " frames");
     };
+    paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
+    // Mute the rig-audio stream while keying (semi-break-in) when configured to.
+    paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
 
     loadSettings();
     if (notebook_.get_n_pages() == 0)
@@ -149,6 +176,10 @@ MainWindow::MainWindow()
     // Resume the rig audio stream if it was playing last session.
     if (cfg().audioEnabled)
         startAudioStream();
+
+    // Resume the remote paddle keyer if it was active last session.
+    if (cfg().paddleEnabled)
+        startPaddleKeyer();
 }
 
 void MainWindow::buildActions() {
@@ -181,6 +212,10 @@ void MainWindow::buildActions() {
     add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
 
     add_action("keyersettings", sigc::mem_fun(*this, &MainWindow::onKeyerSettings));
+
+    paddleAction_ =
+        add_action_bool("paddle", sigc::mem_fun(*this, &MainWindow::onTogglePaddle), false);
+    add_action("paddlesettings", sigc::mem_fun(*this, &MainWindow::onPaddleSettings));
 
     audioAction_ = add_action_bool("audio", sigc::mem_fun(*this, &MainWindow::onToggleAudio), false);
     add_action("audiosettings", sigc::mem_fun(*this, &MainWindow::onAudioSettings));
@@ -239,6 +274,10 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
 
     auto keyerMenu = Gio::Menu::create();
     keyerMenu->append("_Settings…", "win.keyersettings");
+    auto paddleSection = Gio::Menu::create();
+    paddleSection->append("Remote _paddle keying ([ / ])", "win.paddle");
+    paddleSection->append("Paddle se_ttings…", "win.paddlesettings");
+    keyerMenu->append_section(paddleSection);
     menu->append_submenu("_Keyer", keyerMenu);
 
     auto audioMenu = Gio::Menu::create();
@@ -1140,6 +1179,127 @@ void MainWindow::onAudioSettings() {
     win->present();
 }
 
+// --- remote paddle keyer (cwsd remote_key) -----------------------------------
+
+void MainWindow::onTogglePaddle() {
+    if (!paddle_.isActive())
+        startPaddleKeyer();
+    else
+        stopPaddleKeyer();
+}
+
+void MainWindow::startPaddleKeyer() {
+    RemotePaddleConfig pc;
+    pc.host     = cfg().paddleHost;
+    pc.port     = cfg().paddlePort;
+    pc.wpm      = cfg().paddleWpm;
+    pc.iambicB  = cfg().paddleIambicB;
+    pc.sidetone = cfg().paddleSidetone;
+    pc.toneHz   = cfg().paddleToneHz;
+    pc.level    = cfg().paddleLevel;
+    pc.device   = cfg().paddleSidetoneDevice;
+    paddle_.start(pc);
+    cfg().paddleEnabled = true;  // user intent, persisted; survives teardown
+    paddleAction_->change_state(true);
+}
+
+void MainWindow::stopPaddleKeyer() {
+    paddle_.stop();
+    cfg().paddleEnabled = false;
+    paddleAction_->change_state(false);
+}
+
+void MainWindow::onPaddleSettings() {
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_modal(true);
+    win->set_title("Remote paddle keyer (cwsd)");
+    win->set_hide_on_close(true);
+
+    auto* grid = Gtk::make_managed<Gtk::Grid>();
+    grid->set_row_spacing(6);
+    grid->set_column_spacing(8);
+    ui::setMargin(*grid, 12);
+
+    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
+    hostEntry->set_text(cfg().paddleHost);
+    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
+    portEntry->set_text(std::to_string(cfg().paddlePort));
+    auto* wpmEntry = Gtk::make_managed<Gtk::Entry>();
+    wpmEntry->set_text(std::to_string(cfg().paddleWpm));
+    auto* iambicBCheck = Gtk::make_managed<Gtk::CheckButton>("Iambic B (default: iambic A)");
+    iambicBCheck->set_active(cfg().paddleIambicB);
+    auto* sidetoneCheck = Gtk::make_managed<Gtk::CheckButton>("Local sidetone");
+    sidetoneCheck->set_active(cfg().paddleSidetone);
+    auto* toneEntry = Gtk::make_managed<Gtk::Entry>();
+    toneEntry->set_text(std::to_string(cfg().paddleToneHz));
+    auto* levelEntry = Gtk::make_managed<Gtk::Entry>();
+    levelEntry->set_text(std::to_string(cfg().paddleLevel));
+    auto* muteAudioCheck = Gtk::make_managed<Gtk::CheckButton>("Mute rig audio while keying");
+    muteAudioCheck->set_active(cfg().paddleMuteAudio);
+
+    auto field = [&](const char* text, Gtk::Widget& w, int row) {
+        auto* l = Gtk::make_managed<Gtk::Label>(text);
+        l->set_xalign(1.0);
+        grid->attach(*l, 0, row);
+        w.set_hexpand(true);
+        grid->attach(w, 1, row);
+    };
+    field("Host:", *hostEntry, 0);
+    field("Port:", *portEntry, 1);
+    field("Speed (wpm):", *wpmEntry, 2);
+    grid->attach(*iambicBCheck, 1, 3);
+    grid->attach(*sidetoneCheck, 1, 4);
+    field("Tone (Hz):", *toneEntry, 5);
+    field("Volume (0–100):", *levelEntry, 6);
+    grid->attach(*muteAudioCheck, 1, 7);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Streams timestamped key edges to cwsd's `remote_key` service for real\n"
+        "paddle keying, with an instant local sidetone for feel. Test with the\n"
+        "[ (dit) and ] (dah) keys while active. cwsd's default port is 6790.");
+    hint->set_xalign(0.0);
+    grid->attach(*hint, 0, 8, 2, 1);
+
+    auto* save = Gtk::make_managed<Gtk::Button>("Save");
+    save->set_halign(Gtk::Align::END);
+    grid->attach(*save, 1, 9);
+
+    win->set_child(*grid);
+    win->signal_hide().connect([win]() { delete win; });
+
+    save->signal_clicked().connect(
+        [this, hostEntry, portEntry, wpmEntry, iambicBCheck, sidetoneCheck,
+         toneEntry, levelEntry, muteAudioCheck, win]() {
+            cfg().paddleHost = hostEntry->get_text().raw();
+            if (cfg().paddleHost.empty())
+                cfg().paddleHost = "127.0.0.1";
+            try { cfg().paddlePort = std::stoi(portEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().paddlePort = 6790; }
+            try { cfg().paddleWpm = std::stoi(wpmEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().paddleWpm = 20; }
+            if (cfg().paddleWpm <= 0)
+                cfg().paddleWpm = 20;
+            cfg().paddleIambicB = iambicBCheck->get_active();
+            cfg().paddleSidetone = sidetoneCheck->get_active();
+            try { cfg().paddleToneHz = std::stoi(toneEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().paddleToneHz = 600; }
+            if (cfg().paddleToneHz <= 0)
+                cfg().paddleToneHz = 600;
+            try { cfg().paddleLevel = std::stoi(levelEntry->get_text().raw()); }
+            catch (const std::exception&) { cfg().paddleLevel = 50; }
+            cfg().paddleMuteAudio = muteAudioCheck->get_active();
+            // Restart on the new settings if currently active.
+            if (paddle_.isActive())
+                startPaddleKeyer();
+            else
+                setStatus("Remote paddle keyer settings saved.");
+            win->set_visible(false);
+        });
+
+    win->present();
+}
+
 // --- DX cluster --------------------------------------------------------------
 
 void MainWindow::applyDxDock() {
@@ -1293,6 +1453,7 @@ bool MainWindow::onCloseRequest() {
     rig_.stop();
     listener_.stop();
     audio_.stop();
+    paddle_.stop();
     cluster_.disconnect();  // close the socket while the panel is still alive
     saveSettings();
     return false;  // proceed with the default close (hide) handling

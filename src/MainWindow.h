@@ -10,6 +10,7 @@
 #include "MainPresenter.h"
 #include "Qrz.h"
 #include "Qso.h"
+#include "RemotePaddleKeyer.h"
 #include "Rig.h"
 #include "Udp.h"
 
@@ -88,6 +89,12 @@ private:
     void onKeyerSettings();
     void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages
 
+    // --- remote paddle keyer (cwsd remote_key) ---
+    void onTogglePaddle();     // start/stop toggle
+    void startPaddleKeyer();
+    void stopPaddleKeyer();
+    void onPaddleSettings();
+
     // --- rig audio stream (cwsd) ---
     void onToggleAudio();      // start/stop toggle
     void startAudioStream();
@@ -136,9 +143,11 @@ private:
     CwKeyer                         keyer_;
     DxCluster                       cluster_;
     AudioStreamClient               audio_;
+    RemotePaddleKeyer               paddle_;
 
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
     Glib::RefPtr<Gio::SimpleAction> audioAction_;
+    Glib::RefPtr<Gio::SimpleAction> paddleAction_;
 
     // DX cluster panel + layout. dxPanel_ is a value member (like notebook_) so
     // it survives being reparented between paned slots when the dock side

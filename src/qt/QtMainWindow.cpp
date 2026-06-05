@@ -21,6 +21,7 @@
 #include <QDockWidget>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
@@ -82,7 +83,8 @@ QtMainWindow::QtMainWindow()
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
       cluster_(uiDispatcher_),
-      audio_(uiDispatcher_) {
+      audio_(uiDispatcher_),
+      paddle_(uiDispatcher_) {
     setWindowTitle("xlog2");
     resize(1024, 700);
 
@@ -175,6 +177,12 @@ QtMainWindow::QtMainWindow()
     audio_.onStats  = [this](unsigned long frames) {
         audioIndicator_->setText(QString("♪ %1 frames").arg(frames));
     };
+    paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
+    // Mute the rig-audio stream while keying (semi-break-in) when configured to.
+    paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
+
+    // App-wide key filter for the `[`/`]` paddle simulation (see eventFilter).
+    qApp->installEventFilter(this);
 
     loadSettings();
     if (tabs_->count() == 0)
@@ -189,6 +197,8 @@ QtMainWindow::QtMainWindow()
     }
     if (cfg().audioEnabled)
         startAudioStream();
+    if (cfg().paddleEnabled)
+        startPaddleKeyer();
 }
 
 // --- IMainView ---------------------------------------------------------------
@@ -327,6 +337,11 @@ void QtMainWindow::buildMenus() {
 
     auto* keyer = menuBar()->addMenu("&Keyer");
     keyer->addAction("Settings…", this, &QtMainWindow::onKeyerSettings);
+    keyer->addSeparator();
+    paddleAction_ = keyer->addAction("Remote paddle keying ([ / ])");
+    paddleAction_->setCheckable(true);
+    connect(paddleAction_, &QAction::toggled, this, &QtMainWindow::onTogglePaddle);
+    keyer->addAction("Paddle settings…", this, &QtMainWindow::onPaddleSettings);
 
     auto* audio = menuBar()->addMenu("&Audio");
     audioAction_ = audio->addAction("Play rig audio stream");
@@ -741,6 +756,102 @@ void QtMainWindow::onAudioSettings() {
         else
             setStatus("Rig audio stream settings saved.");
     }
+}
+
+// --- remote paddle keyer (cwsd remote_key) -----------------------------------
+
+void QtMainWindow::onTogglePaddle(bool on) {
+    if (on)
+        startPaddleKeyer();
+    else {
+        paddle_.stop();
+        cfg().paddleEnabled = false;
+    }
+}
+
+void QtMainWindow::startPaddleKeyer() {
+    RemotePaddleConfig pc;
+    pc.host     = cfg().paddleHost;
+    pc.port     = cfg().paddlePort;
+    pc.wpm      = cfg().paddleWpm;
+    pc.iambicB  = cfg().paddleIambicB;
+    pc.sidetone = cfg().paddleSidetone;
+    pc.toneHz   = cfg().paddleToneHz;
+    pc.level    = cfg().paddleLevel;
+    pc.device   = cfg().paddleSidetoneDevice;
+    paddle_.start(pc);
+    cfg().paddleEnabled = true;  // user intent, persisted; survives teardown
+    if (paddleAction_) {
+        QSignalBlocker block(paddleAction_);
+        paddleAction_->setChecked(true);
+    }
+}
+
+void QtMainWindow::onPaddleSettings() {
+    QDialog dlg(this);
+    dlg.setWindowTitle("Remote paddle keyer (cwsd)");
+    auto* form = new QFormLayout(&dlg);
+    auto* host = new QLineEdit(QString::fromStdString(cfg().paddleHost));
+    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().paddlePort);
+    auto* wpm  = new QSpinBox; wpm->setRange(1, 99); wpm->setValue(cfg().paddleWpm);
+    auto* iambicB = new QCheckBox("Iambic B (default: iambic A)");
+    iambicB->setChecked(cfg().paddleIambicB);
+    auto* sidetone = new QCheckBox("Local sidetone");
+    sidetone->setChecked(cfg().paddleSidetone);
+    auto* tone = new QSpinBox; tone->setRange(100, 2000); tone->setSuffix(" Hz");
+    tone->setValue(cfg().paddleToneHz);
+    auto* level = new QSpinBox; level->setRange(0, 100); level->setValue(cfg().paddleLevel);
+    auto* muteAudio = new QCheckBox("Mute rig audio while keying");
+    muteAudio->setChecked(cfg().paddleMuteAudio);
+    form->addRow("Host:", host);
+    form->addRow("Port:", port);
+    form->addRow("Speed (wpm):", wpm);
+    form->addRow(iambicB);
+    form->addRow(sidetone);
+    form->addRow("Tone:", tone);
+    form->addRow("Volume (0–100):", level);
+    form->addRow(muteAudio);
+    auto* hint = new QLabel(
+        "Streams timestamped key edges to cwsd's `remote_key` service, with an\n"
+        "instant local sidetone for feel. Test with the [ (dit) and ] (dah)\n"
+        "keys while active. cwsd's default remote_key port is 6790.");
+    form->addRow(hint);
+    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
+    form->addRow(bb);
+    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
+    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
+    if (dlg.exec() == QDialog::Accepted) {
+        cfg().paddleHost = host->text().toStdString();
+        if (cfg().paddleHost.empty()) cfg().paddleHost = "127.0.0.1";
+        cfg().paddlePort = port->value();
+        cfg().paddleWpm = wpm->value();
+        cfg().paddleIambicB = iambicB->isChecked();
+        cfg().paddleSidetone = sidetone->isChecked();
+        cfg().paddleToneHz = tone->value();
+        cfg().paddleLevel = level->value();
+        cfg().paddleMuteAudio = muteAudio->isChecked();
+        if (paddle_.isActive())
+            startPaddleKeyer();  // restart on the new settings
+        else
+            setStatus("Remote paddle keyer settings saved.");
+    }
+}
+
+bool QtMainWindow::eventFilter(QObject* obj, QEvent* ev) {
+    if (paddle_.isActive() &&
+        (ev->type() == QEvent::KeyPress || ev->type() == QEvent::KeyRelease)) {
+        auto* ke = static_cast<QKeyEvent*>(ev);
+        if (!ke->isAutoRepeat() &&
+            (ke->key() == Qt::Key_BracketLeft || ke->key() == Qt::Key_BracketRight)) {
+            const bool down = ev->type() == QEvent::KeyPress;
+            if (ke->key() == Qt::Key_BracketLeft)
+                paddle_.setDit(down);
+            else
+                paddle_.setDah(down);
+            return true;  // consume so the bracket isn't typed while keying
+        }
+    }
+    return QMainWindow::eventFilter(obj, ev);
 }
 
 // --- DX cluster --------------------------------------------------------------

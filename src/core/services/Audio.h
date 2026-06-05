@@ -53,6 +53,11 @@ public:
     void stop();
     bool isStreaming() const { return running_.load(); }
 
+    // Mute playback without unsubscribing: the worker keeps receiving + decoding
+    // (so it stays subscribed and the decoder stays in sync) but plays silence.
+    // Used to silence the rig-audio stream while transmitting (see RemotePaddleKeyer).
+    void setMuted(bool m) { muted_.store(m, std::memory_order_relaxed); }
+
 private:
     void worker(AudioStreamConfig cfg);
     void wake();  // poke the self-pipe so the worker re-checks its stop flag
@@ -62,6 +67,7 @@ private:
     IUiDispatcher&    ui_;
     int               wake_[2] = {-1, -1};
     std::atomic<bool> running_{false};
+    std::atomic<bool> muted_{false};
     std::thread       thread_;
 
     // Liveness token for posted closures (see DxCluster/RigController). Recreated
