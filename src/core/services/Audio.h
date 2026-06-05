@@ -40,6 +40,9 @@ struct OpusDecoder;
 class AudioStreamClient {
 public:
     std::function<void(const std::string&)> onStatus;  // streaming state/errors
+    // Running count of decoded+played audio frames, posted ~once a second while
+    // streaming — a live "the stream is working" indicator for the UI.
+    std::function<void(unsigned long framesDecoded)> onStats;
 
     explicit AudioStreamClient(IUiDispatcher& ui) : ui_(ui) {}
     ~AudioStreamClient();
@@ -54,6 +57,7 @@ private:
     void worker(AudioStreamConfig cfg);
     void wake();  // poke the self-pipe so the worker re-checks its stop flag
     void postStatus(const std::string& s);
+    void postStats(unsigned long frames);
 
     IUiDispatcher&    ui_;
     int               wake_[2] = {-1, -1};

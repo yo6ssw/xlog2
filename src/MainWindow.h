@@ -116,6 +116,7 @@ private:
 
     Gtk::Notebook                   notebook_;
     Gtk::Label                      statusLabel_;
+    Gtk::Label                      audioIndicator_;  // live audio-frame counter
     std::map<LogPage*, Gtk::Label*> tabLabels_;
 
     // Marshals worker-thread results from the services onto the UI thread.

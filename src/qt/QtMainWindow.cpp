@@ -104,6 +104,10 @@ QtMainWindow::QtMainWindow()
 
     status_ = new QLabel("Ready.");
     statusBar()->addWidget(status_, 1);
+    // A permanent widget (right-aligned) so the live frame counter doesn't fight
+    // with transient status messages.
+    audioIndicator_ = new QLabel;
+    statusBar()->addPermanentWidget(audioIndicator_);
 
     // DX cluster dock: a band-map panel (spots table on top, telnet console
     // below) matching the gtkmm DxClusterPanel.
@@ -168,6 +172,9 @@ QtMainWindow::QtMainWindow()
     };
     cluster_.onSpot = [this](const DxSpot& s) { dxPanel_->addSpot(s); };
     audio_.onStatus = [this](const std::string& s) { setStatus(s); };
+    audio_.onStats  = [this](unsigned long frames) {
+        audioIndicator_->setText(QString("♪ %1 frames").arg(frames));
+    };
 
     loadSettings();
     if (tabs_->count() == 0)
@@ -676,6 +683,7 @@ void QtMainWindow::onToggleAudio(bool on) {
     else {
         audio_.stop();
         cfg().audioEnabled = false;
+        audioIndicator_->clear();
     }
 }
 

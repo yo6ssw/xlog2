@@ -104,6 +104,7 @@ private:
 
     QTabWidget*       tabs_    = nullptr;
     QLabel*           status_  = nullptr;
+    QLabel*           audioIndicator_ = nullptr;  // live audio-frame counter
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
