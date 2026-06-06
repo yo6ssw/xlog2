@@ -32,6 +32,7 @@ Settings Settings::load(const IniFile& ini) {
     s.paddlePort    = ini.getInt("paddle", "port", s.paddlePort);
     s.paddleWpm     = ini.getInt("paddle", "wpm", s.paddleWpm);
     s.paddleIambicB = ini.getBool("paddle", "iambic_b", s.paddleIambicB);
+    s.paddleAutospace = ini.getBool("paddle", "autospace", s.paddleAutospace);
     s.paddleSidetone = ini.getBool("paddle", "sidetone", s.paddleSidetone);
     s.paddleToneHz  = ini.getInt("paddle", "tone_hz", s.paddleToneHz);
     s.paddleLevel   = ini.getInt("paddle", "level", s.paddleLevel);
@@ -85,6 +86,7 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("paddle", "port", paddlePort);
     ini.setInt("paddle", "wpm", paddleWpm);
     ini.setBool("paddle", "iambic_b", paddleIambicB);
+    ini.setBool("paddle", "autospace", paddleAutospace);
     ini.setBool("paddle", "sidetone", paddleSidetone);
     ini.setInt("paddle", "tone_hz", paddleToneHz);
     ini.setInt("paddle", "level", paddleLevel);

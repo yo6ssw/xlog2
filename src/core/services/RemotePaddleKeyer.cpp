@@ -150,11 +150,14 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     };
 
     // Element-generator state. iambic-A "memory": while sending one element the
-    // opposite paddle is sampled, and that element is queued to follow.
-    enum class Phase { Idle, Mark, Gap };
+    // opposite paddle is sampled, and that element is queued to follow. The Wait
+    // phase is the autospace dwell: a new character's first element is latched and
+    // held until the 3-dit inter-character boundary (see the Idle case below).
+    enum class Phase { Idle, Mark, Gap, Wait };
     Phase phase = Phase::Idle;
     bool  curDah = false;          // element currently being sent
     bool  memDit = false, memDah = false;
+    bool  pendDah = false;         // element latched during an autospace Wait
     std::uint64_t phaseEndUs = 0;
 
     // `at` is the *scheduled* start instant, not the polled clock: from Idle it is
@@ -181,11 +184,28 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
 
         switch (phase) {
             case Phase::Idle:
-                // Start the squeezed element; if both are down, lead with the dit.
-                if (d)
-                    startMark(now, false);
-                else if (h)
-                    startMark(now, true);
+                // A fresh press begins a new character; if both are down, lead with
+                // the dit. With autospace, hold that first element until a full
+                // 3-dit inter-character space has elapsed since the previous element
+                // ended (lastKeyUpUs), so letters tapped in quick succession don't
+                // run together. The element is latched in Wait and emitted exactly on
+                // the boundary, keeping the sidetone aligned with the on-air edge.
+                if (d || h) {
+                    const bool dah = h && !d;
+                    const std::uint64_t charBoundary = lastKeyUpUs + 3 * ditUs;
+                    if (cfg.autospace && lastKeyUpUs != 0 && now < charBoundary) {
+                        pendDah = dah;
+                        phase = Phase::Wait;
+                        phaseEndUs = charBoundary;
+                    } else {
+                        startMark(now, dah);
+                    }
+                }
+                break;
+
+            case Phase::Wait:
+                if (now >= phaseEndUs)
+                    startMark(phaseEndUs, pendDah);
                 break;
 
             case Phase::Mark:

@@ -30,6 +30,12 @@
 // does not. The sidetone thread is independent: if its device is missing, keying
 // still streams.
 //
+// Autospace (on by default): when a new character's first element is keyed within
+// 3 dits of the previous element ending, its start is held to the 3-dit boundary so
+// quickly-tapped letters get a clean inter-character space instead of running
+// together. It applies only across the idle gap between characters, never to a
+// continuing iambic squeeze.
+//
 // NOTE (scaffold): iambic memory gives iambic-A behaviour; full iambic-B is a TODO.
 struct RemotePaddleConfig {
     bool        enabled = false;
@@ -37,6 +43,7 @@ struct RemotePaddleConfig {
     int         port    = 6790;         // cwsd remote_key UDP port
     int         wpm     = 20;           // keying speed
     bool        iambicB = false;        // false = iambic A (reserved; see header note)
+    bool        autospace = true;       // enforce a full 3-dit inter-character space
 
     // local sidetone
     bool        sidetone = true;        // generate local audio feedback

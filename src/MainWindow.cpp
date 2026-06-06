@@ -1200,6 +1200,7 @@ void MainWindow::startPaddleKeyer() {
     pc.port     = cfg().paddlePort;
     pc.wpm      = cfg().paddleWpm;
     pc.iambicB  = cfg().paddleIambicB;
+    pc.autospace = cfg().paddleAutospace;
     pc.sidetone = cfg().paddleSidetone;
     pc.toneHz   = cfg().paddleToneHz;
     pc.level    = cfg().paddleLevel;
@@ -1237,6 +1238,8 @@ void MainWindow::onPaddleSettings() {
     wpmEntry->set_text(std::to_string(cfg().paddleWpm));
     auto* iambicBCheck = Gtk::make_managed<Gtk::CheckButton>("Iambic B (default: iambic A)");
     iambicBCheck->set_active(cfg().paddleIambicB);
+    auto* autospaceCheck = Gtk::make_managed<Gtk::CheckButton>("Autospace (enforce inter-character spacing)");
+    autospaceCheck->set_active(cfg().paddleAutospace);
     auto* sidetoneCheck = Gtk::make_managed<Gtk::CheckButton>("Local sidetone");
     sidetoneCheck->set_active(cfg().paddleSidetone);
     auto* toneEntry = Gtk::make_managed<Gtk::Entry>();
@@ -1257,28 +1260,29 @@ void MainWindow::onPaddleSettings() {
     field("Port:", *portEntry, 1);
     field("Speed (wpm):", *wpmEntry, 2);
     grid->attach(*iambicBCheck, 1, 3);
-    grid->attach(*sidetoneCheck, 1, 4);
-    field("Tone (Hz):", *toneEntry, 5);
-    field("Volume (0–100):", *levelEntry, 6);
-    grid->attach(*muteAudioCheck, 1, 7);
+    grid->attach(*autospaceCheck, 1, 4);
+    grid->attach(*sidetoneCheck, 1, 5);
+    field("Tone (Hz):", *toneEntry, 6);
+    field("Volume (0–100):", *levelEntry, 7);
+    grid->attach(*muteAudioCheck, 1, 8);
 
     auto* hint = Gtk::make_managed<Gtk::Label>(
         "Streams timestamped key edges to cwsd's `remote_key` service for real\n"
         "paddle keying, with an instant local sidetone for feel. Test with the\n"
         "[ (dit) and ] (dah) keys while active. cwsd's default port is 6790.");
     hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 8, 2, 1);
+    grid->attach(*hint, 0, 9, 2, 1);
 
     auto* save = Gtk::make_managed<Gtk::Button>("Save");
     save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 9);
+    grid->attach(*save, 1, 10);
 
     win->set_child(*grid);
     win->signal_hide().connect([win]() { delete win; });
 
     save->signal_clicked().connect(
-        [this, hostEntry, portEntry, wpmEntry, iambicBCheck, sidetoneCheck,
-         toneEntry, levelEntry, muteAudioCheck, win]() {
+        [this, hostEntry, portEntry, wpmEntry, iambicBCheck, autospaceCheck,
+         sidetoneCheck, toneEntry, levelEntry, muteAudioCheck, win]() {
             cfg().paddleHost = hostEntry->get_text().raw();
             if (cfg().paddleHost.empty())
                 cfg().paddleHost = "127.0.0.1";
@@ -1289,6 +1293,7 @@ void MainWindow::onPaddleSettings() {
             if (cfg().paddleWpm <= 0)
                 cfg().paddleWpm = 20;
             cfg().paddleIambicB = iambicBCheck->get_active();
+            cfg().paddleAutospace = autospaceCheck->get_active();
             cfg().paddleSidetone = sidetoneCheck->get_active();
             try { cfg().paddleToneHz = std::stoi(toneEntry->get_text().raw()); }
             catch (const std::exception&) { cfg().paddleToneHz = 600; }

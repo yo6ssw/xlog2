@@ -160,8 +160,12 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   `[paddle] mute_audio` setting) so the rig-audio stream is silenced while keying
   — semi-break-in, since otherwise you'd hear your own delayed signal fighting the
   local sidetone. `setMuted` keeps decoding/feeding ALSA with silence (no
-  unsubscribe, no unmute glitch). *Scaffold note:* iambic memory gives iambic-A;
-  full iambic-B is a TODO.
+  unsubscribe, no unmute glitch). **Autospace** (`[paddle] autospace`, on by
+  default) holds a new character's first element to the 3-dit inter-character
+  boundary when it's keyed too soon after the previous element, so quickly-tapped
+  letters don't run together; it acts only across the idle gap between characters
+  (a `Wait` phase before `Mark`), never on a continuing squeeze. *Scaffold note:*
+  iambic memory gives iambic-A; full iambic-B is a TODO.
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.
 

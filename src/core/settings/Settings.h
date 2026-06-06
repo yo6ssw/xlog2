@@ -39,6 +39,7 @@ struct Settings {
     int         paddlePort    = 6790;
     int         paddleWpm     = 20;
     bool        paddleIambicB = false;     // false = iambic A
+    bool        paddleAutospace = true;    // enforce full inter-character spacing
     bool        paddleSidetone = true;     // local sidetone on/off
     int         paddleToneHz   = 600;      // local sidetone frequency
     int         paddleLevel    = 50;       // local sidetone volume, 0..100
