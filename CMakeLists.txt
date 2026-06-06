@@ -52,6 +52,7 @@ add_library(xlog_core STATIC
     src/core/services/DxCluster.cpp
     src/core/services/Audio.cpp
     src/core/services/RemotePaddleKeyer.cpp
+    src/core/services/HidPaddleInput.cpp
 )
 target_include_directories(xlog_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/src

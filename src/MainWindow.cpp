@@ -23,7 +23,8 @@ MainWindow::MainWindow()
       qrz_(uiDispatcher_),
       cluster_(uiDispatcher_),
       audio_(uiDispatcher_),
-      paddle_(uiDispatcher_) {
+      paddle_(uiDispatcher_),
+      hidPaddle_(uiDispatcher_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -154,6 +155,11 @@ MainWindow::MainWindow()
     paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
     // Mute the rig-audio stream while keying (semi-break-in) when configured to.
     paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
+    // USB paddle: drive the keyer's lock-free contact atomics straight from the
+    // HID worker thread (no UI hop) for lowest latency; status goes via the UI.
+    hidPaddle_.onDit    = [this](bool p) { paddle_.setDit(p); };
+    hidPaddle_.onDah    = [this](bool p) { paddle_.setDah(p); };
+    hidPaddle_.onStatus = [this](const std::string& s) { setStatus(s); };
 
     loadSettings();
     if (notebook_.get_n_pages() == 0)
@@ -1199,11 +1205,13 @@ void MainWindow::startPaddleKeyer() {
     pc.level    = cfg().paddleLevel;
     pc.device   = cfg().paddleSidetoneDevice;
     paddle_.start(pc);
+    hidPaddle_.start();          // also accept a USB HID paddle, if present
     cfg().paddleEnabled = true;  // user intent, persisted; survives teardown
     paddleAction_->change_state(true);
 }
 
 void MainWindow::stopPaddleKeyer() {
+    hidPaddle_.stop();
     paddle_.stop();
     cfg().paddleEnabled = false;
     paddleAction_->change_state(false);
