@@ -137,10 +137,13 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   *text* for cwdaemon to key), the iambic keyer runs *here*, on jitter-free local
   paddle input, and streams finished key edges (key-down/key-up) timestamped on a
   per-session monotonic clock; cwsd replays them behind a fixed playout delay, so
-  jitter never distorts the Morse. The worker ticks the element generator at
-  ~1 ms and sends each edge as a UDP datagram carrying recent edges as
-  loss-recovery history (cwsd dedups by timestamp), plus a keepalive (<cwsd's
-  silence timeout) while idle. Paddle contacts arrive from the UI thread via
+  jitter never distorts the Morse. The worker polls the paddle atomics every
+  ~250 us and ticks the element generator, timestamping each edge from the element
+  *schedule* (not the poll clock) so dit/dah/gap durations stay exact regardless of
+  poll granularity or scheduler stalls — the poll interval bounds only how fast a
+  fresh paddle close is reacted to. Each edge ships as a UDP datagram carrying
+  recent edges as loss-recovery history (cwsd dedups by timestamp), plus a
+  keepalive (<cwsd's silence timeout) while idle. Paddle contacts arrive from the UI thread via
   lock-free `setDit`/`setDah`; **for testing, the `[` and `]` keys** simulate
   dit/dah (gtkmm: a CAPTURE-phase `EventControllerKey`; Qt: an app-wide
   `eventFilter`), intercepted only while the keyer is active so the brackets type
