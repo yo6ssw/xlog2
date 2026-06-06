@@ -17,9 +17,11 @@
 //
 // Paddle input arrives from the UI thread (for testing, the `[` and `]` keys —
 // see MainWindow / QtMainWindow); setDit()/setDah() are lock-free. A worker
-// thread ticks the element generator at ~1 ms, emits edges as UDP datagrams (each
-// carrying recent edges as loss-recovery history), and sends a keepalive while
-// idle so cwsd keeps the session anchored.
+// thread polls them every ~250 us and ticks the element generator, emitting edges
+// as UDP datagrams (each carrying recent edges as loss-recovery history) and a
+// keepalive while idle so cwsd keeps the session anchored. Edge timestamps come
+// from the element *schedule*, not the poll clock, so the keying stays exact — the
+// poll interval bounds only how fast we react to a fresh paddle close.
 //
 // Local sidetone gives the operator instant feel: a second thread renders a
 // click-free (ramped-envelope) sine to ALSA, gated by the same key-down/up

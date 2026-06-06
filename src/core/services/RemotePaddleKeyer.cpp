@@ -157,12 +157,18 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     bool  memDit = false, memDah = false;
     std::uint64_t phaseEndUs = 0;
 
-    auto startMark = [&](std::uint64_t now, bool dah) {
+    // `at` is the *scheduled* start instant, not the polled clock: from Idle it is
+    // the moment the paddle close was detected; mid-train it is the previous gap's
+    // exact end. Emitting on the schedule (rather than on `now`) keeps the whole
+    // element train phase-locked to the first press, so dit/dah/gap durations are
+    // exact regardless of poll granularity or a scheduler stall — only the initial
+    // detection carries real latency.
+    auto startMark = [&](std::uint64_t at, bool dah) {
         curDah = dah;
         memDit = memDah = false;
-        emitEdge(now, remotekey::kKeyDown);
+        emitEdge(at, remotekey::kKeyDown);
         phase = Phase::Mark;
-        phaseEndUs = now + (dah ? dahUs : ditUs);
+        phaseEndUs = at + (dah ? dahUs : ditUs);
     };
 
     postStatus("Paddle keyer: ready — streaming to " + cfg.host + ":" +
@@ -186,9 +192,10 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
                 if (curDah && d) memDit = true;        // opposite-paddle memory
                 if (!curDah && h) memDah = true;
                 if (now >= phaseEndUs) {
-                    emitEdge(now, 0);                  // key up
+                    const std::uint64_t markEnd = phaseEndUs;  // exact, not polled
+                    emitEdge(markEnd, 0);              // key up
                     phase = Phase::Gap;
-                    phaseEndUs = now + gapUs;
+                    phaseEndUs = markEnd + gapUs;
                 }
                 break;
 
@@ -196,6 +203,7 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
                 if (curDah && d) memDit = true;
                 if (!curDah && h) memDah = true;
                 if (now >= phaseEndUs) {
+                    const std::uint64_t gapEnd = phaseEndUs;   // exact, not polled
                     bool haveNext = true, nextDah = false;
                     if (curDah) {
                         if (d || memDit)       nextDah = false;
@@ -207,7 +215,7 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
                         else                   haveNext = false;
                     }
                     if (haveNext)
-                        startMark(now, nextDah);
+                        startMark(gapEnd, nextDah);   // next element phase-locked to the gap end
                     else
                         phase = Phase::Idle;
                 }
@@ -227,7 +235,11 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
         if (clock::now() >= nextKeepalive)
             sendPacket();
 
-        std::this_thread::sleep_for(std::chrono::microseconds(1000));
+        // Poll fast so a fresh paddle close (and a brief iambic squeeze) is caught
+        // with minimal latency. Element *timing* no longer depends on this interval
+        // — edges are emitted on the schedule above — so this only bounds how
+        // quickly we react to the operator, not how clean the keying is.
+        std::this_thread::sleep_for(std::chrono::microseconds(250));
     }
 
     // Leave cwsd in a safe state: a final key-up if we stopped mid-element.
