@@ -9,6 +9,7 @@
 #include "Qrz.h"
 #include "QtDispatcher.h"
 #include "RemotePaddleKeyer.h"
+#include "HidPaddleInput.h"
 #include "Rig.h"
 #include "Udp.h"
 
@@ -105,6 +106,7 @@ private:
     DxCluster       cluster_;
     AudioStreamClient audio_;
     RemotePaddleKeyer paddle_;
+    HidPaddleInput    hidPaddle_;
 
     // The settings loaded at startup, kept so the shared column layout can be
     // applied to newly-created tabs (mirrors the gtkmm shell).

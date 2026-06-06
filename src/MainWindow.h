@@ -11,6 +11,7 @@
 #include "Qrz.h"
 #include "Qso.h"
 #include "RemotePaddleKeyer.h"
+#include "HidPaddleInput.h"
 #include "Rig.h"
 #include "Udp.h"
 
@@ -144,6 +145,7 @@ private:
     DxCluster                       cluster_;
     AudioStreamClient               audio_;
     RemotePaddleKeyer               paddle_;
+    HidPaddleInput                  hidPaddle_;
 
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
     Glib::RefPtr<Gio::SimpleAction> audioAction_;
