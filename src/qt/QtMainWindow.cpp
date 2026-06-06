@@ -782,6 +782,7 @@ void QtMainWindow::startPaddleKeyer() {
     pc.port     = cfg().paddlePort;
     pc.wpm      = cfg().paddleWpm;
     pc.iambicB  = cfg().paddleIambicB;
+    pc.autospace = cfg().paddleAutospace;
     pc.sidetone = cfg().paddleSidetone;
     pc.toneHz   = cfg().paddleToneHz;
     pc.level    = cfg().paddleLevel;
@@ -804,6 +805,8 @@ void QtMainWindow::onPaddleSettings() {
     auto* wpm  = new QSpinBox; wpm->setRange(1, 99); wpm->setValue(cfg().paddleWpm);
     auto* iambicB = new QCheckBox("Iambic B (default: iambic A)");
     iambicB->setChecked(cfg().paddleIambicB);
+    auto* autospace = new QCheckBox("Autospace (enforce inter-character spacing)");
+    autospace->setChecked(cfg().paddleAutospace);
     auto* sidetone = new QCheckBox("Local sidetone");
     sidetone->setChecked(cfg().paddleSidetone);
     auto* tone = new QSpinBox; tone->setRange(100, 2000); tone->setSuffix(" Hz");
@@ -815,6 +818,7 @@ void QtMainWindow::onPaddleSettings() {
     form->addRow("Port:", port);
     form->addRow("Speed (wpm):", wpm);
     form->addRow(iambicB);
+    form->addRow(autospace);
     form->addRow(sidetone);
     form->addRow("Tone:", tone);
     form->addRow("Volume (0–100):", level);
@@ -834,6 +838,7 @@ void QtMainWindow::onPaddleSettings() {
         cfg().paddlePort = port->value();
         cfg().paddleWpm = wpm->value();
         cfg().paddleIambicB = iambicB->isChecked();
+        cfg().paddleAutospace = autospace->isChecked();
         cfg().paddleSidetone = sidetone->isChecked();
         cfg().paddleToneHz = tone->value();
         cfg().paddleLevel = level->value();
