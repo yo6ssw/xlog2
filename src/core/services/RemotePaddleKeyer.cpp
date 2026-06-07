@@ -277,7 +277,15 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
 // never a stall in keying. Opened lazily and retried so startup never blocks.
 void RemotePaddleKeyer::sidetoneWorker(RemotePaddleConfig cfg) {
     constexpr unsigned kRate  = 48000;
-    constexpr int      kBlock = kRate / 100;            // 10 ms render blocks
+    // Keep these small: the sidetone is the operator's only instant feedback (the
+    // on-air signal lags by cwsd's playout delay), and its felt latency is set by
+    // the ALSA queue depth, not the 1 ms input chain. A short block + shallow
+    // buffer puts a fresh key edge on the speaker in ~5 ms. Underruns just click
+    // and self-recover (see the -EPIPE handling below); for the lowest, most
+    // reliable latency point the sidetone at a raw hw:/plughw: device rather than
+    // a PipeWire/PulseAudio "default" that may clamp the buffer.
+    constexpr int      kBlockMs = 3;
+    constexpr int      kBlock   = kRate * kBlockMs / 1000;  // ~3 ms render blocks
 
     const int    toneHz   = cfg.toneHz > 0 ? cfg.toneHz : 600;
     const int    levelPct = cfg.level < 0 ? 0 : (cfg.level > 100 ? 100 : cfg.level);
@@ -295,7 +303,7 @@ void RemotePaddleKeyer::sidetoneWorker(RemotePaddleConfig cfg) {
         if (pcm == nullptr) {
             if (snd_pcm_open(&pcm, cfg.device.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0 ||
                 snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                                   1, kRate, 1, 20000 /* ~20 ms latency target */) < 0) {
+                                   1, kRate, 1, 6000 /* ~6 ms latency target */) < 0) {
                 if (pcm) { snd_pcm_close(pcm); pcm = nullptr; }
                 if (!reportedMissing) {
                     postStatus("Paddle keyer: sidetone device " + cfg.device + " unavailable.");
