@@ -13,6 +13,7 @@
 #include "RemotePaddleKeyer.h"
 #include "HidPaddleInput.h"
 #include "Rig.h"
+#include "RigPanel.h"
 #include "Udp.h"
 
 #include <gtkmm.h>
@@ -76,6 +77,12 @@ private:
     // --- Hamlib rig control ---
     void onRigConnect();
     void onRigDisconnect();
+
+    // --- rig control panel ---
+    void onRigToggleShow();                     // show/hide the panel
+    void onRigDock(const Glib::ustring& side);  // dock-side radio action
+    void applyRigDock();                        // (re)build the paned from dock/visibility
+    void applyRigConfig();                      // after load: dock + action states
 
     // --- LoTW ---
     void onLotwUpload();
@@ -159,6 +166,17 @@ private:
     Gtk::Paned       paned_;                      // wraps notebook_ + dxPanel_
     Glib::RefPtr<Gio::SimpleAction> dxShowAction_;
     Glib::RefPtr<Gio::SimpleAction> dxDockAction_;
+
+    // Rig control panel + layout. rigPaned_ wraps the whole DX/notebook area
+    // (paned_) and rigPanel_, so the rig panel docks independently of the DX one.
+    RigPanel         rigPanel_;
+    Gtk::Paned       rigPaned_;                    // wraps paned_ + rigPanel_
+    Glib::RefPtr<Gio::SimpleAction> rigShowAction_;
+    Glib::RefPtr<Gio::SimpleAction> rigDockAction_;
+    // Latest frequency/mode from rig_.onUpdate, rendered together with the
+    // passband/filter that arrives in the paired rig_.onFilter call.
+    double           lastMhz_ = 0.0;
+    std::string      lastMode_;
 
     // Loaded settings, used to apply the shared column layout to new pages.
     IniFile settings_;

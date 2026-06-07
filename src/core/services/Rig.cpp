@@ -6,6 +6,37 @@
 
 namespace {
 RIG* asRig(void* p) { return static_cast<RIG*>(p); }
+
+// The Hamlib passband width (Hz) for an IF-filter slot of a given mode:
+// 1 = wide, 2 = normal, 3 = narrow. Returns 0 if the backend doesn't define it.
+pbwidth_t passbandForFilter(RIG* rig, rmode_t mode, int filter) {
+    switch (filter) {
+        case 1: return rig_passband_wide(rig, mode);
+        case 2: return rig_passband_normal(rig, mode);
+        case 3: return rig_passband_narrow(rig, mode);
+        default: return 0;
+    }
+}
+
+// Classify the current passband width into an IF-filter slot by nearest match
+// to the mode's wide/normal/narrow widths. 0 if the rig reports no widths.
+int filterFromWidth(RIG* rig, rmode_t mode, pbwidth_t width) {
+    const pbwidth_t cand[3] = {rig_passband_wide(rig, mode),
+                               rig_passband_normal(rig, mode),
+                               rig_passband_narrow(rig, mode)};
+    int best = 0;
+    pbwidth_t bestDiff = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (cand[i] <= 0)
+            continue;
+        const pbwidth_t diff = width > cand[i] ? width - cand[i] : cand[i] - width;
+        if (best == 0 || diff < bestDiff) {
+            best     = i + 1;
+            bestDiff = diff;
+        }
+    }
+    return best;
+}
 }  // namespace
 
 RigController::RigController(IUiDispatcher& ui) : ui_(ui) {
@@ -72,6 +103,20 @@ void RigController::setFrequency(double mhz) {
     hasPendingFreq_ = true;
 }
 
+void RigController::stepFrequency(double hz) {
+    if (!running_.load() || hz == 0.0)
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingStepHz_ += hz;
+}
+
+void RigController::setFilter(int n) {
+    if (!running_.load() || n < 1 || n > 3)
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingFilter_ = n;
+}
+
 void RigController::worker(std::shared_ptr<Run> run) {
     // Report the connection outcome on the UI thread. Only ever called while the
     // run is not abandoned (so the controller — hence ui_ — is still alive); the
@@ -132,17 +177,40 @@ void RigController::worker(std::shared_ptr<Run> run) {
     report(true);
 
     while (running_.load()) {
-        // Apply a queued tune request before reading back the current state.
-        double pending = 0.0;
+        // Apply any queued tune/step/filter requests before reading back state.
+        double pending  = 0.0;
+        double stepHz   = 0.0;
+        int    setFilt  = 0;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (hasPendingFreq_) {
                 pending = pendingFreqMhz_;
                 hasPendingFreq_ = false;
             }
+            stepHz         = pendingStepHz_;
+            pendingStepHz_ = 0.0;
+            setFilt        = pendingFilter_;
+            pendingFilter_ = 0;
         }
         if (pending > 0.0)
             rig_set_freq(asRig(rig_), RIG_VFO_CURR, static_cast<freq_t>(pending * 1.0e6));
+        if (stepHz != 0.0) {
+            freq_t cur = 0;
+            if (rig_get_freq(asRig(rig_), RIG_VFO_CURR, &cur) == RIG_OK) {
+                const double next = static_cast<double>(cur) + stepHz;
+                if (next > 0.0)
+                    rig_set_freq(asRig(rig_), RIG_VFO_CURR, static_cast<freq_t>(next));
+            }
+        }
+        if (setFilt >= 1 && setFilt <= 3) {
+            rmode_t   cm = RIG_MODE_NONE;
+            pbwidth_t cw = 0;
+            if (rig_get_mode(asRig(rig_), RIG_VFO_CURR, &cm, &cw) == RIG_OK) {
+                const pbwidth_t tw = passbandForFilter(asRig(rig_), cm, setFilt);
+                if (tw > 0)
+                    rig_set_mode(asRig(rig_), RIG_VFO_CURR, cm, tw);
+            }
+        }
 
         freq_t   f = 0;
         rmode_t  m = RIG_MODE_NONE;
@@ -152,9 +220,12 @@ void RigController::worker(std::shared_ptr<Run> run) {
 
         if (rc == RIG_OK) {
             const char* modeStr = rig_strrmode(m);
+            const int filt = filterFromWidth(asRig(rig_), m, w);
             std::lock_guard<std::mutex> lock(mutex_);
             mhz_       = f / 1.0e6;
             mode_      = modeStr ? modeStr : "";
+            pbwidthHz_ = static_cast<int>(w);
+            filter_    = filt;
             hasUpdate_ = true;
         }
         ui_.post([this, w = std::weak_ptr<bool>(alive_)]() {
@@ -179,14 +250,20 @@ void RigController::worker(std::shared_ptr<Run> run) {
 void RigController::deliverUpdate() {
     double      mhz;
     std::string mode;
+    int         pbwidthHz;
+    int         filter;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         if (!hasUpdate_)
             return;
         mhz        = mhz_;
         mode       = mode_;
+        pbwidthHz  = pbwidthHz_;
+        filter     = filter_;
         hasUpdate_ = false;
     }
     if (onUpdate)
         onUpdate(mhz, mode);
+    if (onFilter)
+        onFilter(pbwidthHz, filter);
 }

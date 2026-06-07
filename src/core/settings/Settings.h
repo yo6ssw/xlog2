@@ -19,6 +19,10 @@ struct Settings {
     std::string rigDevice;
     int         rigPollMs       = 500;
     bool        rigAutoConnect  = false;
+    // Rig control panel (dockable: frequency display + tune/filter controls).
+    std::string rigDock     = "right";   // top|bottom|left|right
+    bool        rigVisible  = true;
+    int         rigPanelPos = 0;          // saved dock/divider size (0 = unset)
 
     // [lotw]
     std::string lotwUser, lotwPassword, lotwStation, lotwLastDownload;

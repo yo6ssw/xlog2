@@ -4,6 +4,7 @@
 #include "IniFile.h"
 #include "LogPagePresenter.h"
 #include "QtDxClusterPanel.h"
+#include "QtRigPanel.h"
 #include "QtLogPage.h"
 #include "Statistics.h"
 #include "StrUtil.h"
@@ -132,6 +133,17 @@ QtMainWindow::QtMainWindow()
     connect(dxPanel_, &QtDxClusterPanel::connectToggle, this,
             [this]() { onClusterConnectToggle(); });
 
+    // Rig control dock: big frequency readout + tune/filter controls.
+    rigDock_  = new QDockWidget("Rig", this);
+    rigDock_->setObjectName("rigDock");
+    rigPanel_ = new QtRigPanel;
+    rigDock_->setWidget(rigPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, rigDock_);
+    connect(rigPanel_, &QtRigPanel::stepFrequency, this,
+            [this](double hz) { if (rig_.isRunning()) rig_.stepFrequency(hz); });
+    connect(rigPanel_, &QtRigPanel::setFilter, this,
+            [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
+
     buildMenus();
 
     // F1..F9 keyer accelerators, registered once on the window (window-wide) so
@@ -153,8 +165,16 @@ QtMainWindow::QtMainWindow()
     });
     rig_.onUpdate = [this](double mhz, const std::string& mode) {
         presenter_.routeRigUpdate(mhz, mode);
+        lastMhz_  = mhz;
+        lastMode_ = mode;
+    };
+    // onFilter fires immediately after onUpdate each poll tick, so the cached
+    // frequency/mode are current — render the whole panel state here.
+    rig_.onFilter = [this](int pbwidthHz, int filter) {
+        rigPanel_->setState(lastMhz_, lastMode_, pbwidthHz, filter);
     };
     rig_.onConnectResult = [this](bool ok, const std::string& err) {
+        rigPanel_->setConnected(ok);
         setStatus(ok ? "Connected to rig (model " + std::to_string(cfg().rigModel) + ")."
                      : "Rig connect failed: " + err);
     };
@@ -332,6 +352,22 @@ void QtMainWindow::buildMenus() {
     auto* rig = menuBar()->addMenu("&Rig");
     rig->addAction("Connect…", this, &QtMainWindow::onRigConnect);
     rig->addAction("Disconnect", this, &QtMainWindow::onRigDisconnect);
+    rig->addSeparator();
+    auto* rigShow = rigDock_->toggleViewAction();
+    rigShow->setText("Show panel");
+    rig->addAction(rigShow);
+    auto* rigDockMenu = rig->addMenu("Dock");
+    rigDockGroup_ = new QActionGroup(this);  // exclusive radio
+    const std::pair<const char*, const char*> rigSides[] = {
+        {"Top", "top"}, {"Bottom", "bottom"}, {"Left", "left"}, {"Right", "right"}};
+    for (const auto& [label, side] : rigSides) {
+        auto* a = rigDockMenu->addAction(label);
+        a->setCheckable(true);
+        a->setData(QString::fromLatin1(side));
+        rigDockGroup_->addAction(a);
+        const std::string s = side;
+        connect(a, &QAction::triggered, this, [this, s]() { onRigDock(s); });
+    }
 
     auto* lotw = menuBar()->addMenu("Lo&TW");
     lotw->addAction("Upload to LoTW…", this, &QtMainWindow::onLotwUpload);
@@ -576,8 +612,19 @@ void QtMainWindow::onRigConnect() {
 }
 
 void QtMainWindow::onRigDisconnect() {
-    if (rig_.isRunning()) { rig_.stop(); setStatus("Disconnected from rig."); }
-    else setStatus("No rig connected.");
+    if (rig_.isRunning()) {
+        rig_.stop();
+        rigPanel_->setConnected(false);
+        setStatus("Disconnected from rig.");
+    } else {
+        setStatus("No rig connected.");
+    }
+}
+
+void QtMainWindow::onRigDock(const std::string& side) {
+    cfg().rigDock = side;
+    addDockWidget(dockAreaFromString(side), rigDock_);  // move to the chosen side
+    rigDock_->show();                                   // picking a dock implies showing it
 }
 
 // --- LoTW --------------------------------------------------------------------
@@ -971,6 +1018,21 @@ void QtMainWindow::loadSettings() {
         dxDock_->show();
         cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
     }
+
+    // Rig-control dock placement + visibility (shared keys with the gtkmm shell).
+    const Qt::DockWidgetArea rigArea = dockAreaFromString(cfg().rigDock);
+    addDockWidget(rigArea, rigDock_);
+    rigDock_->setVisible(cfg().rigVisible);
+    if (cfg().rigVisible && cfg().rigPanelPos > 0) {
+        pendingRigDockSize_   = cfg().rigPanelPos;
+        pendingRigDockOrient_ = isHorizontalArea(rigArea) ? Qt::Horizontal : Qt::Vertical;
+    }
+    if (rigDockGroup_)
+        for (QAction* a : rigDockGroup_->actions())
+            if (a->data().toString().toStdString() == cfg().rigDock) {
+                a->setChecked(true);
+                break;
+            }
 }
 
 void QtMainWindow::saveSettings() {
@@ -986,6 +1048,17 @@ void QtMainWindow::saveSettings() {
         const int sz = isHorizontalArea(area) ? dxDock_->width() : dxDock_->height();
         if (sz > 0)
             cfg().dxPanelPos = sz;
+    }
+
+    // Same for the rig dock.
+    const Qt::DockWidgetArea rigArea = dockWidgetArea(rigDock_);
+    if (rigArea != Qt::NoDockWidgetArea)
+        cfg().rigDock = stringFromDockArea(rigArea);
+    cfg().rigVisible = rigDock_->isVisible();
+    if (cfg().rigVisible) {
+        const int sz = isHorizontalArea(rigArea) ? rigDock_->width() : rigDock_->height();
+        if (sz > 0)
+            cfg().rigPanelPos = sz;
     }
     cfg().store(ini);
     if (auto* p = currentPage())
@@ -1041,8 +1114,12 @@ void QtMainWindow::restoreDockSize() {
     // size — whereas showEvent fires earlier (during showMaximized(), before the
     // dock params are known). resizeDocks only sticks once the window is laid
     // out, so neither can run pre-show.
-    if (dockSizeRestored_ || pendingDockSize_ <= 0 || !isVisible())
+    if (dockSizeRestored_ || !isVisible() ||
+        (pendingDockSize_ <= 0 && pendingRigDockSize_ <= 0))
         return;
     dockSizeRestored_ = true;
-    resizeDocks({dxDock_}, {pendingDockSize_}, pendingDockOrient_);
+    if (pendingDockSize_ > 0)
+        resizeDocks({dxDock_}, {pendingDockSize_}, pendingDockOrient_);
+    if (pendingRigDockSize_ > 0)
+        resizeDocks({rigDock_}, {pendingRigDockSize_}, pendingRigDockOrient_);
 }
