@@ -24,6 +24,7 @@ public:
     virtual void setCall(const std::string&) = 0;
     virtual void setFreq(const std::string&) = 0;
     virtual void setBand(const std::string&) = 0;
+    virtual void setMode(const std::string&) = 0;
 
     // --- log list ---
     virtual void setRows(const std::vector<Qso>&) = 0;

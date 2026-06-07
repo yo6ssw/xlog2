@@ -77,6 +77,7 @@ public:
     void setCall(const std::string&) override;
     void setFreq(const std::string&) override;
     void setBand(const std::string&) override;
+    void setMode(const std::string&) override;
     void setRows(const std::vector<Qso>&) override;
     void clearSelection() override;
     void setDupeWarning(const std::string& msg, bool highlight) override;

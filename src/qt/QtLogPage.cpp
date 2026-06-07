@@ -264,6 +264,7 @@ void QtLogPage::setFormData(const FormData& f) {
 void QtLogPage::setCall(const std::string& s) { call_->setText(QString::fromStdString(s)); }
 void QtLogPage::setFreq(const std::string& s) { freq_->setText(QString::fromStdString(s)); }
 void QtLogPage::setBand(const std::string& s) { band_->setCurrentText(QString::fromStdString(s)); }
+void QtLogPage::setMode(const std::string& s) { mode_->setCurrentText(QString::fromStdString(s)); }
 
 void QtLogPage::setRows(const std::vector<Qso>& qsos) {
     model_->setRows(qsos);
