@@ -254,7 +254,12 @@ void LogPagePresenter::addExternalQso(const Qso& q) {
 void LogPagePresenter::setRigFrequency(double mhz) {
     if (mhz <= 0.0)
         return;
-    view_.setFreq(formatMhz(mhz));
+    // Only write when the value actually changes: rig polling calls this every
+    // tick, and an unconditional setFreq() would reset the freq field's cursor
+    // (and fight the operator) even when the frequency hasn't moved.
+    const std::string f = formatMhz(mhz);
+    if (view_.formData().freq != f)
+        view_.setFreq(f);
     const std::string b = bands::forFrequencyMHz(mhz);
     if (!b.empty())
         view_.setBand(b);
@@ -268,9 +273,10 @@ void LogPagePresenter::setRigMode(const std::string& mode) {
     const auto& modes = bands::modes();
     if (std::find(modes.begin(), modes.end(), mode) == modes.end())
         return;
-    FormData f = view_.formData();
-    f.mode = mode;
-    view_.setFormData(f);
+    // Set only the mode drop-down. Rebuilding the whole form via setFormData()
+    // here would re-write every text field on each rig poll, yanking the cursor
+    // out of whatever the operator is typing (e.g. the callsign).
+    view_.setMode(mode);
 }
 
 void LogPagePresenter::applyQrzLookup(const QrzResult& r) {

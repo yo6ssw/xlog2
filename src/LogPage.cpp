@@ -501,6 +501,7 @@ void LogPage::setFormData(const FormData& f) {
 void LogPage::setCall(const std::string& s) { call_.set_text(s); }
 void LogPage::setFreq(const std::string& s) { freq_.set_text(s); }
 void LogPage::setBand(const std::string& s) { ui::setDropdown(band_, bandModel_, s); }
+void LogPage::setMode(const std::string& s) { ui::setDropdown(mode_, modeModel_, s); }
 
 // --- ILogPageView: indicators / button state ---------------------------------
 
