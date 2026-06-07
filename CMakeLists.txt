@@ -89,6 +89,7 @@ if(XLOG_BUILD_GTK)
         src/MainWindow.cpp
         src/LogPage.cpp
         src/DxClusterPanel.cpp
+        src/RigPanel.cpp
     )
     target_link_libraries(xlog2-gtk PRIVATE xlog_core PkgConfig::GTKMM)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -115,12 +116,14 @@ if(XLOG_BUILD_QT)
         src/qt/QtLogPage.cpp
         src/qt/QtMainWindow.cpp
         src/qt/QtDxClusterPanel.cpp
+        src/qt/QtRigPanel.cpp
         src/qt/FlowLayout.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
         src/qt/QtLogPage.h
         src/qt/QtMainWindow.h
         src/qt/QtDxClusterPanel.h
+        src/qt/QtRigPanel.h
     )
     set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
     target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)

@@ -10,6 +10,9 @@ Settings Settings::load(const IniFile& ini) {
     s.rigDevice      = ini.getString("rig", "device", s.rigDevice);
     s.rigPollMs      = ini.getInt("rig", "poll_ms", s.rigPollMs);
     s.rigAutoConnect = ini.getBool("rig", "autoconnect", s.rigAutoConnect);
+    s.rigDock        = ini.getString("rig", "dock", s.rigDock);
+    s.rigVisible     = ini.getBool("rig", "visible", s.rigVisible);
+    s.rigPanelPos    = ini.getInt("rig", "position", s.rigPanelPos);
 
     s.lotwUser         = ini.getString("lotw", "username", s.lotwUser);
     s.lotwPassword     = ini.getString("lotw", "password", s.lotwPassword);
@@ -65,6 +68,10 @@ void Settings::store(IniFile& ini) const {
     ini.setString("rig", "device", rigDevice);
     ini.setInt("rig", "poll_ms", rigPollMs);
     ini.setBool("rig", "autoconnect", rigAutoConnect);
+    ini.setString("rig", "dock", rigDock);
+    ini.setBool("rig", "visible", rigVisible);
+    if (rigVisible && rigPanelPos > 0)
+        ini.setInt("rig", "position", rigPanelPos);
 
     ini.setString("lotw", "username", lotwUser);
     ini.setString("lotw", "password", lotwPassword);

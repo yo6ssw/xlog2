@@ -102,8 +102,16 @@ MainWindow::MainWindow()
     dxPanel_.signalConnectToggle().connect(
         sigc::mem_fun(*this, &MainWindow::onClusterConnect));
     paned_.set_vexpand(true);
-    vbox->append(paned_);
-    applyDxDock();  // initial layout (defaults); reapplied after loadSettings
+
+    // The rig panel docks around the DX/notebook area via a second paned.
+    rigPanel_.signalStep().connect(
+        [this](double hz) { if (rig_.isRunning()) rig_.stepFrequency(hz); });
+    rigPanel_.signalSetFilter().connect(
+        [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
+    rigPaned_.set_vexpand(true);
+    vbox->append(rigPaned_);
+    applyDxDock();   // initial layout (defaults); reapplied after loadSettings
+    applyRigDock();  // wraps paned_ + rigPanel_
 
     cluster_.onSpot   = [this](const DxSpot& s) { dxPanel_.addSpot(s); };
     cluster_.onLine   = [this](const std::string& l) { dxPanel_.addLine(l); };
@@ -132,8 +140,16 @@ MainWindow::MainWindow()
         });
     rig_.onUpdate = [this](double mhz, const std::string& mode) {
         presenter_.routeRigUpdate(mhz, mode);
+        lastMhz_  = mhz;
+        lastMode_ = mode;
+    };
+    // onFilter fires immediately after onUpdate each poll tick, so the cached
+    // frequency/mode are current — render the whole panel state here.
+    rig_.onFilter = [this](int pbwidthHz, int filter) {
+        rigPanel_.setState(lastMhz_, lastMode_, pbwidthHz, filter);
     };
     rig_.onConnectResult = [this](bool ok, const std::string& error) {
+        rigPanel_.setConnected(ok);
         if (ok)
             setStatus("Connected to rig (model " + std::to_string(cfg().rigModel) + ").");
         else
@@ -210,6 +226,10 @@ void MainWindow::buildActions() {
 
     add_action("rigconnect",    sigc::mem_fun(*this, &MainWindow::onRigConnect));
     add_action("rigdisconnect", sigc::mem_fun(*this, &MainWindow::onRigDisconnect));
+    rigShowAction_ = add_action_bool(
+        "rigshow", sigc::mem_fun(*this, &MainWindow::onRigToggleShow), true);
+    rigDockAction_ = add_action_radio_string(
+        "rigdock", sigc::mem_fun(*this, &MainWindow::onRigDock), "right");
 
     add_action("lotwupload",   sigc::mem_fun(*this, &MainWindow::onLotwUpload));
     add_action("lotwdownload", sigc::mem_fun(*this, &MainWindow::onLotwDownload));
@@ -266,6 +286,15 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto rigMenu = Gio::Menu::create();
     rigMenu->append("_Connect…", "win.rigconnect");
     rigMenu->append("_Disconnect", "win.rigdisconnect");
+    auto rigPanelSection = Gio::Menu::create();
+    rigPanelSection->append("Show _panel", "win.rigshow");
+    auto rigDockMenu = Gio::Menu::create();
+    rigDockMenu->append("_Top",    "win.rigdock::top");
+    rigDockMenu->append("_Bottom", "win.rigdock::bottom");
+    rigDockMenu->append("_Left",   "win.rigdock::left");
+    rigDockMenu->append("_Right",  "win.rigdock::right");
+    rigPanelSection->append_submenu("Doc_k", rigDockMenu);
+    rigMenu->append_section(rigPanelSection);
     menu->append_submenu("_Rig", rigMenu);
 
     auto lotwMenu = Gio::Menu::create();
@@ -749,6 +778,7 @@ void MainWindow::onRigConnect() {
 void MainWindow::onRigDisconnect() {
     if (rig_.isRunning()) {
         rig_.stop();
+        rigPanel_.setConnected(false);
         setStatus("Disconnected from rig.");
     } else {
         setStatus("No rig connected.");
@@ -1375,6 +1405,60 @@ void MainWindow::onDxDock(const Glib::ustring& side) {
     applyDxDock();
 }
 
+void MainWindow::applyRigDock() {
+    // Mirror applyDxDock() on rigPaned_, whose "content" child is the entire
+    // DX/notebook paned_. null-then-reparent is portable across gtkmm versions.
+    rigPaned_.property_start_child().set_value(nullptr);
+    rigPaned_.property_end_child().set_value(nullptr);
+    const bool horizontal = (cfg().rigDock == "left" || cfg().rigDock == "right");
+    rigPaned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
+                                         : Gtk::Orientation::VERTICAL);
+    const bool panelFirst = (cfg().rigDock == "top" || cfg().rigDock == "left");
+    if (panelFirst) {
+        rigPaned_.set_start_child(rigPanel_);
+        rigPaned_.set_end_child(paned_);
+    } else {
+        rigPaned_.set_start_child(paned_);
+        rigPaned_.set_end_child(rigPanel_);
+    }
+    // The content keeps the bulk of the space; the panel holds its own size.
+    rigPaned_.set_resize_start_child(!panelFirst);
+    rigPaned_.set_resize_end_child(panelFirst);
+    rigPaned_.set_shrink_start_child(false);
+    rigPaned_.set_shrink_end_child(false);
+    rigPanel_.set_visible(cfg().rigVisible);
+}
+
+void MainWindow::applyRigConfig() {
+    if (cfg().rigDock != "top" && cfg().rigDock != "bottom" &&
+        cfg().rigDock != "left" && cfg().rigDock != "right")
+        cfg().rigDock = "right";
+    if (rigDockAction_)
+        rigDockAction_->set_state(Glib::Variant<Glib::ustring>::create(cfg().rigDock));
+    if (rigShowAction_)
+        rigShowAction_->set_state(Glib::Variant<bool>::create(cfg().rigVisible));
+    applyRigDock();
+    if (cfg().rigPanelPos > 0)
+        rigPaned_.set_position(cfg().rigPanelPos);
+}
+
+void MainWindow::onRigToggleShow() {
+    bool state = false;
+    rigShowAction_->get_state(state);
+    cfg().rigVisible = state;
+    rigPanel_.set_visible(cfg().rigVisible);
+}
+
+void MainWindow::onRigDock(const Glib::ustring& side) {
+    cfg().rigDock = side.raw();
+    rigDockAction_->set_state(Glib::Variant<Glib::ustring>::create(side));
+    if (!cfg().rigVisible) {  // picking a dock implies wanting the panel shown
+        cfg().rigVisible = true;
+        rigShowAction_->set_state(Glib::Variant<bool>::create(true));
+    }
+    applyRigDock();
+}
+
 void MainWindow::onClusterConnect() {
     if (cluster_.isConnected()) {
         cluster_.disconnect();
@@ -1483,6 +1567,11 @@ void MainWindow::saveSettings() {
         if (pos > 0)
             cfg().dxPanelPos = pos;
     }
+    if (cfg().rigVisible) {
+        const int pos = rigPaned_.get_position();
+        if (pos > 0)
+            cfg().rigPanelPos = pos;
+    }
     cfg().store(ini);  // udp/rig/lotw/qrz/keyer/dxcluster scalars
 
     // Window geometry (no position under GTK4; avoid recording maximized size).
@@ -1562,6 +1651,8 @@ void MainWindow::loadSettings() {
 
     // Apply the DX-cluster dock/visibility and optionally auto-connect.
     applyDxConfig();
+    // Apply the rig-panel dock/visibility.
+    applyRigConfig();
 }
 
 void MainWindow::setStatus(const std::string& msg) {

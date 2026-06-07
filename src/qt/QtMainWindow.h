@@ -22,6 +22,7 @@ class QLabel;
 class QDockWidget;
 class QActionGroup;
 class QtDxClusterPanel;
+class QtRigPanel;
 class QtLogPage;
 class LogPagePresenter;
 
@@ -67,6 +68,7 @@ private:
     void onUdpSettings();
     void onRigConnect();
     void onRigDisconnect();
+    void onRigDock(const std::string& side);  // move the rig dock to a side
     void onLotwUpload();
     void onLotwDownload();
     void onLotwSettings();
@@ -117,14 +119,24 @@ private:
     QLabel*           audioIndicator_ = nullptr;  // live audio-frame counter
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
+    QDockWidget*      rigDock_  = nullptr;
+    QtRigPanel*       rigPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
     QAction*          audioAction_ = nullptr;
     QAction*          paddleAction_ = nullptr;
-    QActionGroup*     dxDockGroup_ = nullptr;  // Cluster ▸ Dock radio (top/bottom/left/right)
+    QActionGroup*     dxDockGroup_ = nullptr;   // Cluster ▸ Dock radio (top/bottom/left/right)
+    QActionGroup*     rigDockGroup_ = nullptr;  // Rig ▸ Dock radio
 
-    // Persisted DX-cluster dock size, applied once on first show (resizeDocks
-    // only takes effect after the window has its laid-out geometry).
+    // Latest frequency/mode from rig_.onUpdate, rendered together with the
+    // passband/filter that arrives in the paired rig_.onFilter call.
+    double            lastMhz_ = 0.0;
+    std::string       lastMode_;
+
+    // Persisted dock sizes, applied once on first show (resizeDocks only takes
+    // effect after the window has its laid-out geometry).
     int               pendingDockSize_   = 0;   // 0 = nothing to restore
     Qt::Orientation   pendingDockOrient_ = Qt::Vertical;
+    int               pendingRigDockSize_   = 0;
+    Qt::Orientation   pendingRigDockOrient_ = Qt::Horizontal;
     bool              dockSizeRestored_  = false;
 };
