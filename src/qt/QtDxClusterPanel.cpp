@@ -88,6 +88,7 @@ void QtDxClusterPanel::buildUi() {
     // --- raw telnet console ---
     console_ = new QPlainTextEdit;
     console_->setReadOnly(true);
+    console_->setMaximumBlockCount(100);  // keep only the last 100 lines
     console_->setMinimumHeight(90);
     QFont mono("monospace");
     mono.setStyleHint(QFont::Monospace);

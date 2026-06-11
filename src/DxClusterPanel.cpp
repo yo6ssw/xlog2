@@ -313,8 +313,16 @@ void DxClusterPanel::rebuild() {
 }
 
 void DxClusterPanel::addLine(const std::string& line) {
+    constexpr int kMaxLines = 100;
     auto buffer = console_.get_buffer();
     buffer->insert(buffer->end(), line + "\n");
+    // Keep only the last kMaxLines lines; drop the oldest from the top.
+    // The trailing newline leaves an empty final line, so the buffer holds
+    // kMaxLines text lines when get_line_count() == kMaxLines + 1.
+    if (buffer->get_line_count() > kMaxLines + 1) {
+        auto cut = buffer->get_iter_at_line(buffer->get_line_count() - 1 - kMaxLines);
+        buffer->erase(buffer->begin(), cut);
+    }
     auto mark = buffer->create_mark(buffer->end());
     console_.scroll_to(mark);
     buffer->delete_mark(mark);
