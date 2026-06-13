@@ -54,7 +54,7 @@ struct Settings {
     bool        audioEnabled    = false;
     std::string audioHost       = "127.0.0.1";
     int         audioPort       = 7355;
-    int         audioSampleRate = 48000;  // must match the server (opus rate)
+    int         audioSampleRate = 16000;  // must match the server (opus rate)
     int         audioChannels   = 1;      // must match the server
     std::string audioDevice     = "default";  // ALSA playback device
 
