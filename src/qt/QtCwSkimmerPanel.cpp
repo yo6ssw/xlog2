@@ -15,15 +15,32 @@
 
 namespace {
 
-// Intensity (0..1) -> a black→blue→cyan→yellow→white waterfall colormap.
+// Intensity (0..1) -> an "inferno"-style waterfall colormap: a dark, cool noise
+// floor that recedes, ramping through purple/red/orange/yellow to white. The
+// colour stops are packed into the upper range (most of the travel happens above
+// 0.55) so differences in power among strong signals read as clear colour steps,
+// not just "bright vs brighter". A gamma >1 first dims the low end (noise).
 QRgb heat(float v) {
-    v = std::clamp(v, 0.0f, 1.0f);
-    float r, g, b;
-    if (v < 0.25f)      { r = 0;                 g = 0;               b = v / 0.25f; }
-    else if (v < 0.5f)  { r = 0;                 g = (v - 0.25f) * 4; b = 1; }
-    else if (v < 0.75f) { r = (v - 0.5f) * 4;    g = 1;               b = 1 - (v - 0.5f) * 4; }
-    else                { r = 1;                 g = 1;               b = (v - 0.75f) * 4; }
-    return qRgb(int(r * 255), int(g * 255), int(b * 255));
+    v = std::pow(std::clamp(v, 0.0f, 1.0f), 1.4f);
+    constexpr int N = 8;
+    static const float pos[N]    = {0.00f, 0.35f, 0.55f, 0.68f, 0.78f, 0.86f, 0.93f, 1.00f};
+    static const float col[N][3] = {
+        {  0,   0,   0},   // black
+        { 35,  10,  80},   // indigo (noise floor)
+        {110,  25, 110},   // purple
+        {180,  35,  85},   // red-magenta
+        {225,  60,  40},   // red
+        {245, 120,  20},   // orange
+        {252, 190,  55},   // yellow
+        {255, 255, 235},   // white (peak)
+    };
+    int i = 0;
+    while (i < N - 2 && v > pos[i + 1]) ++i;
+    const float t = (v - pos[i]) / (pos[i + 1] - pos[i]);
+    const float r = col[i][0] + t * (col[i + 1][0] - col[i][0]);
+    const float g = col[i][1] + t * (col[i + 1][1] - col[i][1]);
+    const float b = col[i][2] + t * (col[i + 1][2] - col[i][2]);
+    return qRgb(int(r), int(g), int(b));
 }
 
 }  // namespace
