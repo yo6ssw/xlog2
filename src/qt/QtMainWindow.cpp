@@ -157,6 +157,14 @@ QtMainWindow::QtMainWindow()
     skimmerDock_->setWidget(skimmerPanel_);
     addDockWidget(Qt::LeftDockWidgetArea, skimmerDock_);
     skimmerDock_->hide();
+    connect(skimmerPanel_, &QtCwSkimmerPanel::gateChanged, this, [this](int db) {
+        cfg().skimmerGate = db;
+        skimmer_.setGate(static_cast<float>(db));
+    });
+    connect(skimmerPanel_, &QtCwSkimmerPanel::minSnrChanged, this, [this](int db) {
+        cfg().skimmerMinSnr = db;
+        skimmer_.setMinSnr(static_cast<float>(db));
+    });
 
     buildMenus();
 
@@ -1111,6 +1119,13 @@ void QtMainWindow::loadSettings() {
                 a->setChecked(true);
                 break;
             }
+
+    // CW-skimmer gate level, applied before the dock is shown (so the skimmer
+    // starts with it). setGate on the panel doesn't re-emit.
+    skimmerPanel_->setGate(cfg().skimmerGate);
+    skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
+    skimmerPanel_->setMinSnr(cfg().skimmerMinSnr);
+    skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
 
     // CW-skimmer dock placement + visibility.
     const Qt::DockWidgetArea skArea = dockAreaFromString(cfg().skimmerDock);

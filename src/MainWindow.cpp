@@ -192,6 +192,14 @@ MainWindow::MainWindow()
         skimmerPanel_.updateChannel(id, hz, wpm, text, call);
     };
     skimmer_.onChannelRemoved = [this](int id) { skimmerPanel_.removeChannel(id); };
+    skimmerPanel_.signalGate().connect([this](int db) {
+        cfg().skimmerGate = db;
+        skimmer_.setGate(static_cast<float>(db));
+    });
+    skimmerPanel_.signalMinSnr().connect([this](int db) {
+        cfg().skimmerMinSnr = db;
+        skimmer_.setMinSnr(static_cast<float>(db));
+    });
     paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
     // Mute the rig-audio stream while keying (semi-break-in) when configured to.
     paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
@@ -1536,6 +1544,11 @@ void MainWindow::applySkimmerConfig() {
     applySkimmerDock();
     if (cfg().skimmerPanelPos > 0)
         skimmerPaned_.set_position(cfg().skimmerPanelPos);
+    // Restore the gate + min-SNR levels (slider + service) before the skimmer starts.
+    skimmerPanel_.setGate(cfg().skimmerGate);
+    skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
+    skimmerPanel_.setMinSnr(cfg().skimmerMinSnr);
+    skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
     if (cfg().skimmerVisible)
         startSkimmer();
 }

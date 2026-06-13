@@ -57,6 +57,19 @@ public:
     void stop();
     bool isRunning() const { return running_.load(); }
 
+    // Detection gating level, in dB above the default. 0 keeps the normal
+    // sensitivity; raising it requires stronger signals to spawn a channel and be
+    // copied (suppresses noise/ghosts); lowering it catches weaker signals.
+    // Thread-safe; the worker reads it each frame, so changes take effect live and
+    // survive a stop()/start(). Persisted by the shell.
+    void setGate(float db) { gateDb_.store(db, std::memory_order_relaxed); }
+
+    // Minimum per-channel SNR (dB) — the channel's keyed power vs its own tracked
+    // noise — for it to be shown and kept. A noise burst that spawns a channel
+    // (a spurious 'E'/'T') has low SNR, so raising this rejects them; a real
+    // signal sits well above its noise. Thread-safe; live; persisted by the shell.
+    void setMinSnr(float db) { minSnrDb_.store(db, std::memory_order_relaxed); }
+
     // Feed decoded PCM (int16, interleaved). Called from the audio worker thread;
     // downmixes to mono and queues it. No-op when not running or when the rate
     // does not match the configured one.
@@ -69,8 +82,10 @@ private:
     void postRemoved(int id);
 
     IUiDispatcher&    ui_;
-    std::atomic<bool> running_{false};
-    std::thread       thread_;
+    std::atomic<bool>  running_{false};
+    std::atomic<float> gateDb_{0.0f};    // detection gating offset (dB); see setGate
+    std::atomic<float> minSnrDb_{0.0f};  // minimum per-channel SNR (dB); see setMinSnr
+    std::thread        thread_;
 
     std::mutex              mu_;
     std::condition_variable cv_;
