@@ -111,6 +111,8 @@ MainWindow::MainWindow()
         [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
     rigPanel_.signalSetPower().connect(
         [this](bool on) { if (rig_.isRunning()) rig_.setPower(on); });
+    rigPanel_.signalSetAgc().connect(
+        [this](bool on) { if (rig_.isRunning()) rig_.setAgc(on); });
     rigPaned_.set_vexpand(true);
     // The skimmer panel docks around the rig/DX/notebook area via a third paned.
     skimmerPaned_.set_vexpand(true);

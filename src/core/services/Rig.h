@@ -21,6 +21,10 @@ public:
     // in Hz and the IF-filter slot derived from it (1 = wide, 2 = normal,
     // 3 = narrow; 0 if the rig doesn't report per-mode widths).
     std::function<void(int pbwidthHz, int filter)> onFilter;
+    // Called on the UI thread each poll tick with the rig's power state.
+    // `supported` is false when the backend doesn't report a power status (the
+    // shell hides the power control in that case); `on` is the latest reading.
+    std::function<void(bool supported, bool on)> onPower;
     // Called on the UI thread when an attempted connection finishes; on failure
     // `error` is set. rig_open() can block, so it runs on the worker thread and
     // the outcome is reported here — start() never blocks the UI thread.
@@ -52,6 +56,16 @@ public:
     // worker re-applies the current mode with the matching Hamlib passband on
     // its next tick. No-op if the rig isn't running or n is out of range.
     void setFilter(int n);
+
+    // Queue a rig power on/off; the worker applies it (rig_set_powerstat) on its
+    // next tick. No-op if the rig isn't running.
+    void setPower(bool on);
+
+    // Queue an AGC enable/disable; the worker applies it (rig_set_level,
+    // RIG_LEVEL_AGC) on its next tick — on = a normal AGC, off = RIG_AGC_OFF.
+    // Disabling AGC keeps signal levels proportional, which the CW skimmer wants.
+    // No-op if the rig isn't running.
+    void setAgc(bool on);
 
     bool isRunning() const { return running_.load(); }
     const std::string& lastError() const { return lastError_; }
@@ -91,6 +105,11 @@ private:
     bool        hasPendingFreq_ = false;
     double      pendingStepHz_  = 0.0;   // accumulated relative nudge, applied by worker
     int         pendingFilter_  = 0;     // requested IF-filter slot (0 = none queued)
+    int         pendingPower_   = -1;    // requested power state (1 on, 0 off, -1 none)
+    int         pendingAgc_     = -1;    // requested AGC state (1 on, 0 off, -1 none)
+    bool        powerSupported_ = false; // backend reports a power status
+    bool        powerOn_        = false; // latest power reading
+    bool        hasPower_       = false; // a fresh power reading awaits delivery
 
     // Liveness token: posted closures hold a weak_ptr to it and bail if the
     // controller was destroyed before they ran on the UI thread.

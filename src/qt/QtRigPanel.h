@@ -21,19 +21,27 @@ public:
 
     void setState(double mhz, const std::string& mode, int pbwidthHz, int filter);
     void setConnected(bool connected);
+    // Reflect the rig's power state; the power button is shown only when the
+    // backend reports a power status (`supported`).
+    void setPowerState(bool supported, bool on);
 
 signals:
     void stepFrequency(double hz);  // signed Hz nudge
     void setFilter(int n);          // IF-filter slot 1..3
+    void setPower(bool on);         // power on/off request
+    void setAgc(bool on);           // AGC enable/disable request
 
 private:
     void updateFilterButtons(int filter);
 
     QLabel* freqLabel_ = nullptr;
     QLabel* modeLabel_ = nullptr;
+    QPushButton* powerButton_ = nullptr;
+    QPushButton* agcButton_ = nullptr;
     QButtonGroup* filterGroup_ = nullptr;
     std::array<QPushButton*, 3> filterButtons_{nullptr, nullptr, nullptr};
 
     bool updatingFilter_ = false;  // suppress emission during programmatic toggles
+    bool updatingPower_  = false;  // suppress emission during programmatic toggles
     int  filter_         = 0;
 };
