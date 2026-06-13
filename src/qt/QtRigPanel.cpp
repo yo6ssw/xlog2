@@ -26,6 +26,21 @@ QtRigPanel::QtRigPanel(QWidget* parent) : QWidget(parent) {
     auto* layout = new QVBoxLayout(this);
     layout->setSpacing(6);
 
+    // Power on/off, top-right. Shown only once the rig reports a power status.
+    auto* powerRow = new QHBoxLayout;
+    powerRow->addStretch();
+    powerButton_ = new QPushButton(QString::fromUtf8("⏻"));
+    powerButton_->setCheckable(true);
+    powerButton_->setToolTip("Power the rig on/off");
+    powerButton_->setFixedWidth(36);
+    powerButton_->setVisible(false);
+    connect(powerButton_, &QPushButton::clicked, this, [this](bool checked) {
+        if (!updatingPower_)
+            emit setPower(checked);
+    });
+    powerRow->addWidget(powerButton_);
+    layout->addLayout(powerRow);
+
     // Frequency, large and centred.
     freqLabel_ = new QLabel(formatFreq(0.0));
     freqLabel_->setAlignment(Qt::AlignCenter);
@@ -83,6 +98,22 @@ QtRigPanel::QtRigPanel(QWidget* parent) : QWidget(parent) {
     }
     filterRow->addStretch();
     layout->addLayout(filterRow);
+
+    // AGC enable/disable. Starts enabled (the rig's normal state); disabling keeps
+    // signal levels proportional, which the CW skimmer wants. There is no readback,
+    // so the toggle reflects the operator's intent.
+    auto* agcRow = new QHBoxLayout;
+    agcRow->addStretch();
+    agcButton_ = new QPushButton("AGC");
+    agcButton_->setCheckable(true);
+    agcButton_->setChecked(true);
+    agcButton_->setToolTip("Enable/disable the rig's AGC");
+    connect(agcButton_, &QPushButton::clicked, this, [this](bool checked) {
+        emit setAgc(checked);
+    });
+    agcRow->addWidget(agcButton_);
+    agcRow->addStretch();
+    layout->addLayout(agcRow);
     layout->addStretch();
 
     setConnected(false);
@@ -111,11 +142,22 @@ void QtRigPanel::setState(double mhz, const std::string& mode, int pbwidthHz, in
     updateFilterButtons(filter);
 }
 
+void QtRigPanel::setPowerState(bool supported, bool on) {
+    if (!powerButton_)
+        return;
+    powerButton_->setVisible(supported);
+    updatingPower_ = true;
+    powerButton_->setChecked(on);
+    updatingPower_ = false;
+}
+
 void QtRigPanel::setConnected(bool connected) {
     setEnabled(connected);
     if (!connected) {
         modeLabel_->setText("not connected");
         freqLabel_->setText(formatFreq(0.0));
         updateFilterButtons(0);
+        if (powerButton_)
+            powerButton_->setVisible(false);
     }
 }

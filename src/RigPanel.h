@@ -21,9 +21,14 @@ public:
     void setState(double mhz, const std::string& mode, int pbwidthHz, int filter);
     // Enable/disable the controls and grey out the readouts when no rig is up.
     void setConnected(bool connected);
+    // Reflect the rig's power state; the power button is shown only when the
+    // backend reports a power status (`supported`).
+    void setPowerState(bool supported, bool on);
 
     sigc::signal<void(double)>& signalStep()      { return signalStep_; }  // signed Hz
     sigc::signal<void(int)>&    signalSetFilter() { return signalSetFilter_; }
+    sigc::signal<void(bool)>&   signalSetPower()  { return signalSetPower_; }
+    sigc::signal<void(bool)>&   signalSetAgc()    { return signalSetAgc_; }  // true = AGC on
 
 private:
     void buildUi();
@@ -31,12 +36,17 @@ private:
 
     Gtk::Label freqLabel_;
     Gtk::Label modeLabel_;
+    Gtk::ToggleButton* powerButton_ = nullptr;
+    Gtk::ToggleButton* agcButton_   = nullptr;
     std::array<Gtk::ToggleButton*, 3> filterButtons_{nullptr, nullptr, nullptr};
 
     bool connected_      = false;
     bool updatingFilter_ = false;  // suppress emission during programmatic toggles
+    bool updatingPower_  = false;  // suppress emission during programmatic toggles
     int  filter_         = 0;
 
     sigc::signal<void(double)> signalStep_;
     sigc::signal<void(int)>    signalSetFilter_;
+    sigc::signal<void(bool)>   signalSetPower_;
+    sigc::signal<void(bool)>   signalSetAgc_;
 };

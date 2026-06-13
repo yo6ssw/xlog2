@@ -29,6 +29,20 @@ void RigPanel::buildUi() {
     set_spacing(6);
     ui::setMargin(*this, 8);
 
+    // Power on/off, top-right. Shown only once the rig reports a power status.
+    auto* powerBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    powerBox->set_halign(Gtk::Align::END);
+    powerButton_ = Gtk::make_managed<Gtk::ToggleButton>("⏻");
+    powerButton_->set_tooltip_text("Power the rig on/off");
+    powerButton_->signal_toggled().connect([this]() {
+        if (updatingPower_)
+            return;
+        signalSetPower_.emit(powerButton_->get_active());
+    });
+    powerButton_->set_visible(false);
+    powerBox->append(*powerButton_);
+    append(*powerBox);
+
     // Frequency, large and centred.
     freqLabel_.set_use_markup(true);
     freqLabel_.set_markup("<span size='28000' weight='bold'>" + formatFreq(0.0) + "</span>");
@@ -87,6 +101,19 @@ void RigPanel::buildUi() {
     }
     filterBox->append(*toggles);
     append(*filterBox);
+
+    // AGC enable/disable. Starts enabled (the rig's normal state); disabling keeps
+    // signal levels proportional, which the CW skimmer wants. There is no readback,
+    // so the toggle reflects the operator's intent.
+    auto* agcBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    agcBox->set_halign(Gtk::Align::CENTER);
+    agcButton_ = Gtk::make_managed<Gtk::ToggleButton>("AGC");
+    agcButton_->set_active(true);
+    agcButton_->set_tooltip_text("Enable/disable the rig's AGC");
+    agcButton_->signal_toggled().connect(
+        [this]() { signalSetAgc_.emit(agcButton_->get_active()); });
+    agcBox->append(*agcButton_);
+    append(*agcBox);
 }
 
 void RigPanel::updateFilterButtons(int filter) {
@@ -112,6 +139,15 @@ void RigPanel::setState(double mhz, const std::string& mode, int pbwidthHz, int 
     updateFilterButtons(filter);
 }
 
+void RigPanel::setPowerState(bool supported, bool on) {
+    if (!powerButton_)
+        return;
+    powerButton_->set_visible(supported);
+    updatingPower_ = true;
+    powerButton_->set_active(on);
+    updatingPower_ = false;
+}
+
 void RigPanel::setConnected(bool connected) {
     connected_ = connected;
     set_sensitive(connected);
@@ -119,5 +155,7 @@ void RigPanel::setConnected(bool connected) {
         modeLabel_.set_text("not connected");
         freqLabel_.set_markup("<span size='28000' weight='bold'>" + formatFreq(0.0) + "</span>");
         updateFilterButtons(0);
+        if (powerButton_)
+            powerButton_->set_visible(false);
     }
 }

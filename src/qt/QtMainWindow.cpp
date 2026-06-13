@@ -147,6 +147,8 @@ QtMainWindow::QtMainWindow()
             [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
     connect(rigPanel_, &QtRigPanel::setPower, this,
             [this](bool on) { if (rig_.isRunning()) rig_.setPower(on); });
+    connect(rigPanel_, &QtRigPanel::setAgc, this,
+            [this](bool on) { if (rig_.isRunning()) rig_.setAgc(on); });
 
     // CW Skimmer dock: waterfall of the rig-audio passband + a decode table.
     skimmerDock_  = new QDockWidget("CW Skimmer", this);

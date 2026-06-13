@@ -51,6 +51,15 @@ RigController::~RigController() {
 void RigController::start(int model, const std::string& device, int pollMs) {
     stop();
     lastError_.clear();
+    {
+        // Re-evaluate power support for the new connection (latched once a rig
+        // answers; see the worker's get_powerstat handling).
+        std::lock_guard<std::mutex> lock(mutex_);
+        powerSupported_ = false;
+        powerOn_        = false;
+        hasPower_       = false;
+        pendingPower_   = -1;
+    }
     pendingModel_  = model;
     pendingDevice_ = device;
     pollMs_        = pollMs > 0 ? pollMs : 500;
@@ -117,6 +126,20 @@ void RigController::setFilter(int n) {
     pendingFilter_ = n;
 }
 
+void RigController::setPower(bool on) {
+    if (!running_.load())
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingPower_ = on ? 1 : 0;
+}
+
+void RigController::setAgc(bool on) {
+    if (!running_.load())
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingAgc_ = on ? 1 : 0;
+}
+
 void RigController::worker(std::shared_ptr<Run> run) {
     // Report the connection outcome on the UI thread. Only ever called while the
     // run is not abandoned (so the controller — hence ui_ — is still alive); the
@@ -181,6 +204,8 @@ void RigController::worker(std::shared_ptr<Run> run) {
         double pending  = 0.0;
         double stepHz   = 0.0;
         int    setFilt  = 0;
+        int    setPow   = -1;
+        int    setAgcTo = -1;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (hasPendingFreq_) {
@@ -191,6 +216,26 @@ void RigController::worker(std::shared_ptr<Run> run) {
             pendingStepHz_ = 0.0;
             setFilt        = pendingFilter_;
             pendingFilter_ = 0;
+            setPow         = pendingPower_;
+            pendingPower_  = -1;
+            setAgcTo       = pendingAgc_;
+            pendingAgc_    = -1;
+        }
+        if (setAgcTo >= 0) {
+            // Off = RIG_AGC_OFF; on = a normal AGC (MEDIUM is the IC-7300 default).
+            value_t v{};
+            v.i = setAgcTo ? RIG_AGC_MEDIUM : RIG_AGC_OFF;
+            rig_set_level(asRig(rig_), RIG_VFO_CURR, RIG_LEVEL_AGC, v);
+        }
+        if (setPow >= 0) {
+            rig_set_powerstat(asRig(rig_), setPow ? RIG_POWER_ON : RIG_POWER_OFF);
+            // Reflect the commanded state immediately: a rig that has just been
+            // switched OFF typically stops answering, so we must not wait for a
+            // readback that may never arrive (and the readback below would then
+            // leave the last-known state untouched, keeping this value).
+            std::lock_guard<std::mutex> lock(mutex_);
+            powerOn_  = (setPow != 0);
+            hasPower_ = true;
         }
         if (pending > 0.0)
             rig_set_freq(asRig(rig_), RIG_VFO_CURR, static_cast<freq_t>(pending * 1.0e6));
@@ -210,6 +255,25 @@ void RigController::worker(std::shared_ptr<Run> run) {
                 if (tw > 0)
                     rig_set_mode(asRig(rig_), RIG_VFO_CURR, cm, tw);
             }
+        }
+
+        // Power status, read independently of the frequency: a rig that is off
+        // won't report a frequency, but we still want its power state to reach
+        // the panel (so the operator can turn it back on).
+        powerstat_t ps = RIG_POWER_UNKNOWN;
+        const int prc = rig_get_powerstat(asRig(rig_), &ps);
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (prc == RIG_OK) {
+                // Latch support on the first rig that answers: the read fails
+                // precisely when the rig is off, and dropping support then would
+                // hide the very button needed to turn it back on.
+                powerSupported_ = true;
+                powerOn_        = (ps != RIG_POWER_OFF);
+            }
+            // On a failed read keep the last known state (set above by a command,
+            // or by the previous successful read) rather than guessing.
+            hasPower_ = true;
         }
 
         freq_t   f = 0;
@@ -252,18 +316,29 @@ void RigController::deliverUpdate() {
     std::string mode;
     int         pbwidthHz;
     int         filter;
+    bool        haveUpdate;
+    bool        havePower;
+    bool        powerSupported;
+    bool        powerOn;
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!hasUpdate_)
-            return;
-        mhz        = mhz_;
-        mode       = mode_;
-        pbwidthHz  = pbwidthHz_;
-        filter     = filter_;
-        hasUpdate_ = false;
+        haveUpdate     = hasUpdate_;
+        havePower      = hasPower_;
+        mhz            = mhz_;
+        mode           = mode_;
+        pbwidthHz      = pbwidthHz_;
+        filter         = filter_;
+        powerSupported = powerSupported_;
+        powerOn        = powerOn_;
+        hasUpdate_     = false;
+        hasPower_      = false;
     }
-    if (onUpdate)
-        onUpdate(mhz, mode);
-    if (onFilter)
-        onFilter(pbwidthHz, filter);
+    if (haveUpdate) {
+        if (onUpdate)
+            onUpdate(mhz, mode);
+        if (onFilter)
+            onFilter(pbwidthHz, filter);
+    }
+    if (havePower && onPower)
+        onPower(powerSupported, powerOn);
 }
