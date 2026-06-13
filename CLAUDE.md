@@ -165,6 +165,9 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   (`QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) show a scrolling waterfall with
   callsign labels plus a decode table. Cold-start mangles the first character or
   two (the unit length isn't yet known) — inherent to streaming Morse decoders.
+  **Full design reference: `docs/cw-skimmer-decoder.md`** (pipeline, every tuning
+  constant, the operator controls, ghost/noise suppression, new-station
+  adaptation, and known limitations) — update it when changing the decoder.
 - `RemotePaddleKeyer` (`src/core/services/RemotePaddleKeyer.*`, wire format in
   `RemoteKeyProtocol.h`) — operator-side client for **cwsd's `remote_key`
   service: real paddle keying over the internet**. Unlike `CwKeyer` (which sends
