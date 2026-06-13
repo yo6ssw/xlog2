@@ -65,8 +65,11 @@ public:
         const int cols = static_cast<int>(mags.size());
         if (cols <= 0)
             return;
-        if (img_.width() != cols)
+        if (img_.width() != cols) {
             img_ = QImage(cols, kHistory, QImage::Format_RGB32);
+            img_.fill(Qt::black);  // QImage is uninitialised; clear so the not-yet-
+                                   // filled scrollback shows black, not stale memory
+        }
         // Scroll down by one scanline, then write the new row at the top.
         const int bpl = img_.bytesPerLine();
         for (int y = img_.height() - 1; y > 0; --y)
