@@ -15,7 +15,7 @@ struct AudioStreamConfig {
     bool        enabled    = false;
     std::string host       = "127.0.0.1";  // cwsd audio_stream_server host
     int         port       = 7355;         // UDP port to subscribe to
-    int         sampleRate = 16000;        // opus rate: 8000/12000/16000/24000/48000
+    int         sampleRate = 8000;         // opus rate: 8000/12000/16000/24000/48000
     int         channels   = 1;
     std::string device     = "default";    // ALSA playback device
 };
