@@ -138,20 +138,26 @@ void QtCwSkimmerPanel::updateChannel(int id, double hz, int wpm,
     const QString freq = QString::number(static_cast<int>(std::lround(hz))) + " Hz";
     auto it = rows_.find(id);
     if (it == rows_.end()) {
-        QList<QStandardItem*> cells = {new QStandardItem(freq),
+        auto* freqItem = new QStandardItem(freq);
+        freqItem->setData(hz, Qt::UserRole);  // numeric key for frequency ordering
+        QList<QStandardItem*> cells = {freqItem,
                                        new QStandardItem(QString::number(wpm)),
                                        new QStandardItem(QString::fromStdString(text)),
                                        new QStandardItem(QString::fromStdString(call))};
-        model_->appendRow(cells);
-        rows_[id] = cells[0];
+        // Insert so the table stays ordered by frequency (a channel's frequency
+        // never changes, so rows only move on insert/remove — never on update).
+        int pos = model_->rowCount();
+        for (int r = 0; r < model_->rowCount(); ++r)
+            if (model_->item(r, 0)->data(Qt::UserRole).toDouble() > hz) { pos = r; break; }
+        model_->insertRow(pos, cells);
+        rows_[id] = freqItem;
     } else {
+        // Update the cells in place (freq is fixed; row keeps its sorted slot).
         const int row = it->second->row();
-        model_->item(row, 0)->setText(freq);
         model_->item(row, 1)->setText(QString::number(wpm));
         model_->item(row, 2)->setText(QString::fromStdString(text));
         model_->item(row, 3)->setText(QString::fromStdString(call));
     }
-    table_->scrollToBottom();
 
     // Refresh the waterfall callsign tags from the current channel set.
     std::map<double, QString> labels;

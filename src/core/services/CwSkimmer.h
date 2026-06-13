@@ -19,7 +19,7 @@ struct SkimmerConfig {
     int    sampleRate = 48000;
     int    channels   = 1;
     double minHz      = 250.0;
-    double maxHz      = 3500.0;
+    double maxHz      = 4000.0;   // CW lives in the low audio; nothing above is decoded
 };
 
 // A toolkit-neutral "CW Skimmer": fed mono rig audio, it runs a sliding STFT to

@@ -103,23 +103,57 @@ std::string callsignIn(const std::string& text) {
     return (hasDigit && hasAlpha) ? tok : std::string{};
 }
 
+// Frames of look-ahead for the per-channel ON/OFF Viterbi. The most-probable
+// keying path for a frame is fixed once this much later evidence is in.
+constexpr int kViterbiLag = 32;
+
 // Per-carrier decoder state, keyed by its (stationary) FFT bin, which is also
 // the stable id the UI uses to update one row per signal.
 struct Channel {
-    int    bin       = 0;
-    bool   rawDown   = false; // instantaneous Schmitt state of the level
-    bool   keyDown   = false; // debounced (confirmed) key state
-    int    pending   = 0;     // frames the raw state has disagreed with keyDown
-    int    runHops   = 0;     // hops elapsed in the current (confirmed) key state
-    double markUnit  = 0.0;   // adaptive dit-mark length, hops (from dits only)
-    double gapUnit   = 0.0;   // adaptive element-gap length, hops (from gaps only)
+    int    bin = 0;
+
+    // Soft, most-probable keying segmentation (à la CW Skimmer's "compute the
+    // probability the signal is present" rather than a hard per-sample decision):
+    // a fixed-lag 2-state (key down/up) Viterbi over per-frame tone-present
+    // probabilities. The path-transition cost rejects noise blips and rides
+    // through fades without a Schmitt trigger or debounce hacks.
+    float  dOn = 0.0f, dOff = 0.0f;           // running path log-probs (normalised)
+    std::array<bool, kViterbiLag> fromOn{};   // ON-node predecessor was ON? (ring)
+    std::array<bool, kViterbiLag> fromOff{};  // OFF-node predecessor was ON? (ring)
+    long   vframes  = 0;                       // frames fed to the Viterbi
+    bool   curState = false;                   // last finalised key state (down=true)
+    int    runHops  = 0;                       // finalised frames in the current state
+    bool   started  = false;                   // a finalised run is in progress
+
+    // Per-channel narrowband receiver: complex down-conversion to baseband + a
+    // 2-stage low-pass. The keying envelope's time resolution comes from the
+    // low-pass, not the FFT window, so a fine FFT can resolve closely-spaced
+    // carriers while each envelope stays sharp — this is what lets a crowded
+    // band decode in parallel instead of merging into a few channels.
+    double loRe = 1.0, loIm = 0.0;   // local-oscillator phasor at the carrier
+    double rotRe = 1.0, rotIm = 0.0; // per-sample LO rotation (from the bin freq)
+    double f1Re = 0.0, f1Im = 0.0;   // low-pass stage 1
+    double f2Re = 0.0, f2Im = 0.0;   // low-pass stage 2
+    double noisePow = 0.0;           // min-tracked key-up power (per-channel noise)
+
+    // Adaptive unit references (hops), separate for marks vs gaps because the
+    // finite window inflates marks and shrinks gaps. Each tracks the *shortest*
+    // recurring interval — a dit / an element gap — moving down fast and leaking
+    // up slowly, so it locks onto the true unit within a couple of dits even when
+    // the first element is a dah (robust where a 2-means clustering collapses).
+    double markUnit = 0.0;
+    double gapUnit  = 0.0;
+
     std::string symbol;       // elements of the character in progress
     std::string text;         // rolling decoded text
     std::string call;
-    int    idleHops  = 0;     // hops since the last decoded character
-    int    wpm       = 0;
-    bool   shown     = false; // has onChannel been emitted for this id?
-    bool   dirty     = false; // text/wpm/call changed this frame
+    int    richChars = 0;     // count of decoded multi-element chars (real-CW evidence)
+    bool   charDone = false;  // current gap already closed the character?
+    bool   wordDone = false;  // current gap already added a word space?
+    int    idleHops = 0;      // finalised quiet frames since the last character
+    int    wpm = 0;
+    bool   shown = false;     // has onChannel been emitted for this id?
+    bool   dirty = false;     // text/wpm/call changed
 };
 
 void appendChar(Channel& ch, char c) {
@@ -130,18 +164,58 @@ void appendChar(Channel& ch, char c) {
         ch.call = call;
 }
 
-// A completed key-up gap, measured in dit units, closes the current symbol
-// and/or inserts spacing.
-void closeGap(Channel& ch, double units) {
-    if (units >= 2.0 && !ch.symbol.empty()) {  // inter-character (or longer)
-        if (char c = decodeSymbol(ch.symbol))
+void closeSymbol(Channel& ch) {
+    if (!ch.symbol.empty()) {
+        if (char c = decodeSymbol(ch.symbol)) {
             appendChar(ch, c);
+            // A valid character of two or more elements is evidence of real CW —
+            // a lone band-noise burst only ever makes a one-element 'E' or 'T'.
+            if (ch.symbol.size() >= 2)
+                ++ch.richChars;
+        }
         ch.symbol.clear();
-        ch.idleHops = 0;
         ch.dirty = true;
     }
-    if (units >= 6.0 && !ch.text.empty() && ch.text.back() != ' ') {  // word gap
+}
+
+// Min-track a unit reference toward the shortest recurring interval: jump down
+// fast (a dit / element gap), leak up slowly (a slow-down). Resists outliers and
+// survives a dah-first cold start where a 2-means clustering would collapse.
+void unitTrack(double& ref, double x) {
+    if (ref <= 0.0) ref = x;
+    else if (x < ref) ref += 0.4 * (x - ref);
+    else ref += 0.02 * (x - ref);
+}
+
+// A finalised mark (key-down run) just ended: append a dit or dah and refine the
+// dit length from dits only.
+void decodeMark(Channel& ch, int durHops, double hopMs) {
+    const double d = std::max(1, durHops);
+    const bool dah = ch.markUnit > 0.0 && d > 1.8 * ch.markUnit;
+    if (!dah) unitTrack(ch.markUnit, d);
+    else if (ch.markUnit <= 0.0) ch.markUnit = d;  // first-ever mark seeds even if a dah
+    ch.symbol.push_back(dah ? '-' : '.');
+    const double unit = (ch.markUnit + (ch.gapUnit > 0 ? ch.gapUnit : ch.markUnit)) / 2.0;
+    ch.wpm = std::clamp(static_cast<int>(std::lround(
+                 1200.0 / std::max(1.0, unit * hopMs))), 5, 80);
+    ch.dirty = ch.dirty || ch.shown;  // wpm shown live
+}
+
+// Called each finalised key-up frame: as the silence grows past the
+// inter-character then word thresholds, close the pending character and add a
+// space — once each. Doing this *during* the gap (not when the next mark starts)
+// means the last character of a transmission is emitted instead of being lost.
+void growGap(Channel& ch, int gapHops) {
+    if (ch.markUnit <= 0.0) return;  // no unit reference yet (lead-in)
+    const double gu = ch.gapUnit > 0.0 ? ch.gapUnit : ch.markUnit;
+    const double units = gapHops / gu;
+    if (!ch.charDone && units >= 2.0) {  // inter-character gap
+        closeSymbol(ch);
+        ch.charDone = true;
+    }
+    if (!ch.wordDone && units >= 6.0 && !ch.text.empty() && ch.text.back() != ' ') {
         appendChar(ch, ' ');
+        ch.wordDone = true;
         ch.dirty = true;
     }
 }
@@ -206,29 +280,68 @@ void CwSkimmer::pushPcm(const std::int16_t* samples, int frames, int channels,
 }
 
 void CwSkimmer::worker(SkimmerConfig cfg) {
-    // The analysis window must be well shorter than a CW dit (54 ms at 22 wpm) or
-    // the FFT smears energy across the element gaps — inflating marks and
-    // shrinking gaps — and the timing falls apart. ~11 ms (512 pts @ 48 kHz)
-    // keeps that distortion small while ~94 Hz bins still separate CW signals.
-    const std::size_t fftSize = nextPow2(cfg.sampleRate * 0.008);  // 512 @ 48 kHz (~11 ms)
-    const std::size_t hop     = std::max<std::size_t>(32, fftSize / 4);
-    const double      hopMs   = 1000.0 * hop / cfg.sampleRate;
-    const double      binHz   = static_cast<double>(cfg.sampleRate) / fftSize;
+    // CW only lives in the low audio (<= ~4 kHz), so a high-rate stream is wasted
+    // work: decimate to ~12 kHz first and run the whole pipeline there. 12 kHz
+    // lands the FFT on 512 pts with the *same* ~23 Hz bins / ~43 ms window as
+    // 48 kHz/2048 — identical resolution and timing — but the FFT is 4x smaller
+    // and the per-channel narrowband receivers (the dominant cost: one complex
+    // filter per channel per sample) run at a quarter of the rate.
+    const int decim = (cfg.sampleRate > 12000 && cfg.sampleRate % 12000 == 0)
+                          ? cfg.sampleRate / 12000 : 1;
+    const int rate  = cfg.sampleRate / decim;   // working sample rate
+    // Anti-alias FIR (windowed sinc) applied before downsampling; cutoff just
+    // below the new Nyquist so nothing folds into the band we keep.
+    std::vector<float> aaTaps;
+    if (decim > 1) {
+        const int n = 8 * decim + 1;
+        const double fc = 0.45 / decim;   // cutoff, normalised to the input rate
+        const int mid = n / 2;
+        double sum = 0.0;
+        aaTaps.resize(n);
+        for (int i = 0; i < n; ++i) {
+            const double t = i - mid;
+            const double sinc = (t == 0.0) ? 2.0 * fc
+                                           : std::sin(2.0 * M_PI * fc * t) / (M_PI * t);
+            const double w = 0.5 - 0.5 * std::cos(2.0 * M_PI * i / (n - 1));  // Hann
+            aaTaps[i] = static_cast<float>(sinc * w);
+            sum += aaTaps[i];
+        }
+        for (float& v : aaTaps) v /= static_cast<float>(sum);  // unity DC gain
+    }
+    std::vector<float> aaHist;   // input-sample history carried across chunks
 
-    const double maxHz = std::min(cfg.maxHz, cfg.sampleRate / 2.0 - binHz);
+    // A fine FFT (~512 pts @ 12 kHz → ~23 Hz bins) is used only for the waterfall
+    // and channel detection, so its long window doesn't hurt timing: each
+    // channel's keying envelope comes from its own narrowband receiver (below),
+    // not the FFT. hop is fftSize/8 (~5 ms steps) for responsive envelope sampling.
+    const std::size_t fftSize = nextPow2(rate * 0.043);
+    const std::size_t hop     = std::max<std::size_t>(32, fftSize / 8);
+    // 2-stage low-pass coefficient for the per-channel receiver (~70 Hz cutoff:
+    // passes CW keying sidebands, rejects carriers a few bins away).
+    const double lpA = 1.0 - std::exp(-2.0 * M_PI * 70.0 / rate);
+    const double      hopMs   = 1000.0 * hop / rate;
+    const double      binHz   = static_cast<double>(rate) / fftSize;
+
+    const double maxHz = std::min(cfg.maxHz, rate / 2.0 - binHz);
     const int kMin = std::max<int>(1, static_cast<int>(cfg.minHz / binHz));
     const int kMax = std::min<int>(static_cast<int>(fftSize / 2) - 1,
                                    static_cast<int>(maxHz / binHz));
     const double dispMinHz = kMin * binHz;
     const double dispMaxHz = kMax * binHz;
 
-    // Aging / classification limits derived from the hop rate.
-    const int    removeAfterHops = static_cast<int>(5000.0 / hopMs);   // 5 s idle
-    const int    debounceHops = std::max(2, static_cast<int>(6.0 / hopMs));  // confirm an edge (~6 ms)
-    const int    glitchHops   = std::max(debounceHops + 1, static_cast<int>(18.0 / hopMs));  // shorter than any real dit (~45 wpm)
+    const int    removeAfterHops = static_cast<int>(30000.0 / hopMs);  // drop after 30 s idle
     const int    spawnPersist = 3;     // frames a peak must persist before a channel spawns
-    const int    minSepBins   = 4;     // keep channels at least this far apart
+    // Channels must be at least the per-channel receiver's bandwidth apart, or two
+    // of them sit inside one carrier's passband and decode it identically (the
+    // "same signal on several frequencies" duplicate). ~2x the 70 Hz low-pass.
+    const int    minSepBins   = std::max(4, static_cast<int>(150.0 / binHz));
     const std::size_t kMaxChannels = 40;
+
+    // Soft tone-present model + Viterbi transition cost.
+    const double kZ0      = 6.0;       // SNR (dB) at which P(tone) = 0.5
+    const double kZs      = 4.0;       // logistic softness (dB)
+    const double kLogStay = std::log(0.94);   // 2-state HMM self-transition
+    const double kLogFlip = std::log(0.06);   // ...and key-state flip
 
     // Hann window for the STFT.
     std::vector<float> window(fftSize);
@@ -241,7 +354,7 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
     std::map<int, Channel> channels;   // id (original bin) -> state
     std::map<int, int>     cand;       // candidate peak bin -> consecutive-frame count
 
-    int waterfallDecim = std::max(1, static_cast<int>((cfg.sampleRate / hop) / 38.0));
+    int waterfallDecim = std::max(1, static_cast<int>((rate / hop) / 38.0));
     int sinceEmit = 0;
     std::vector<float> rowMax(kDisplayCols, 0.0f);
 
@@ -254,7 +367,22 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 break;
             chunk.swap(queue_);
         }
-        buf.insert(buf.end(), chunk.begin(), chunk.end());
+        if (decim == 1) {
+            buf.insert(buf.end(), chunk.begin(), chunk.end());
+        } else {
+            // Anti-alias filter + downsample by `decim`, carrying the FIR history
+            // across chunks so the decimation phase stays continuous.
+            aaHist.insert(aaHist.end(), chunk.begin(), chunk.end());
+            const std::size_t n = aaTaps.size();
+            std::size_t i = 0;
+            for (; i + n <= aaHist.size(); i += decim) {
+                float acc = 0.0f;
+                for (std::size_t j = 0; j < n; ++j)
+                    acc += aaTaps[j] * aaHist[i + j];
+                buf.push_back(acc);
+            }
+            aaHist.erase(aaHist.begin(), aaHist.begin() + i);
+        }
 
         std::size_t pos = 0;
         while (buf.size() - pos >= fftSize) {
@@ -271,10 +399,8 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
             sortbuf.assign(mag.begin() + kMin, mag.begin() + kMax + 1);
             const std::size_t pIdx = sortbuf.size() / 3;
             std::nth_element(sortbuf.begin(), sortbuf.begin() + pIdx, sortbuf.end());
-            const float floor = std::max(1e-6f, sortbuf[pIdx]);
-            const float onTh    = floor * 4.5f;   // Schmitt-trigger thresholds
-            const float offTh   = floor * 2.5f;
-            const float spawnTh = floor * 7.0f;   // a much stronger peak to start a channel
+            const float  floor    = std::max(1e-6f, sortbuf[pIdx]);
+            const float  spawnTh  = floor * 7.0f;   // a strong peak to start a channel
 
             // 1) Spawn channels at strong local-maximum peaks, but only after the
             //    peak has persisted (rejects keying-transient clicks and noise) and
@@ -285,17 +411,42 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                         return true;
                 return false;
             };
+            // k is an audio harmonic of an existing carrier if a stronger channel
+            // sits near k/2, k/3 or k/4 — suppress it (a real second carrier would
+            // not be locked to an integer multiple of another's frequency).
+            auto isHarmonic = [&](int k) {
+                for (int n = 2; n <= 4; ++n) {
+                    const int kf = (k + n / 2) / n;
+                    for (auto& [id, ch] : channels)
+                        if (std::abs(ch.bin - kf) <= 1 && mag[ch.bin] >= mag[k])
+                            return true;
+                }
+                return false;
+            };
             std::map<int, int> nextCand;
             if (channels.size() < kMaxChannels) {
                 for (int k = kMin + 1; k < kMax; ++k) {
-                    if (mag[k] < spawnTh || mag[k] < mag[k - 1] || mag[k] < mag[k + 1])
+                    if (mag[k] < spawnTh)
                         continue;
-                    if (nearChannel(k))
+                    // Require the dominant peak over ±(minSep-1) bins, not just a
+                    // local max, so the FFT skirts of a strong carrier don't spawn
+                    // spurious channels between real signals.
+                    bool peak = true;
+                    for (int j = -(minSepBins - 1); j <= minSepBins - 1; ++j) {
+                        const int n = k + j;
+                        if (n >= kMin && n <= kMax && mag[n] > mag[k]) { peak = false; break; }
+                    }
+                    if (!peak)
+                        continue;
+                    if (nearChannel(k) || isHarmonic(k))
                         continue;
                     const int age = (cand.count(k) ? cand[k] : 0) + 1;
                     if (age >= spawnPersist) {
                         Channel ch;
                         ch.bin = k;
+                        const double omega = -2.0 * M_PI * (k * binHz) / rate;
+                        ch.rotRe = std::cos(omega);  // LO at the carrier frequency
+                        ch.rotIm = std::sin(omega);
                         channels.emplace(k, std::move(ch));
                     } else {
                         nextCand[k] = age;  // keep accumulating
@@ -304,113 +455,121 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
             }
             cand.swap(nextCand);  // candidates not seen this frame reset to zero
 
-            // 2) Advance every channel's keying envelope + Morse decode.
+            // 2) For each channel: a soft tone-present probability, a fixed-lag
+            //    Viterbi that picks the most-probable keying segmentation, and a
+            //    duration-cluster Morse decode of the finalised runs.
             for (auto it = channels.begin(); it != channels.end();) {
                 Channel& ch = it->second;
-                // A CW carrier is stationary in the audio passband, so the bin is
-                // fixed; read the level as the max over the carrier's ±1-bin width
-                // (robust to a tone sitting between two bins) without moving it.
-                float level = mag[ch.bin];
-                if (ch.bin - 1 >= kMin) level = std::max(level, mag[ch.bin - 1]);
-                if (ch.bin + 1 <= kMax) level = std::max(level, mag[ch.bin + 1]);
 
-                // Schmitt-trigger the raw level, then debounce: a state change is
-                // committed only after the new state holds for `debounceHops`, so a
-                // noise blip can't inject a false element or split a long gap.
-                if (!ch.rawDown && level > onTh)
-                    ch.rawDown = true;
-                else if (ch.rawDown && level < offTh)
-                    ch.rawDown = false;
+                // Narrowband receiver: down-convert this hop's samples to baseband
+                // at the carrier, 2-stage low-pass, and take the output power as
+                // the keying envelope. The low-pass (not the FFT window) sets the
+                // time resolution, so the envelope stays sharp even with fine bins.
+                double P = 0.0;
+                for (std::size_t i = 0; i < hop; ++i) {
+                    const double x = buf[pos + i];
+                    const double bRe = x * ch.loRe, bIm = x * ch.loIm;
+                    const double nlo = ch.loRe * ch.rotRe - ch.loIm * ch.rotIm;
+                    ch.loIm = ch.loRe * ch.rotIm + ch.loIm * ch.rotRe;
+                    ch.loRe = nlo;
+                    ch.f1Re += lpA * (bRe - ch.f1Re);  ch.f1Im += lpA * (bIm - ch.f1Im);
+                    ch.f2Re += lpA * (ch.f1Re - ch.f2Re);  ch.f2Im += lpA * (ch.f1Im - ch.f2Im);
+                    P = ch.f2Re * ch.f2Re + ch.f2Im * ch.f2Im;
+                }
+                const double lm = std::sqrt(ch.loRe * ch.loRe + ch.loIm * ch.loIm);
+                if (lm > 1e-9) { ch.loRe /= lm; ch.loIm /= lm; }  // keep the phasor unit-length
 
-                ++ch.runHops;
-                if (ch.rawDown != ch.keyDown) {
-                    if (++ch.pending >= debounceHops) {
-                        // Confirmed flip: the previous key state's run just ended.
-                        // Its true length excludes the `pending` frames already
-                        // spent in the new state.
-                        const bool wasMark = ch.keyDown;
-                        const double dur = std::max(1, ch.runHops - ch.pending);
-                        ch.keyDown = ch.rawDown;
-                        ch.runHops = ch.pending;
-                        ch.pending = 0;
+                // Per-channel noise = min-tracked key-up power (down fast, up slow).
+                if (ch.noisePow <= 0.0) ch.noisePow = P;
+                else if (P < ch.noisePow) ch.noisePow += 0.1 * (P - ch.noisePow);
+                else ch.noisePow += 0.002 * (P - ch.noisePow);
+                const double zdb = 10.0 * std::log10((P + 1e-12) / (ch.noisePow + 1e-12));
+                // Soft tone-present probability — never a hard per-frame decision.
+                const double pOn = 1.0 / (1.0 + std::exp(-(zdb - kZ0) / kZs));
+                const double eOn  = std::log(std::max(1e-4, pOn));
+                const double eOff = std::log(std::max(1e-4, 1.0 - pOn));
 
-                        // Track the dit-mark and element-gap lengths in SEPARATE
-                        // references: the finite FFT window inflates marks and
-                        // shrinks gaps, so a shared estimate would never settle.
-                        // Each reference min-tracks (jumps down to the shortest
-                        // interval — a dit / an element gap — instantly, and leaks
-                        // up slowly to follow a slow-down), which locks on within
-                        // one dit regardless of whether the first element was a dah.
-                        auto minTrack = [](double& ref, double x) {
-                            if (ref <= 0.0) ref = x;             // seed
-                            else if (x < ref) ref += 0.4 * (x - ref);  // move toward a shorter unit (resists outliers)
-                            else ref += 0.02 * (x - ref);        // leak up slowly to follow a slow-down
-                        };
-                        if (wasMark) {  // a mark ended
-                            // Ignore a mark shorter than any real dit: a noise
-                            // burst, not an element. An absolute floor (not one
-                            // relative to markUnit) so it can't reject genuine dits
-                            // while markUnit is still seeded high from a lead dah.
-                            if (dur < glitchHops) {
-                                ++it;
-                                continue;
-                            }
-                            const bool dah = ch.markUnit > 0.0 && dur > 1.8 * ch.markUnit;
-                            if (!dah)
-                                minTrack(ch.markUnit, dur);   // only dits define the dit length
-                            else if (ch.markUnit <= 0.0)
-                                ch.markUnit = dur;            // first-ever mark seeds even if a dah
-                            ch.symbol.push_back(dah ? '-' : '.');
-                            const double u = (ch.markUnit + (ch.gapUnit > 0 ? ch.gapUnit : ch.markUnit)) / 2;
-                            ch.wpm = std::clamp(static_cast<int>(std::lround(
-                                         1200.0 / std::max(1.0, u * hopMs))), 5, 80);
-                            ch.dirty = ch.dirty || ch.shown;
-                        } else if (ch.markUnit > 0.0) {  // a gap ended (ignore the lead-in)
-                            const double gu = ch.gapUnit > 0 ? ch.gapUnit : ch.markUnit;
-                            const double units = dur / gu;
-                            closeGap(ch, units);
-                            // Define the gap unit only from real element gaps: short
-                            // enough to be one unit, but not a sub-dit fragment left
-                            // by a rejected glitch mark (which would collapse it).
-                            if (units < 1.8 && dur >= glitchHops)
-                                minTrack(ch.gapUnit, dur);
-                            else if (ch.gapUnit <= 0.0 && dur >= glitchHops)
-                                ch.gapUnit = dur;             // until one is seen, accept the first real gap
-                        }
+                // Viterbi step for the two key states (down / up).
+                const double onFromOn  = ch.dOn + kLogStay,  onFromOff = ch.dOff + kLogFlip;
+                const bool   onPrevOn  = onFromOn >= onFromOff;
+                const double offFromOff = ch.dOff + kLogStay, offFromOn = ch.dOn + kLogFlip;
+                const bool   offPrevOn = offFromOn > offFromOff;
+                const double nOn  = eOn  + (onPrevOn  ? onFromOn  : onFromOff);
+                const double nOff = eOff + (offPrevOn ? offFromOn : offFromOff);
+                const double norm = std::max(nOn, nOff);
+                ch.dOn  = static_cast<float>(nOn  - norm);
+                ch.dOff = static_cast<float>(nOff - norm);
+                const int slot = static_cast<int>(ch.vframes % kViterbiLag);
+                ch.fromOn[slot]  = onPrevOn;
+                ch.fromOff[slot] = offPrevOn;
+                ++ch.vframes;
+
+                // Fixed-lag finalise: the keying of the frame kViterbiLag ago is
+                // settled — backtrack the best path to it and decode that run.
+                if (ch.vframes >= kViterbiLag) {
+                    bool st = ch.dOn >= ch.dOff;
+                    long f = ch.vframes - 1;
+                    for (int s = 0; s < kViterbiLag - 1; ++s) {
+                        st = st ? ch.fromOn[f % kViterbiLag] : ch.fromOff[f % kViterbiLag];
+                        --f;
                     }
-                } else {
-                    ch.pending = 0;
+                    if (!ch.started) {
+                        ch.started = true;
+                        ch.curState = st;
+                        ch.runHops = 1;
+                    } else if (st == ch.curState) {
+                        ++ch.runHops;
+                        if (!ch.curState) growGap(ch, ch.runHops);  // close char/word as silence grows
+                    } else if (st) {                 // gap -> mark: the gap just ended
+                        const double gu = ch.gapUnit > 0.0 ? ch.gapUnit : ch.markUnit;
+                        if (ch.markUnit > 0.0 && ch.runHops < 1.8 * gu)
+                            unitTrack(ch.gapUnit, ch.runHops);  // an element gap defines the gap unit
+                        ch.curState = true;
+                        ch.runHops = 1;
+                    } else {                          // mark -> gap: the mark just ended
+                        decodeMark(ch, ch.runHops, hopMs);
+                        ch.curState = false;
+                        ch.runHops = 1;
+                        ch.charDone = ch.wordDone = false;  // a fresh gap begins
+                    }
+                    if (!ch.curState && ch.symbol.empty()) ++ch.idleHops;
+                    else ch.idleHops = 0;
                 }
 
-                // Idle accounting + aging (only count once truly quiet).
-                if (!ch.keyDown && ch.symbol.empty())
-                    ++ch.idleHops;
-                else
-                    ch.idleHops = 0;
                 if (ch.idleHops > removeAfterHops) {
                     if (ch.shown)
                         postRemoved(it->first);
                     it = channels.erase(it);
                     continue;
                 }
-                // Emit once there is decoded text; thereafter on any change.
-                if (ch.dirty || (!ch.shown && !ch.text.empty())) {
-                    ch.shown = true;
-                    ch.dirty = false;
-                    postChannel(it->first, ch.bin * binHz, ch.wpm, ch.text, ch.call);
+                // Surface a channel only once it has shown real-CW structure (a
+                // couple of multi-element characters); a noise burst that only
+                // ever produces a lone 'E'/'T' never qualifies and stays hidden.
+                // Thereafter, re-emit on any change.
+                if (ch.shown || ch.richChars >= 2) {
+                    if (!ch.shown || ch.dirty) {
+                        ch.shown = true;
+                        ch.dirty = false;
+                        postChannel(it->first, ch.bin * binHz, ch.wpm, ch.text, ch.call);
+                    }
                 }
                 ++it;
             }
 
-            // 2b) Merge channels that have drifted onto the same carrier: keep the
-            //     one with more decoded text, drop the other. Collect first, then
-            //     erase, so the map isn't mutated mid-iteration.
+            // 2b) De-duplicate: two channels are the same signal if they sit within
+            //     a receiver bandwidth of each other, or — at any separation, e.g.
+            //     a harmonic — they decode the same callsign. Drop the one with less
+            //     decoded text. Collect first, then erase (no mid-iteration mutation).
             std::vector<int> toDrop;
             for (auto a = channels.begin(); a != channels.end(); ++a)
-                for (auto b = std::next(a); b != channels.end(); ++b)
-                    if (std::abs(a->second.bin - b->second.bin) < minSepBins)
-                        toDrop.push_back(a->second.text.size() >= b->second.text.size()
-                                             ? b->first : a->first);
+                for (auto b = std::next(a); b != channels.end(); ++b) {
+                    const Channel& A = a->second;
+                    const Channel& B = b->second;
+                    const bool dup = std::abs(A.bin - B.bin) < minSepBins ||
+                                     (!A.call.empty() && A.call == B.call);
+                    if (dup)
+                        toDrop.push_back(A.text.size() >= B.text.size() ? b->first : a->first);
+                }
             for (int id : toDrop) {
                 auto it = channels.find(id);
                 if (it == channels.end())

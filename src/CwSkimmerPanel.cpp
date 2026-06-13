@@ -170,14 +170,20 @@ void CwSkimmerPanel::updateChannel(int id, double hz, int wpm, const std::string
     if (it == items_.end()) {
         auto item = SkimmerItem::create();
         item->id = id;
+        item->hz = hz;
         item->freq.set_value(freq);
         item->wpm.set_value(std::to_string(wpm));
         item->text.set_value(text);
         item->call.set_value(call);
-        store_->append(item);
+        // Insert so the list stays ordered by frequency (a channel's frequency
+        // never changes, so rows only move on insert/remove — never on update).
+        guint pos = store_->get_n_items();
+        for (guint i = 0; i < store_->get_n_items(); ++i)
+            if (store_->get_item(i)->hz > hz) { pos = i; break; }
+        store_->insert(pos, item);
         items_[id] = item;
     } else {
-        it->second->freq.set_value(freq);
+        // Update the bound properties in place (freq is fixed; row keeps its slot).
         it->second->wpm.set_value(std::to_string(wpm));
         it->second->text.set_value(text);
         it->second->call.set_value(call);
