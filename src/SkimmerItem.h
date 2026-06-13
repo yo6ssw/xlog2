@@ -10,7 +10,8 @@
 // row widget is not recreated, so a selected row survives its text changing.
 class SkimmerItem : public Glib::Object {
 public:
-    int id = 0;  // stable channel id (FFT bin); used to find the row to update
+    int    id = 0;   // stable channel id (FFT bin); used to find the row to update
+    double hz = 0.0; // audio pitch, for ordering rows by frequency
 
     Glib::Property<Glib::ustring> freq;
     Glib::Property<Glib::ustring> wpm;

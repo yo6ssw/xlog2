@@ -135,14 +135,31 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
 - `CwSkimmer` (`src/core/services/CwSkimmer.*`) — a pragmatic **multi-channel CW
   decoder** in the spirit of VE3NEA's CW Skimmer, scaled to a single audio
   passband (the rig-audio stream) rather than wideband IQ. Fed mono PCM via
-  `pushPcm` from `AudioStreamClient::onPcm`, its own worker runs a sliding STFT
-  (small dependency-free radix-2 FFT, window sized **shorter than a dit** — ~512
-  pts/11 ms @ 48 kHz — so the keying envelope resolves) and, on every detected
-  carrier in the passband at once, tracks the on/off envelope (Schmitt + edge
-  debounce) and decodes Morse. Per-carrier dit-mark and element-gap lengths are
-  tracked in *separate* adaptive references (the finite window inflates marks and
-  shrinks gaps, so a shared estimate never settles); callsigns are pattern-matched
-  out of the decoded text. Emits `onWaterfall` (a max-pooled spectrum row),
+  `pushPcm` from `AudioStreamClient::onPcm`, its own worker decodes every carrier
+  in the passband at once. Since CW lives only in the low audio (the band is
+  capped at ~4 kHz), the worker first **decimates the stream to ~12 kHz** (an
+  anti-alias FIR + downsample, e.g. ÷4 from 48 kHz) and runs the whole pipeline
+  there — a quarter-size FFT and quarter-rate per-channel receivers for the same
+  resolution. The decoder uses a **two-path** design that decouples frequency
+  resolution from envelope timing (the single-FFT tradeoff otherwise forces a
+  choice — coarse bins merge crowded signals into a few channels; a short window
+  for sharp keying gives coarse bins): a **fine FFT** (~512 pts/23 Hz bins @
+  12 kHz, dependency-free radix-2) drives the waterfall, the noise floor and
+  channel detection (dominant-peak spawn + harmonic suppression, one channel per
+  carrier); each channel then runs its **own narrowband receiver** — complex
+  down-conversion to baseband at the carrier + a 2-stage low-pass — whose output
+  power is the keying envelope, with time resolution set by the filter, not the
+  FFT window. The decode then follows CW Skimmer's "soft, not hard" philosophy:
+  envelope power vs a per-channel min-tracked noise floor → a continuous
+  **tone-present probability** (logistic in SNR, never a per-frame threshold) →
+  a fixed-lag **2-state Viterbi** picking the most-probable key down/up
+  segmentation (the transition cost rejects noise blips and rides through fades,
+  replacing any Schmitt/debounce); finalised runs are decoded with min-tracked
+  dit-mark / element-gap references (kept *separate* because the finite window
+  inflates marks and shrinks gaps), characters flushed as the inter-character
+  silence elapses. Callsigns are pattern-matched out of the decoded text (a
+  master-callsign/SCP dictionary check — CW Skimmer's biggest accuracy lever — is
+  a deliberate TODO). Emits `onWaterfall` (a max-pooled spectrum row),
   `onChannel` (id = FFT bin, pitch, wpm, rolling text, call) and
   `onChannelRemoved`, all marshalled to the UI thread. The dockable panels
   (`QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) show a scrolling waterfall with
