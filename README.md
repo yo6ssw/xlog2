@@ -45,6 +45,11 @@ you can switch between them freely.
   spotter count, band-filter chips, and double-click to tune.
 - **Rig audio** — plays a `cwsd` `audio_stream_server` Opus-over-UDP stream of
   the receiver audio through a local ALSA device.
+- **CW Skimmer** — a dockable multi-channel CW decoder: it decodes every CW
+  signal in the rig-audio passband at once, showing a waterfall with callsign
+  labels plus a per-signal decode table (frequency / WPM / text / call), with
+  Gate and Min-SNR controls. See
+  [docs/cw-skimmer-decoder.md](docs/cw-skimmer-decoder.md) for how it works.
 - **LoTW** — *Upload* signs/submits new QSOs via ARRL's `tqsl`; *Download
   confirmations* fetches confirmed QSOs and marks matches (call+band+mode+date).
   A `LoTW` column shows `✓` confirmed / `↑` uploaded.
