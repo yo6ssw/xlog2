@@ -62,11 +62,24 @@ snd_pcm_t* openPlayback(const AudioStreamConfig& cfg) {
                            cfg.channels,
                            static_cast<unsigned>(cfg.sampleRate),
                            1,          // allow ALSA soft-resampling
-                           100000) < 0 /* ~100 ms latency target */) {
+                           250000) < 0 /* ~250 ms buffer: low rates resample to the
+                                          device's native rate with coarse periods, so
+                                          a tight buffer underruns on the slightest
+                                          network jitter — choppy audio. */) {
         snd_pcm_close(pcm);
         return nullptr;
     }
     return pcm;
+}
+
+// Write ~150 ms of silence to build a cushion before real audio plays. ALSA
+// starts playback near-empty, so without this a single late datagram underruns
+// immediately and keeps re-underrunning; priming on open and after each recovery
+// keeps the stream smooth at low sample rates.
+void primePlayback(snd_pcm_t* pcm, const AudioStreamConfig& cfg) {
+    const int frames = cfg.sampleRate * 150 / 1000;
+    std::vector<int16_t> silence(static_cast<std::size_t>(frames) * cfg.channels, 0);
+    snd_pcm_writei(pcm, silence.data(), frames);
 }
 
 }  // namespace
@@ -190,6 +203,7 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                 }
                 continue;
             }
+            primePlayback(pcm, cfg);  // start with a cushion so jitter can't underrun
             postStatus("Audio: playing to " + cfg.device + ".");
             playbackReported = false;
         }
@@ -217,7 +231,8 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                 std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});
             const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
             if (w == -EPIPE) {
-                snd_pcm_prepare(pcm);  // underrun: recover and keep going
+                snd_pcm_prepare(pcm);     // underrun: recover...
+                primePlayback(pcm, cfg);  // ...and re-cushion so it doesn't recur immediately
             } else if (w < 0) {
                 snd_pcm_close(pcm);
                 pcm = nullptr;  // reopen on the next datagram
