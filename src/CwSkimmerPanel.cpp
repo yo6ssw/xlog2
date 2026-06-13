@@ -51,6 +51,48 @@ CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     waterfall_.set_draw_func(sigc::mem_fun(*this, &CwSkimmerPanel::onDrawWaterfall));
     append(waterfall_);
 
+    // --- detection-gate slider: higher = stronger signals only -------------
+    auto* gateBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    gateBox->set_spacing(6);
+    gateBox->append(*Gtk::make_managed<Gtk::Label>("Gate"));
+    gateScale_ = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
+    gateScale_->set_range(-12, 24);   // dB offset; 0 = default sensitivity
+    gateScale_->set_increments(1, 3);
+    gateScale_->set_draw_value(false);
+    gateScale_->set_hexpand(true);
+    gateScale_->set_value(0);
+    gateLabel_ = Gtk::make_managed<Gtk::Label>("0 dB");
+    gateScale_->signal_value_changed().connect([this]() {
+        const int db = static_cast<int>(gateScale_->get_value());
+        gateLabel_->set_text(std::to_string(db) + " dB");
+        if (!updatingGate_)
+            signalGate_.emit(db);
+    });
+    gateBox->append(*gateScale_);
+    gateBox->append(*gateLabel_);
+    append(*gateBox);
+
+    // --- per-channel min-SNR slider: rejects low-SNR channels (spurious E/T) -
+    auto* snrBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    snrBox->set_spacing(6);
+    snrBox->append(*Gtk::make_managed<Gtk::Label>("Min SNR"));
+    snrScale_ = Gtk::make_managed<Gtk::Scale>(Gtk::Orientation::HORIZONTAL);
+    snrScale_->set_range(0, 30);   // dB; 0 = no per-channel gating
+    snrScale_->set_increments(1, 3);
+    snrScale_->set_draw_value(false);
+    snrScale_->set_hexpand(true);
+    snrScale_->set_value(0);
+    snrLabel_ = Gtk::make_managed<Gtk::Label>("0 dB");
+    snrScale_->signal_value_changed().connect([this]() {
+        const int db = static_cast<int>(snrScale_->get_value());
+        snrLabel_->set_text(std::to_string(db) + " dB");
+        if (!updatingSnr_)
+            signalMinSnr_.emit(db);
+    });
+    snrBox->append(*snrScale_);
+    snrBox->append(*snrLabel_);
+    append(*snrBox);
+
     // --- decode list: store -> selection -> view ---------------------------
     store_     = Gio::ListStore<SkimmerItem>::create();
     selection_ = Gtk::SingleSelection::create(store_);
@@ -236,4 +278,18 @@ void CwSkimmerPanel::clear() {
     labels_.clear();
     std::fill(pixels_.begin(), pixels_.end(), 0);
     waterfall_.queue_draw();
+}
+
+void CwSkimmerPanel::setGate(int db) {
+    updatingGate_ = true;   // restore from settings without re-emitting
+    gateScale_->set_value(db);
+    gateLabel_->set_text(std::to_string(db) + " dB");
+    updatingGate_ = false;
+}
+
+void CwSkimmerPanel::setMinSnr(int db) {
+    updatingSnr_ = true;
+    snrScale_->set_value(db);
+    snrLabel_->set_text(std::to_string(db) + " dB");
+    updatingSnr_ = false;
 }

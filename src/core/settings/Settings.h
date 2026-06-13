@@ -54,7 +54,7 @@ struct Settings {
     bool        audioEnabled    = false;
     std::string audioHost       = "127.0.0.1";
     int         audioPort       = 7355;
-    int         audioSampleRate = 16000;  // must match the server (opus rate)
+    int         audioSampleRate = 8000;   // must match the server (opus rate)
     int         audioChannels   = 1;      // must match the server
     std::string audioDevice     = "default";  // ALSA playback device
 
@@ -62,6 +62,8 @@ struct Settings {
     std::string skimmerDock     = "left";   // top|bottom|left|right
     bool        skimmerVisible  = false;
     int         skimmerPanelPos = 0;         // saved dock/divider size (0 = unset)
+    int         skimmerGate     = 0;         // detection gating level, dB (see CwSkimmer)
+    int         skimmerMinSnr   = 0;         // minimum per-channel SNR, dB (see CwSkimmer)
 
     // [dxcluster]
     std::string dxHost;

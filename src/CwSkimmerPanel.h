@@ -25,6 +25,12 @@ public:
     void removeChannel(int id);
     void clear();
 
+    // Set a slider without emitting its signal (restore from settings).
+    void setGate(int db);
+    void setMinSnr(int db);
+    sigc::signal<void(int)>& signalGate()   { return signalGate_; }    // operator moved the gate
+    sigc::signal<void(int)>& signalMinSnr() { return signalMinSnr_; }  // ...the min-SNR slider
+
 private:
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
         const Glib::ustring& title,
@@ -32,10 +38,18 @@ private:
     void onDrawWaterfall(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
 
     Gtk::DrawingArea waterfall_;
+    Gtk::Scale*      gateScale_ = nullptr;
+    Gtk::Label*      gateLabel_ = nullptr;
+    Gtk::Scale*      snrScale_  = nullptr;
+    Gtk::Label*      snrLabel_  = nullptr;
+    bool             updatingGate_ = false;  // suppress emission during a programmatic set
+    bool             updatingSnr_  = false;
     Gtk::ColumnView  columnView_;
     Glib::RefPtr<Gio::ListStore<SkimmerItem>> store_;
     Glib::RefPtr<Gtk::SingleSelection>        selection_;
     std::map<int, Glib::RefPtr<SkimmerItem>>  items_;  // id -> live row
+    sigc::signal<void(int)> signalGate_;
+    sigc::signal<void(int)> signalMinSnr_;
 
     // Waterfall pixel history (cols_ wide, kHistory tall; RGB24, newest at top).
     static constexpr int kHistory = 400;

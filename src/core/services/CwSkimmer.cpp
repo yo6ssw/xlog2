@@ -49,6 +49,11 @@ void fft(std::vector<float>& re, std::vector<float>& im) {
     }
 }
 
+int popcount128(unsigned __int128 v) {
+    return __builtin_popcountll(static_cast<unsigned long long>(v)) +
+           __builtin_popcountll(static_cast<unsigned long long>(v >> 64));
+}
+
 std::size_t nextPow2(double v) {
     std::size_t n = 256;
     while (n < static_cast<std::size_t>(v) && n < 4096)
@@ -124,6 +129,10 @@ struct Channel {
     bool   curState = false;                   // last finalised key state (down=true)
     int    runHops  = 0;                       // finalised frames in the current state
     bool   started  = false;                   // a finalised run is in progress
+    unsigned __int128 keyHist = 0;             // last 128 finalised key states (1 bit/frame);
+                                               // compared across channels to spot a ghost
+                                               // (an image / intermod / codec artifact keys
+                                               // in lockstep with its parent at another pitch)
 
     // Per-channel narrowband receiver: complex down-conversion to baseband + a
     // 2-stage low-pass. The keying envelope's time resolution comes from the
@@ -135,6 +144,8 @@ struct Channel {
     double f1Re = 0.0, f1Im = 0.0;   // low-pass stage 1
     double f2Re = 0.0, f2Im = 0.0;   // low-pass stage 2
     double noisePow = 0.0;           // min-tracked key-up power (per-channel noise)
+    double peakPow  = 0.0;           // tracked key-down power; a ghost is an attenuated
+                                     // artifact, so the stronger of two ghosts is the real one
 
     // Adaptive unit references (hops), separate for marks vs gaps because the
     // finite window inflates marks and shrinks gaps. Each tracks the *shortest*
@@ -400,7 +411,15 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
             const std::size_t pIdx = sortbuf.size() / 3;
             std::nth_element(sortbuf.begin(), sortbuf.begin() + pIdx, sortbuf.end());
             const float  floor    = std::max(1e-6f, sortbuf[pIdx]);
-            const float  spawnTh  = floor * 7.0f;   // a strong peak to start a channel
+            // Operator gating level (dB): a squelch on channel creation. Raising it
+            // requires a stronger peak above the noise floor to start a channel, so
+            // weak signals, noise and ghosts are not picked up — but a channel that
+            // does clear it decodes at full sensitivity (the per-frame keying gate
+            // below is left at its default, so the decode quality is unaffected).
+            const double gate     = gateDb_.load(std::memory_order_relaxed);
+            const float  gateLin  = static_cast<float>(std::pow(10.0, gate / 20.0));
+            const float  spawnTh  = floor * 7.0f * gateLin;  // peak strength to start a channel
+            const double minSnr   = minSnrDb_.load(std::memory_order_relaxed);  // per-channel gate
 
             // 1) Spawn channels at strong local-maximum peaks, but only after the
             //    peak has persisted (rejects keying-transient clicks and noise) and
@@ -483,6 +502,10 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 if (ch.noisePow <= 0.0) ch.noisePow = P;
                 else if (P < ch.noisePow) ch.noisePow += 0.1 * (P - ch.noisePow);
                 else ch.noisePow += 0.002 * (P - ch.noisePow);
+                // Track the key-down level (fast up, slow down) as a strength proxy
+                // (the per-channel SNR numerator, and the ghost-dedup tiebreak).
+                if (P > ch.peakPow) ch.peakPow = P;
+                else ch.peakPow += 0.001 * (P - ch.peakPow);
                 const double zdb = 10.0 * std::log10((P + 1e-12) / (ch.noisePow + 1e-12));
                 // Soft tone-present probability — never a hard per-frame decision.
                 const double pOn = 1.0 / (1.0 + std::exp(-(zdb - kZ0) / kZs));
@@ -534,19 +557,29 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                     }
                     if (!ch.curState && ch.symbol.empty()) ++ch.idleHops;
                     else ch.idleHops = 0;
+                    ch.keyHist = (ch.keyHist << 1) | static_cast<unsigned __int128>(st ? 1 : 0);
                 }
 
-                if (ch.idleHops > removeAfterHops) {
+                // Per-channel SNR: the keyed level vs this channel's own noise.
+                // peakPow's slow decay gives it hysteresis, so it stays high through
+                // element/word gaps and only falls once the signal is truly gone.
+                const double snrDb = 10.0 * std::log10((ch.peakPow + 1e-12) /
+                                                       (ch.noisePow + 1e-12));
+
+                // Drop on long silence, or — once shown — when the signal fades
+                // below the minimum SNR (also removes channels live when the
+                // operator raises the slider).
+                if (ch.idleHops > removeAfterHops || (ch.shown && snrDb < minSnr)) {
                     if (ch.shown)
                         postRemoved(it->first);
                     it = channels.erase(it);
                     continue;
                 }
                 // Surface a channel only once it has shown real-CW structure (a
-                // couple of multi-element characters); a noise burst that only
-                // ever produces a lone 'E'/'T' never qualifies and stays hidden.
-                // Thereafter, re-emit on any change.
-                if (ch.shown || ch.richChars >= 2) {
+                // couple of multi-element characters) AND clears the minimum SNR —
+                // a noise burst that makes a lone 'E'/'T', or any low-SNR artifact,
+                // never qualifies and stays hidden. Thereafter, re-emit on change.
+                if (ch.shown || (ch.richChars >= 2 && snrDb >= minSnr)) {
                     if (!ch.shown || ch.dirty) {
                         ch.shown = true;
                         ch.dirty = false;
@@ -556,19 +589,43 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 ++it;
             }
 
-            // 2b) De-duplicate: two channels are the same signal if they sit within
-            //     a receiver bandwidth of each other, or — at any separation, e.g.
-            //     a harmonic — they decode the same callsign. Drop the one with less
-            //     decoded text. Collect first, then erase (no mid-iteration mutation).
+            // 2b) De-duplicate. Two channels are the same signal if they: sit within
+            //     a receiver bandwidth of each other; decode the same callsign (a
+            //     harmonic at any separation); or key in lockstep — a ghost (an
+            //     image, intermod product or codec artifact) reproduces its parent's
+            //     exact on/off timing at a different pitch, so the recent keying
+            //     histories overlap almost perfectly (Jaccard of the on-bits), which
+            //     independent signals never do. Keep the cleaner copy (more valid
+            //     characters, then more text); collect first, then erase.
             std::vector<int> toDrop;
             for (auto a = channels.begin(); a != channels.end(); ++a)
                 for (auto b = std::next(a); b != channels.end(); ++b) {
                     const Channel& A = a->second;
                     const Channel& B = b->second;
-                    const bool dup = std::abs(A.bin - B.bin) < minSepBins ||
-                                     (!A.call.empty() && A.call == B.call);
-                    if (dup)
-                        toDrop.push_back(A.text.size() >= B.text.size() ? b->first : a->first);
+                    bool dup = std::abs(A.bin - B.bin) < minSepBins ||
+                               (!A.call.empty() && A.call == B.call);
+                    if (!dup) {
+                        const int inter = popcount128(A.keyHist & B.keyHist);
+                        const int uni   = popcount128(A.keyHist | B.keyHist);
+                        // Enough shared keying activity, and they're on together for
+                        // most of it — same Morse, so one is a ghost of the other.
+                        // Independent signals overlap ~25% (different timing) even
+                        // sending the same text; a ghost is ~90%, so 65% has margin
+                        // both ways and tolerates a sloppy (partial) ghost.
+                        if (uni >= 24 && inter * 100 >= 65 * uni)
+                            dup = true;
+                    }
+                    if (dup) {
+                        // Keep the stronger signal (a ghost is the attenuated copy);
+                        // fall back to the cleaner/longer decode if strengths tie.
+                        bool keepA;
+                        if (A.peakPow > B.peakPow * 1.15) keepA = true;
+                        else if (B.peakPow > A.peakPow * 1.15) keepA = false;
+                        else keepA = A.richChars != B.richChars
+                                         ? A.richChars > B.richChars
+                                         : A.text.size() >= B.text.size();
+                        toDrop.push_back(keepA ? b->first : a->first);
+                    }
                 }
             for (int id : toDrop) {
                 auto it = channels.find(id);

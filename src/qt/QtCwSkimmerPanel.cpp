@@ -1,8 +1,12 @@
 #include "QtCwSkimmerPanel.h"
 
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QImage>
+#include <QLabel>
 #include <QPainter>
+#include <QSignalBlocker>
+#include <QSlider>
 #include <QStandardItemModel>
 #include <QTableView>
 #include <QVBoxLayout>
@@ -129,6 +133,40 @@ QtCwSkimmerPanel::QtCwSkimmerPanel(QWidget* parent) : QWidget(parent) {
     waterfall_ = new SkimmerWaterfall;
     layout->addWidget(waterfall_, 3);
 
+    // Detection-gate slider: higher = stronger signals only (suppress noise/ghosts).
+    auto* gateRow = new QHBoxLayout;
+    gateRow->setContentsMargins(4, 2, 4, 2);
+    gateRow->addWidget(new QLabel("Gate"));
+    gate_ = new QSlider(Qt::Horizontal);
+    gate_->setRange(-12, 24);   // dB offset; 0 = default sensitivity
+    gate_->setValue(0);
+    gateRow->addWidget(gate_, 1);
+    gateLabel_ = new QLabel("0 dB");
+    gateLabel_->setMinimumWidth(40);
+    gateRow->addWidget(gateLabel_);
+    connect(gate_, &QSlider::valueChanged, this, [this](int v) {
+        gateLabel_->setText(QString("%1 dB").arg(v));
+        emit gateChanged(v);
+    });
+    layout->addLayout(gateRow);
+
+    // Per-channel minimum-SNR slider: rejects low-SNR channels (spurious E/T).
+    auto* snrRow = new QHBoxLayout;
+    snrRow->setContentsMargins(4, 0, 4, 2);
+    snrRow->addWidget(new QLabel("Min SNR"));
+    snr_ = new QSlider(Qt::Horizontal);
+    snr_->setRange(0, 30);   // dB; 0 = no per-channel gating
+    snr_->setValue(0);
+    snrRow->addWidget(snr_, 1);
+    snrLabel_ = new QLabel("0 dB");
+    snrLabel_->setMinimumWidth(40);
+    snrRow->addWidget(snrLabel_);
+    connect(snr_, &QSlider::valueChanged, this, [this](int v) {
+        snrLabel_->setText(QString("%1 dB").arg(v));
+        emit minSnrChanged(v);
+    });
+    layout->addLayout(snrRow);
+
     model_ = new QStandardItemModel(0, 4, this);
     model_->setHorizontalHeaderLabels({"Freq", "WPM", "Text", "Call"});
     table_ = new QTableView;
@@ -143,6 +181,18 @@ QtCwSkimmerPanel::QtCwSkimmerPanel(QWidget* parent) : QWidget(parent) {
     layout->addWidget(table_, 2);
 
     setMinimumWidth(260);
+}
+
+void QtCwSkimmerPanel::setGate(int db) {
+    QSignalBlocker block(gate_);   // restore from settings without re-emitting
+    gate_->setValue(db);
+    gateLabel_->setText(QString("%1 dB").arg(db));
+}
+
+void QtCwSkimmerPanel::setMinSnr(int db) {
+    QSignalBlocker block(snr_);
+    snr_->setValue(db);
+    snrLabel_->setText(QString("%1 dB").arg(db));
 }
 
 void QtCwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
