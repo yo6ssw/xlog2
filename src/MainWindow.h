@@ -2,6 +2,8 @@
 
 #include "Audio.h"
 #include "CwKeyer.h"
+#include "CwSkimmer.h"
+#include "CwSkimmerPanel.h"
 #include "DxCluster.h"
 #include "DxClusterPanel.h"
 #include "GlibDispatcher.h"
@@ -109,6 +111,14 @@ private:
     void stopAudioStream();
     void onAudioSettings();
 
+    // --- CW skimmer ---
+    void onSkimmerToggleShow();                     // show/hide the panel
+    void onSkimmerDock(const Glib::ustring& side);  // dock-side radio action
+    void applySkimmerDock();                        // (re)build the paned
+    void applySkimmerConfig();                      // after load: dock + start/stop
+    void startSkimmer();
+    void stopSkimmer();
+
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
     void onClusterSettings();
@@ -150,6 +160,9 @@ private:
     QrzClient                       qrz_;
     CwKeyer                         keyer_;
     DxCluster                       cluster_;
+    // skimmer_ is declared before audio_ so it outlives it: the audio worker's
+    // onPcm tap calls skimmer_.pushPcm, and members destruct in reverse order.
+    CwSkimmer                       skimmer_;
     AudioStreamClient               audio_;
     RemotePaddleKeyer               paddle_;
     HidPaddleInput                  hidPaddle_;
@@ -173,6 +186,13 @@ private:
     Gtk::Paned       rigPaned_;                    // wraps paned_ + rigPanel_
     Glib::RefPtr<Gio::SimpleAction> rigShowAction_;
     Glib::RefPtr<Gio::SimpleAction> rigDockAction_;
+
+    // CW skimmer panel + layout. skimmerPaned_ wraps the rig/DX/notebook area
+    // (rigPaned_) and skimmerPanel_, so the skimmer docks independently.
+    CwSkimmerPanel   skimmerPanel_;
+    Gtk::Paned       skimmerPaned_;                // wraps rigPaned_ + skimmerPanel_
+    Glib::RefPtr<Gio::SimpleAction> skimmerShowAction_;
+    Glib::RefPtr<Gio::SimpleAction> skimmerDockAction_;
     // Latest frequency/mode from rig_.onUpdate, rendered together with the
     // passband/filter that arrives in the paired rig_.onFilter call.
     double           lastMhz_ = 0.0;

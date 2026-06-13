@@ -22,6 +22,7 @@ MainWindow::MainWindow()
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
       cluster_(uiDispatcher_),
+      skimmer_(uiDispatcher_),
       audio_(uiDispatcher_),
       paddle_(uiDispatcher_),
       hidPaddle_(uiDispatcher_) {
@@ -108,10 +109,15 @@ MainWindow::MainWindow()
         [this](double hz) { if (rig_.isRunning()) rig_.stepFrequency(hz); });
     rigPanel_.signalSetFilter().connect(
         [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
+    rigPanel_.signalSetPower().connect(
+        [this](bool on) { if (rig_.isRunning()) rig_.setPower(on); });
     rigPaned_.set_vexpand(true);
-    vbox->append(rigPaned_);
-    applyDxDock();   // initial layout (defaults); reapplied after loadSettings
-    applyRigDock();  // wraps paned_ + rigPanel_
+    // The skimmer panel docks around the rig/DX/notebook area via a third paned.
+    skimmerPaned_.set_vexpand(true);
+    vbox->append(skimmerPaned_);
+    applyDxDock();       // initial layout (defaults); reapplied after loadSettings
+    applyRigDock();      // wraps paned_ + rigPanel_
+    applySkimmerDock();  // wraps rigPaned_ + skimmerPanel_
 
     cluster_.onSpot   = [this](const DxSpot& s) { dxPanel_.addSpot(s); };
     cluster_.onLine   = [this](const std::string& l) { dxPanel_.addLine(l); };
@@ -148,6 +154,9 @@ MainWindow::MainWindow()
     rig_.onFilter = [this](int pbwidthHz, int filter) {
         rigPanel_.setState(lastMhz_, lastMode_, pbwidthHz, filter);
     };
+    rig_.onPower = [this](bool supported, bool on) {
+        rigPanel_.setPowerState(supported, on);
+    };
     rig_.onConnectResult = [this](bool ok, const std::string& error) {
         rigPanel_.setConnected(ok);
         if (ok)
@@ -168,6 +177,19 @@ MainWindow::MainWindow()
     audio_.onStats  = [this](unsigned long frames) {
         audioIndicator_.set_text("♪ " + std::to_string(frames) + " frames");
     };
+    // Tap the decoded rig audio into the skimmer (called on the audio worker
+    // thread; pushPcm is cheap + thread-safe and a no-op when the skimmer is off).
+    audio_.onPcm = [this](const int16_t* s, int frames, int ch, int rate) {
+        skimmer_.pushPcm(s, frames, ch, rate);
+    };
+    skimmer_.onWaterfall = [this](const std::vector<float>& mags, double lo, double hi) {
+        skimmerPanel_.addWaterfall(mags, lo, hi);
+    };
+    skimmer_.onChannel = [this](int id, double hz, int wpm, const std::string& text,
+                                const std::string& call) {
+        skimmerPanel_.updateChannel(id, hz, wpm, text, call);
+    };
+    skimmer_.onChannelRemoved = [this](int id) { skimmerPanel_.removeChannel(id); };
     paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
     // Mute the rig-audio stream while keying (semi-break-in) when configured to.
     paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
@@ -252,6 +274,11 @@ void MainWindow::buildActions() {
     add_action("dxsettings", sigc::mem_fun(*this, &MainWindow::onClusterSettings));
     dxDockAction_ = add_action_radio_string(
         "dxdock", sigc::mem_fun(*this, &MainWindow::onDxDock), "bottom");
+
+    skimmerShowAction_ = add_action_bool(
+        "skimmershow", sigc::mem_fun(*this, &MainWindow::onSkimmerToggleShow), false);
+    skimmerDockAction_ = add_action_radio_string(
+        "skimmerdock", sigc::mem_fun(*this, &MainWindow::onSkimmerDock), "left");
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -319,6 +346,16 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     audioMenu->append("_Play rig audio stream", "win.audio");
     audioMenu->append("_Settings…", "win.audiosettings");
     menu->append_submenu("_Audio", audioMenu);
+
+    auto skimmerMenu = Gio::Menu::create();
+    skimmerMenu->append("_Show panel", "win.skimmershow");
+    auto skimmerDockMenu = Gio::Menu::create();
+    skimmerDockMenu->append("_Top",    "win.skimmerdock::top");
+    skimmerDockMenu->append("_Bottom", "win.skimmerdock::bottom");
+    skimmerDockMenu->append("_Left",   "win.skimmerdock::left");
+    skimmerDockMenu->append("_Right",  "win.skimmerdock::right");
+    skimmerMenu->append_submenu("Doc_k", skimmerDockMenu);
+    menu->append_submenu("S_kimmer", skimmerMenu);
 
     auto clusterMenu = Gio::Menu::create();
     clusterMenu->append("_Show panel", "win.dxshow");
@@ -1130,6 +1167,8 @@ void MainWindow::startAudioStream() {
     // survives onCloseRequest()'s teardown — mirrors the UDP listener.
     cfg().audioEnabled = true;
     audioAction_->change_state(true);
+    if (skimmer_.isRunning())  // re-sync the skimmer to the (possibly new) rate
+        startSkimmer();
 }
 
 void MainWindow::stopAudioStream() {
@@ -1459,6 +1498,80 @@ void MainWindow::onRigDock(const Glib::ustring& side) {
     applyRigDock();
 }
 
+// --- CW skimmer --------------------------------------------------------------
+
+void MainWindow::applySkimmerDock() {
+    // Mirror applyRigDock() on skimmerPaned_, whose "content" child is the entire
+    // rig/DX/notebook area (rigPaned_).
+    skimmerPaned_.property_start_child().set_value(nullptr);
+    skimmerPaned_.property_end_child().set_value(nullptr);
+    const bool horizontal = (cfg().skimmerDock == "left" || cfg().skimmerDock == "right");
+    skimmerPaned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
+                                             : Gtk::Orientation::VERTICAL);
+    const bool panelFirst = (cfg().skimmerDock == "top" || cfg().skimmerDock == "left");
+    if (panelFirst) {
+        skimmerPaned_.set_start_child(skimmerPanel_);
+        skimmerPaned_.set_end_child(rigPaned_);
+    } else {
+        skimmerPaned_.set_start_child(rigPaned_);
+        skimmerPaned_.set_end_child(skimmerPanel_);
+    }
+    skimmerPaned_.set_resize_start_child(!panelFirst);
+    skimmerPaned_.set_resize_end_child(panelFirst);
+    skimmerPaned_.set_shrink_start_child(false);
+    skimmerPaned_.set_shrink_end_child(false);
+    skimmerPanel_.set_visible(cfg().skimmerVisible);
+}
+
+void MainWindow::applySkimmerConfig() {
+    if (cfg().skimmerDock != "top" && cfg().skimmerDock != "bottom" &&
+        cfg().skimmerDock != "left" && cfg().skimmerDock != "right")
+        cfg().skimmerDock = "left";
+    if (skimmerDockAction_)
+        skimmerDockAction_->set_state(Glib::Variant<Glib::ustring>::create(cfg().skimmerDock));
+    if (skimmerShowAction_)
+        skimmerShowAction_->set_state(Glib::Variant<bool>::create(cfg().skimmerVisible));
+    applySkimmerDock();
+    if (cfg().skimmerPanelPos > 0)
+        skimmerPaned_.set_position(cfg().skimmerPanelPos);
+    if (cfg().skimmerVisible)
+        startSkimmer();
+}
+
+void MainWindow::onSkimmerToggleShow() {
+    bool state = false;
+    skimmerShowAction_->get_state(state);
+    cfg().skimmerVisible = state;
+    skimmerPanel_.set_visible(cfg().skimmerVisible);
+    if (state)
+        startSkimmer();
+    else
+        stopSkimmer();
+}
+
+void MainWindow::onSkimmerDock(const Glib::ustring& side) {
+    cfg().skimmerDock = side.raw();
+    skimmerDockAction_->set_state(Glib::Variant<Glib::ustring>::create(side));
+    if (!cfg().skimmerVisible) {  // picking a dock implies wanting the panel shown
+        cfg().skimmerVisible = true;
+        skimmerShowAction_->set_state(Glib::Variant<bool>::create(true));
+        startSkimmer();
+    }
+    applySkimmerDock();
+}
+
+void MainWindow::startSkimmer() {
+    SkimmerConfig sc;
+    sc.sampleRate = cfg().audioSampleRate;
+    sc.channels   = cfg().audioChannels;
+    skimmer_.start(sc);
+}
+
+void MainWindow::stopSkimmer() {
+    skimmer_.stop();
+    skimmerPanel_.clear();
+}
+
 void MainWindow::onClusterConnect() {
     if (cluster_.isConnected()) {
         cluster_.disconnect();
@@ -1549,7 +1662,8 @@ std::string MainWindow::layoutFilePath() const {
 bool MainWindow::onCloseRequest() {
     rig_.stop();
     listener_.stop();
-    audio_.stop();
+    audio_.stop();      // joins the audio worker before the skimmer is torn down
+    skimmer_.stop();
     paddle_.stop();
     cluster_.disconnect();  // close the socket while the panel is still alive
     saveSettings();
@@ -1571,6 +1685,11 @@ void MainWindow::saveSettings() {
         const int pos = rigPaned_.get_position();
         if (pos > 0)
             cfg().rigPanelPos = pos;
+    }
+    if (cfg().skimmerVisible) {
+        const int pos = skimmerPaned_.get_position();
+        if (pos > 0)
+            cfg().skimmerPanelPos = pos;
     }
     cfg().store(ini);  // udp/rig/lotw/qrz/keyer/dxcluster scalars
 
@@ -1653,6 +1772,8 @@ void MainWindow::loadSettings() {
     applyDxConfig();
     // Apply the rig-panel dock/visibility.
     applyRigConfig();
+    // Apply the skimmer dock/visibility (starts the skimmer if it was shown).
+    applySkimmerConfig();
 }
 
 void MainWindow::setStatus(const std::string& msg) {

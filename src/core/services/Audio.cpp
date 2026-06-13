@@ -73,7 +73,7 @@ snd_pcm_t* openPlayback(const AudioStreamConfig& cfg) {
 
 AudioStreamClient::~AudioStreamClient() {
     onStatus = nullptr;  // the owning view may already be gone at shutdown
-    stop();
+    stop();              // joins the worker, so onPcm is no longer called
 }
 
 void AudioStreamClient::wake() {
@@ -207,6 +207,10 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
             if (frames < 0)
                 continue;  // corrupt packet
             ++framesDecoded;
+            // Tap the clean decoded PCM for the skimmer before any mute fill, and
+            // only while unmuted (no point decoding our own keyed signal on TX).
+            if (onPcm && !muted_.load(std::memory_order_relaxed))
+                onPcm(pcmBuf.data(), frames, cfg.channels, cfg.sampleRate);
             // Muted (e.g. transmitting): keep the decoder and ALSA fed but output
             // silence, so unmuting resumes instantly with no underrun glitch.
             if (muted_.load(std::memory_order_relaxed))

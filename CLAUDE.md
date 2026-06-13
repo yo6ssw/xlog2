@@ -130,7 +130,24 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   never blocks. `sampleRate`/`channels` must match the server. It also posts a
   running decoded-frame count (`onStats`) ~once a second, shown as a live
   indicator in each shell's status bar. (Links `opus` + `asound`; the only audio
-  code in xlog2.)
+  code in xlog2.) It also exposes an `onPcm` tap (fired on the worker thread for
+  each unmuted datagram) that feeds the CW skimmer.
+- `CwSkimmer` (`src/core/services/CwSkimmer.*`) — a pragmatic **multi-channel CW
+  decoder** in the spirit of VE3NEA's CW Skimmer, scaled to a single audio
+  passband (the rig-audio stream) rather than wideband IQ. Fed mono PCM via
+  `pushPcm` from `AudioStreamClient::onPcm`, its own worker runs a sliding STFT
+  (small dependency-free radix-2 FFT, window sized **shorter than a dit** — ~512
+  pts/11 ms @ 48 kHz — so the keying envelope resolves) and, on every detected
+  carrier in the passband at once, tracks the on/off envelope (Schmitt + edge
+  debounce) and decodes Morse. Per-carrier dit-mark and element-gap lengths are
+  tracked in *separate* adaptive references (the finite window inflates marks and
+  shrinks gaps, so a shared estimate never settles); callsigns are pattern-matched
+  out of the decoded text. Emits `onWaterfall` (a max-pooled spectrum row),
+  `onChannel` (id = FFT bin, pitch, wpm, rolling text, call) and
+  `onChannelRemoved`, all marshalled to the UI thread. The dockable panels
+  (`QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) show a scrolling waterfall with
+  callsign labels plus a decode table. Cold-start mangles the first character or
+  two (the unit length isn't yet known) — inherent to streaming Morse decoders.
 - `RemotePaddleKeyer` (`src/core/services/RemotePaddleKeyer.*`, wire format in
   `RemoteKeyProtocol.h`) — operator-side client for **cwsd's `remote_key`
   service: real paddle keying over the internet**. Unlike `CwKeyer` (which sends

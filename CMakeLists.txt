@@ -51,6 +51,7 @@ add_library(xlog_core STATIC
     src/core/services/CwKeyer.cpp
     src/core/services/DxCluster.cpp
     src/core/services/Audio.cpp
+    src/core/services/CwSkimmer.cpp
     src/core/services/RemotePaddleKeyer.cpp
     src/core/services/HidPaddleInput.cpp
 )
@@ -90,6 +91,7 @@ if(XLOG_BUILD_GTK)
         src/LogPage.cpp
         src/DxClusterPanel.cpp
         src/RigPanel.cpp
+        src/CwSkimmerPanel.cpp
     )
     target_link_libraries(xlog2-gtk PRIVATE xlog_core PkgConfig::GTKMM)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -117,6 +119,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtMainWindow.cpp
         src/qt/QtDxClusterPanel.cpp
         src/qt/QtRigPanel.cpp
+        src/qt/QtCwSkimmerPanel.cpp
         src/qt/FlowLayout.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
@@ -124,6 +127,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtMainWindow.h
         src/qt/QtDxClusterPanel.h
         src/qt/QtRigPanel.h
+        src/qt/QtCwSkimmerPanel.h
     )
     set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
     target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)

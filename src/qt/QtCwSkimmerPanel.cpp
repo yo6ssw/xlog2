@@ -1,0 +1,180 @@
+#include "QtCwSkimmerPanel.h"
+
+#include <QHeaderView>
+#include <QImage>
+#include <QPainter>
+#include <QStandardItemModel>
+#include <QTableView>
+#include <QVBoxLayout>
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+#include <map>
+#include <vector>
+
+namespace {
+
+// Intensity (0..1) -> a black→blue→cyan→yellow→white waterfall colormap.
+QRgb heat(float v) {
+    v = std::clamp(v, 0.0f, 1.0f);
+    float r, g, b;
+    if (v < 0.25f)      { r = 0;                 g = 0;               b = v / 0.25f; }
+    else if (v < 0.5f)  { r = 0;                 g = (v - 0.25f) * 4; b = 1; }
+    else if (v < 0.75f) { r = (v - 0.5f) * 4;    g = 1;               b = 1 - (v - 0.5f) * 4; }
+    else                { r = 1;                 g = 1;               b = (v - 0.75f) * 4; }
+    return qRgb(int(r * 255), int(g * 255), int(b * 255));
+}
+
+}  // namespace
+
+// A self-scrolling spectrogram. The newest line is at the top; on each new row
+// the image scrolls down one pixel. Callsigns for the live channels are painted
+// over the top edge at their frequency column.
+class SkimmerWaterfall : public QWidget {
+public:
+    explicit SkimmerWaterfall(QWidget* parent = nullptr) : QWidget(parent) {
+        setMinimumHeight(120);
+        setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    }
+
+    void addRow(const std::vector<float>& mags, double minHz, double maxHz) {
+        minHz_ = minHz;
+        maxHz_ = maxHz;
+        const int cols = static_cast<int>(mags.size());
+        if (cols <= 0)
+            return;
+        if (img_.width() != cols)
+            img_ = QImage(cols, kHistory, QImage::Format_RGB32);
+        // Scroll down by one scanline, then write the new row at the top.
+        const int bpl = img_.bytesPerLine();
+        for (int y = img_.height() - 1; y > 0; --y)
+            std::memcpy(img_.scanLine(y), img_.scanLine(y - 1), bpl);
+        QRgb* top = reinterpret_cast<QRgb*>(img_.scanLine(0));
+        for (int x = 0; x < cols; ++x)
+            top[x] = heat(mags[x]);
+        update();
+    }
+
+    // labels: x-position (Hz) -> callsign text, drawn along the top.
+    void setLabels(std::map<double, QString> labels) {
+        labels_ = std::move(labels);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent*) override {
+        QPainter p(this);
+        p.fillRect(rect(), Qt::black);
+        if (!img_.isNull())
+            p.drawImage(rect(), img_, img_.rect());
+        if (maxHz_ <= minHz_)
+            return;
+        const double span = maxHz_ - minHz_;
+        // Frequency grid + axis labels every 500 Hz.
+        p.setPen(QColor(255, 255, 255, 40));
+        QFont f = p.font();
+        f.setPointSizeF(f.pointSizeF() - 1);
+        p.setFont(f);
+        for (int hz = static_cast<int>(std::ceil(minHz_ / 500) * 500); hz < maxHz_; hz += 500) {
+            const int x = static_cast<int>((hz - minHz_) / span * width());
+            p.setPen(QColor(255, 255, 255, 35));
+            p.drawLine(x, 0, x, height());
+            p.setPen(QColor(180, 180, 180));
+            p.drawText(x + 2, height() - 3, QString::number(hz));
+        }
+        // Callsign tags over the traces they were decoded from.
+        for (const auto& [hz, call] : labels_) {
+            if (hz < minHz_ || hz > maxHz_)
+                continue;
+            const int x = static_cast<int>((hz - minHz_) / span * width());
+            const QRect box(x + 2, 1, p.fontMetrics().horizontalAdvance(call) + 6, 15);
+            p.fillRect(box, QColor(0, 0, 0, 160));
+            p.setPen(QColor(120, 255, 120));
+            p.drawText(box.adjusted(3, 0, 0, 0), Qt::AlignVCenter, call);
+        }
+    }
+
+private:
+    static constexpr int kHistory = 400;  // scrollback in rows
+    QImage  img_;
+    double  minHz_ = 0.0, maxHz_ = 0.0;
+    std::map<double, QString> labels_;
+};
+
+// -----------------------------------------------------------------------------
+
+QtCwSkimmerPanel::QtCwSkimmerPanel(QWidget* parent) : QWidget(parent) {
+    auto* layout = new QVBoxLayout(this);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(0);
+
+    waterfall_ = new SkimmerWaterfall;
+    layout->addWidget(waterfall_, 3);
+
+    model_ = new QStandardItemModel(0, 4, this);
+    model_->setHorizontalHeaderLabels({"Freq", "WPM", "Text", "Call"});
+    table_ = new QTableView;
+    table_->setModel(model_);
+    table_->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    table_->setSelectionBehavior(QAbstractItemView::SelectRows);
+    table_->verticalHeader()->setVisible(false);
+    table_->horizontalHeader()->setStretchLastSection(false);
+    table_->setColumnWidth(0, 70);
+    table_->setColumnWidth(1, 50);
+    table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    layout->addWidget(table_, 2);
+
+    setMinimumWidth(260);
+}
+
+void QtCwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
+                                    double maxHz) {
+    waterfall_->addRow(mags, minHz, maxHz);
+}
+
+void QtCwSkimmerPanel::updateChannel(int id, double hz, int wpm,
+                                     const std::string& text, const std::string& call) {
+    const QString freq = QString::number(static_cast<int>(std::lround(hz))) + " Hz";
+    auto it = rows_.find(id);
+    if (it == rows_.end()) {
+        QList<QStandardItem*> cells = {new QStandardItem(freq),
+                                       new QStandardItem(QString::number(wpm)),
+                                       new QStandardItem(QString::fromStdString(text)),
+                                       new QStandardItem(QString::fromStdString(call))};
+        model_->appendRow(cells);
+        rows_[id] = cells[0];
+    } else {
+        const int row = it->second->row();
+        model_->item(row, 0)->setText(freq);
+        model_->item(row, 1)->setText(QString::number(wpm));
+        model_->item(row, 2)->setText(QString::fromStdString(text));
+        model_->item(row, 3)->setText(QString::fromStdString(call));
+    }
+    table_->scrollToBottom();
+
+    // Refresh the waterfall callsign tags from the current channel set.
+    std::map<double, QString> labels;
+    for (int r = 0; r < model_->rowCount(); ++r) {
+        const QString c = model_->item(r, 3)->text();
+        if (!c.isEmpty()) {
+            const double f = model_->item(r, 0)->text().split(' ').first().toDouble();
+            labels[f] = c;
+        }
+    }
+    waterfall_->setLabels(std::move(labels));
+}
+
+void QtCwSkimmerPanel::removeChannel(int id) {
+    auto it = rows_.find(id);
+    if (it == rows_.end())
+        return;
+    model_->removeRow(it->second->row());
+    rows_.erase(it);
+}
+
+void QtCwSkimmerPanel::clear() {
+    model_->removeRows(0, model_->rowCount());
+    rows_.clear();
+    waterfall_->setLabels({});
+}
