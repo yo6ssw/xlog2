@@ -43,6 +43,11 @@ public:
     // Running count of decoded+played audio frames, posted ~once a second while
     // streaming — a live "the stream is working" indicator for the UI.
     std::function<void(unsigned long framesDecoded)> onStats;
+    // A tap on the decoded PCM (int16, interleaved), fired straight from the
+    // worker thread for each datagram while unmuted — feeds the CW skimmer. Set
+    // it before start() and leave it set for the client's lifetime; the sink
+    // (e.g. CwSkimmer::pushPcm) must be cheap and thread-safe.
+    std::function<void(const int16_t* samples, int frames, int channels, int sampleRate)> onPcm;
 
     explicit AudioStreamClient(IUiDispatcher& ui) : ui_(ui) {}
     ~AudioStreamClient();

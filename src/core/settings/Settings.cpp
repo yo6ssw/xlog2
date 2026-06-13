@@ -49,6 +49,10 @@ Settings Settings::load(const IniFile& ini) {
     s.audioChannels   = ini.getInt("audio", "channels", s.audioChannels);
     s.audioDevice     = ini.getString("audio", "device", s.audioDevice);
 
+    s.skimmerDock     = ini.getString("skimmer", "dock", s.skimmerDock);
+    s.skimmerVisible  = ini.getBool("skimmer", "visible", s.skimmerVisible);
+    s.skimmerPanelPos = ini.getInt("skimmer", "position", s.skimmerPanelPos);
+
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
     s.dxPort        = ini.getInt("dxcluster", "port", s.dxPort);
     s.dxLogin       = ini.getString("dxcluster", "login", s.dxLogin);
@@ -106,6 +110,11 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("audio", "sample_rate", audioSampleRate);
     ini.setInt("audio", "channels", audioChannels);
     ini.setString("audio", "device", audioDevice);
+
+    ini.setString("skimmer", "dock", skimmerDock);
+    ini.setBool("skimmer", "visible", skimmerVisible);
+    if (skimmerVisible && skimmerPanelPos > 0)
+        ini.setInt("skimmer", "position", skimmerPanelPos);
 
     ini.setString("dxcluster", "host", dxHost);
     ini.setInt("dxcluster", "port", dxPort);

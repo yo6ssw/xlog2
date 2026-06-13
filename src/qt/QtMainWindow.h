@@ -2,6 +2,7 @@
 
 #include "Audio.h"
 #include "CwKeyer.h"
+#include "CwSkimmer.h"
 #include "DxCluster.h"
 #include "IMainView.h"
 #include "Lotw.h"
@@ -23,6 +24,7 @@ class QDockWidget;
 class QActionGroup;
 class QtDxClusterPanel;
 class QtRigPanel;
+class QtCwSkimmerPanel;
 class QtLogPage;
 class LogPagePresenter;
 
@@ -83,6 +85,9 @@ private:
     void onPaddleSettings();
     void onClusterConnectToggle();
     void onClusterSettings();
+    void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
+    void startSkimmer();
+    void stopSkimmer();
 
     Settings& cfg() { return presenter_.settings; }
 
@@ -106,6 +111,9 @@ private:
     QrzClient       qrz_;
     CwKeyer         keyer_;
     DxCluster       cluster_;
+    // skimmer_ is declared before audio_ so it outlives it: the audio worker's
+    // onPcm tap calls skimmer_.pushPcm, and members destruct in reverse order.
+    CwSkimmer         skimmer_;
     AudioStreamClient audio_;
     RemotePaddleKeyer paddle_;
     HidPaddleInput    hidPaddle_;
@@ -121,11 +129,14 @@ private:
     QtDxClusterPanel* dxPanel_ = nullptr;
     QDockWidget*      rigDock_  = nullptr;
     QtRigPanel*       rigPanel_ = nullptr;
+    QDockWidget*      skimmerDock_  = nullptr;
+    QtCwSkimmerPanel* skimmerPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
     QAction*          audioAction_ = nullptr;
     QAction*          paddleAction_ = nullptr;
     QActionGroup*     dxDockGroup_ = nullptr;   // Cluster ▸ Dock radio (top/bottom/left/right)
     QActionGroup*     rigDockGroup_ = nullptr;  // Rig ▸ Dock radio
+    QActionGroup*     skimmerDockGroup_ = nullptr;  // Skimmer ▸ Dock radio
 
     // Latest frequency/mode from rig_.onUpdate, rendered together with the
     // passband/filter that arrives in the paired rig_.onFilter call.
@@ -138,5 +149,7 @@ private:
     Qt::Orientation   pendingDockOrient_ = Qt::Vertical;
     int               pendingRigDockSize_   = 0;
     Qt::Orientation   pendingRigDockOrient_ = Qt::Horizontal;
+    int               pendingSkimmerDockSize_   = 0;
+    Qt::Orientation   pendingSkimmerDockOrient_ = Qt::Horizontal;
     bool              dockSizeRestored_  = false;
 };

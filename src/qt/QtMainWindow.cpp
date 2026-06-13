@@ -5,6 +5,7 @@
 #include "LogPagePresenter.h"
 #include "QtDxClusterPanel.h"
 #include "QtRigPanel.h"
+#include "QtCwSkimmerPanel.h"
 #include "QtLogPage.h"
 #include "Statistics.h"
 #include "StrUtil.h"
@@ -84,6 +85,7 @@ QtMainWindow::QtMainWindow()
       lotw_(uiDispatcher_),
       qrz_(uiDispatcher_),
       cluster_(uiDispatcher_),
+      skimmer_(uiDispatcher_),
       audio_(uiDispatcher_),
       paddle_(uiDispatcher_),
       hidPaddle_(uiDispatcher_) {
@@ -143,6 +145,16 @@ QtMainWindow::QtMainWindow()
             [this](double hz) { if (rig_.isRunning()) rig_.stepFrequency(hz); });
     connect(rigPanel_, &QtRigPanel::setFilter, this,
             [this](int n) { if (rig_.isRunning()) rig_.setFilter(n); });
+    connect(rigPanel_, &QtRigPanel::setPower, this,
+            [this](bool on) { if (rig_.isRunning()) rig_.setPower(on); });
+
+    // CW Skimmer dock: waterfall of the rig-audio passband + a decode table.
+    skimmerDock_  = new QDockWidget("CW Skimmer", this);
+    skimmerDock_->setObjectName("skimmerDock");
+    skimmerPanel_ = new QtCwSkimmerPanel;
+    skimmerDock_->setWidget(skimmerPanel_);
+    addDockWidget(Qt::LeftDockWidgetArea, skimmerDock_);
+    skimmerDock_->hide();
 
     buildMenus();
 
@@ -173,6 +185,9 @@ QtMainWindow::QtMainWindow()
     rig_.onFilter = [this](int pbwidthHz, int filter) {
         rigPanel_->setState(lastMhz_, lastMode_, pbwidthHz, filter);
     };
+    rig_.onPower = [this](bool supported, bool on) {
+        rigPanel_->setPowerState(supported, on);
+    };
     rig_.onConnectResult = [this](bool ok, const std::string& err) {
         rigPanel_->setConnected(ok);
         setStatus(ok ? "Connected to rig (model " + std::to_string(cfg().rigModel) + ")."
@@ -198,6 +213,19 @@ QtMainWindow::QtMainWindow()
     audio_.onStats  = [this](unsigned long frames) {
         audioIndicator_->setText(QString("♪ %1 frames").arg(frames));
     };
+    // Tap the decoded rig audio into the skimmer (called on the audio worker
+    // thread; pushPcm is cheap + thread-safe and a no-op when the skimmer is off).
+    audio_.onPcm = [this](const int16_t* s, int frames, int ch, int rate) {
+        skimmer_.pushPcm(s, frames, ch, rate);
+    };
+    skimmer_.onWaterfall = [this](const std::vector<float>& mags, double lo, double hi) {
+        skimmerPanel_->addWaterfall(mags, lo, hi);
+    };
+    skimmer_.onChannel = [this](int id, double hz, int wpm, const std::string& text,
+                                const std::string& call) {
+        skimmerPanel_->updateChannel(id, hz, wpm, text, call);
+    };
+    skimmer_.onChannelRemoved = [this](int id) { skimmerPanel_->removeChannel(id); };
     paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
     // Mute the rig-audio stream while keying (semi-break-in) when configured to.
     paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
@@ -390,6 +418,32 @@ void QtMainWindow::buildMenus() {
     audioAction_->setCheckable(true);
     connect(audioAction_, &QAction::toggled, this, &QtMainWindow::onToggleAudio);
     audio->addAction("Settings…", this, &QtMainWindow::onAudioSettings);
+
+    auto* skimmer = menuBar()->addMenu("S&kimmer");
+    auto* skShow = skimmerDock_->toggleViewAction();
+    skShow->setText("Show panel");
+    skimmer->addAction(skShow);
+    auto* skDockMenu = skimmer->addMenu("Dock");
+    skimmerDockGroup_ = new QActionGroup(this);
+    const std::pair<const char*, const char*> skSides[] = {
+        {"Top", "top"}, {"Bottom", "bottom"}, {"Left", "left"}, {"Right", "right"}};
+    for (const auto& [label, side] : skSides) {
+        auto* a = skDockMenu->addAction(label);
+        a->setCheckable(true);
+        a->setData(QString::fromLatin1(side));
+        skimmerDockGroup_->addAction(a);
+        const std::string s = side;
+        connect(a, &QAction::triggered, this, [this, s]() { onSkimmerDock(s); });
+    }
+    // Start/stop the DSP with the panel's visibility (PCM only flows while the
+    // rig-audio stream is also playing).
+    connect(skimmerDock_, &QDockWidget::visibilityChanged, this, [this](bool vis) {
+        cfg().skimmerVisible = vis;
+        if (vis)
+            startSkimmer();
+        else
+            stopSkimmer();
+    });
 
     auto* cluster = menuBar()->addMenu("&Cluster");
     // "Show panel": Qt's built-in dock toggle action auto-syncs its checked
@@ -627,6 +681,26 @@ void QtMainWindow::onRigDock(const std::string& side) {
     rigDock_->show();                                   // picking a dock implies showing it
 }
 
+// --- CW skimmer --------------------------------------------------------------
+
+void QtMainWindow::onSkimmerDock(const std::string& side) {
+    cfg().skimmerDock = side;
+    addDockWidget(dockAreaFromString(side), skimmerDock_);
+    skimmerDock_->show();
+}
+
+void QtMainWindow::startSkimmer() {
+    SkimmerConfig sc;
+    sc.sampleRate = cfg().audioSampleRate;
+    sc.channels   = cfg().audioChannels;
+    skimmer_.start(sc);
+}
+
+void QtMainWindow::stopSkimmer() {
+    skimmer_.stop();
+    skimmerPanel_->clear();
+}
+
 // --- LoTW --------------------------------------------------------------------
 
 void QtMainWindow::onLotwUpload() {
@@ -768,6 +842,8 @@ void QtMainWindow::startAudioStream() {
         QSignalBlocker block(audioAction_);
         audioAction_->setChecked(true);
     }
+    if (skimmer_.isRunning())  // re-sync the skimmer to the (possibly new) rate
+        startSkimmer();
 }
 
 void QtMainWindow::onAudioSettings() {
@@ -1033,6 +1109,21 @@ void QtMainWindow::loadSettings() {
                 a->setChecked(true);
                 break;
             }
+
+    // CW-skimmer dock placement + visibility.
+    const Qt::DockWidgetArea skArea = dockAreaFromString(cfg().skimmerDock);
+    addDockWidget(skArea, skimmerDock_);
+    skimmerDock_->setVisible(cfg().skimmerVisible);  // fires visibilityChanged -> startSkimmer
+    if (cfg().skimmerVisible && cfg().skimmerPanelPos > 0) {
+        pendingSkimmerDockSize_   = cfg().skimmerPanelPos;
+        pendingSkimmerDockOrient_ = isHorizontalArea(skArea) ? Qt::Horizontal : Qt::Vertical;
+    }
+    if (skimmerDockGroup_)
+        for (QAction* a : skimmerDockGroup_->actions())
+            if (a->data().toString().toStdString() == cfg().skimmerDock) {
+                a->setChecked(true);
+                break;
+            }
 }
 
 void QtMainWindow::saveSettings() {
@@ -1059,6 +1150,17 @@ void QtMainWindow::saveSettings() {
         const int sz = isHorizontalArea(rigArea) ? rigDock_->width() : rigDock_->height();
         if (sz > 0)
             cfg().rigPanelPos = sz;
+    }
+
+    // Same for the skimmer dock.
+    const Qt::DockWidgetArea skArea = dockWidgetArea(skimmerDock_);
+    if (skArea != Qt::NoDockWidgetArea)
+        cfg().skimmerDock = stringFromDockArea(skArea);
+    cfg().skimmerVisible = skimmerDock_->isVisible();
+    if (cfg().skimmerVisible) {
+        const int sz = isHorizontalArea(skArea) ? skimmerDock_->width() : skimmerDock_->height();
+        if (sz > 0)
+            cfg().skimmerPanelPos = sz;
     }
     cfg().store(ini);
     if (auto* p = currentPage())
@@ -1115,11 +1217,13 @@ void QtMainWindow::restoreDockSize() {
     // dock params are known). resizeDocks only sticks once the window is laid
     // out, so neither can run pre-show.
     if (dockSizeRestored_ || !isVisible() ||
-        (pendingDockSize_ <= 0 && pendingRigDockSize_ <= 0))
+        (pendingDockSize_ <= 0 && pendingRigDockSize_ <= 0 && pendingSkimmerDockSize_ <= 0))
         return;
     dockSizeRestored_ = true;
     if (pendingDockSize_ > 0)
         resizeDocks({dxDock_}, {pendingDockSize_}, pendingDockOrient_);
     if (pendingRigDockSize_ > 0)
         resizeDocks({rigDock_}, {pendingRigDockSize_}, pendingRigDockOrient_);
+    if (pendingSkimmerDockSize_ > 0)
+        resizeDocks({skimmerDock_}, {pendingSkimmerDockSize_}, pendingSkimmerDockOrient_);
 }

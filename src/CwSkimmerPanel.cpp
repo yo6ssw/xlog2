@@ -1,0 +1,216 @@
+#include "CwSkimmerPanel.h"
+
+#include "UiUtil.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstdio>
+#include <cstring>
+#include <memory>
+#include <vector>
+
+namespace {
+
+// Intensity (0..1) -> a black→blue→cyan→yellow→white waterfall colormap, packed
+// as 0x00RRGGBB for a Cairo RGB24 surface.
+uint32_t heat(float v) {
+    v = std::clamp(v, 0.0f, 1.0f);
+    float r, g, b;
+    if (v < 0.25f)      { r = 0;              g = 0;               b = v / 0.25f; }
+    else if (v < 0.5f)  { r = 0;              g = (v - 0.25f) * 4;  b = 1; }
+    else if (v < 0.75f) { r = (v - 0.5f) * 4; g = 1;               b = 1 - (v - 0.5f) * 4; }
+    else                { r = 1;              g = 1;               b = (v - 0.75f) * 4; }
+    return (uint32_t(r * 255) << 16) | (uint32_t(g * 255) << 8) | uint32_t(b * 255);
+}
+
+}  // namespace
+
+CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
+    set_spacing(4);
+    ui::setMargin(*this, 4);
+
+    waterfall_.set_content_height(160);
+    waterfall_.set_vexpand(true);
+    waterfall_.set_draw_func(sigc::mem_fun(*this, &CwSkimmerPanel::onDrawWaterfall));
+    append(waterfall_);
+
+    // --- decode list: store -> selection -> view ---------------------------
+    store_     = Gio::ListStore<SkimmerItem>::create();
+    selection_ = Gtk::SingleSelection::create(store_);
+    selection_->set_autoselect(false);
+    selection_->set_can_unselect(true);
+    columnView_.set_model(selection_);
+    columnView_.add_css_class("data-table");
+    columnView_.set_show_column_separators(true);
+
+    columnView_.append_column(makeColumn("Freq", [](const SkimmerItem& i) { return i.freq.get_value(); }));
+    columnView_.append_column(makeColumn("WPM",  [](const SkimmerItem& i) { return i.wpm.get_value(); }));
+    columnView_.append_column(makeColumn("Text", [](const SkimmerItem& i) { return i.text.get_value(); }, true));
+    columnView_.append_column(makeColumn("Call", [](const SkimmerItem& i) { return i.call.get_value(); }));
+
+    auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    scroller->set_child(columnView_);
+    scroller->set_min_content_height(120);
+    append(*scroller);
+}
+
+Glib::RefPtr<Gtk::ColumnViewColumn> CwSkimmerPanel::makeColumn(
+    const Glib::ustring& title, std::function<Glib::ustring(const SkimmerItem&)> getter,
+    bool expand) {
+    auto factory = Gtk::SignalListItemFactory::create();
+    factory->signal_setup().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto* label = Gtk::make_managed<Gtk::Label>();
+        label->set_xalign(0.0);
+        li->set_child(*label);
+    });
+    // Bind the cell to the item's properties so it updates in place as more
+    // characters arrive. The per-listitem connections live in a map owned by the
+    // factory slots (see DxClusterPanel::makeCountColumn for why) and are
+    // disconnected on unbind so they never fire on a recycled/destroyed label.
+    auto conns =
+        std::make_shared<std::map<Gtk::ListItem*, std::vector<sigc::connection>>>();
+    factory->signal_bind().connect([getter, conns](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto* label = dynamic_cast<Gtk::Label*>(li->get_child());
+        auto* item  = dynamic_cast<SkimmerItem*>(li->get_item().get());
+        if (!label || !item)
+            return;
+        auto update = [label, item, getter]() { label->set_text(getter(*item)); };
+        update();
+        std::vector<sigc::connection> v;
+        v.push_back(item->freq.get_proxy().signal_changed().connect(update));
+        v.push_back(item->wpm.get_proxy().signal_changed().connect(update));
+        v.push_back(item->text.get_proxy().signal_changed().connect(update));
+        v.push_back(item->call.get_proxy().signal_changed().connect(update));
+        (*conns)[li.get()] = std::move(v);
+    });
+    factory->signal_unbind().connect([conns](const Glib::RefPtr<Gtk::ListItem>& li) {
+        auto it = conns->find(li.get());
+        if (it != conns->end()) {
+            for (auto& c : it->second)
+                c.disconnect();
+            conns->erase(it);
+        }
+    });
+    auto column = Gtk::ColumnViewColumn::create(title, factory);
+    column->set_resizable(true);
+    column->set_expand(expand);
+    return column;
+}
+
+void CwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
+                                  double maxHz) {
+    minHz_ = minHz;
+    maxHz_ = maxHz;
+    const int cols = static_cast<int>(mags.size());
+    if (cols <= 0)
+        return;
+    if (cols_ != cols) {
+        cols_ = cols;
+        pixels_.assign(static_cast<std::size_t>(cols) * kHistory, 0);
+    }
+    // Scroll down one row, write the newest line at the top.
+    std::memmove(pixels_.data() + cols_, pixels_.data(),
+                 static_cast<std::size_t>(cols_) * (kHistory - 1) * sizeof(uint32_t));
+    for (int x = 0; x < cols_; ++x)
+        pixels_[x] = heat(mags[x]);
+    waterfall_.queue_draw();
+}
+
+void CwSkimmerPanel::onDrawWaterfall(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h) {
+    cr->set_source_rgb(0, 0, 0);
+    cr->paint();
+    if (cols_ > 0 && !pixels_.empty()) {
+        const int stride =
+            Cairo::ImageSurface::format_stride_for_width(Cairo::Surface::Format::RGB24, cols_);
+        auto surf = Cairo::ImageSurface::create(
+            reinterpret_cast<unsigned char*>(pixels_.data()),
+            Cairo::Surface::Format::RGB24, cols_, kHistory, stride);
+        cr->save();
+        cr->scale(static_cast<double>(w) / cols_, static_cast<double>(h) / kHistory);
+        cr->set_source(surf, 0, 0);
+        cr->paint();
+        cr->restore();
+    }
+    if (maxHz_ <= minHz_)
+        return;
+    const double span = maxHz_ - minHz_;
+
+    // Frequency grid + axis labels every 500 Hz.
+    cr->set_font_size(10);
+    for (int hz = static_cast<int>(std::ceil(minHz_ / 500) * 500); hz < maxHz_; hz += 500) {
+        const double x = (hz - minHz_) / span * w;
+        cr->set_source_rgba(1, 1, 1, 0.15);
+        cr->move_to(x, 0);
+        cr->line_to(x, h);
+        cr->stroke();
+        cr->set_source_rgba(0.7, 0.7, 0.7, 1.0);
+        cr->move_to(x + 2, h - 3);
+        cr->show_text(std::to_string(hz));
+    }
+    // Callsign tags over the traces they were decoded from.
+    for (const auto& [hz, call] : labels_) {
+        if (hz < minHz_ || hz > maxHz_)
+            continue;
+        const double x = (hz - minHz_) / span * w;
+        cr->set_source_rgba(0, 0, 0, 0.6);
+        cr->rectangle(x + 2, 1, call.size() * 7.0 + 4, 14);
+        cr->fill();
+        cr->set_source_rgb(0.47, 1.0, 0.47);
+        cr->move_to(x + 4, 12);
+        cr->show_text(call);
+    }
+}
+
+void CwSkimmerPanel::updateChannel(int id, double hz, int wpm, const std::string& text,
+                                   const std::string& call) {
+    char freq[32];
+    std::snprintf(freq, sizeof(freq), "%d Hz", static_cast<int>(std::lround(hz)));
+    auto it = items_.find(id);
+    if (it == items_.end()) {
+        auto item = SkimmerItem::create();
+        item->id = id;
+        item->freq.set_value(freq);
+        item->wpm.set_value(std::to_string(wpm));
+        item->text.set_value(text);
+        item->call.set_value(call);
+        store_->append(item);
+        items_[id] = item;
+    } else {
+        it->second->freq.set_value(freq);
+        it->second->wpm.set_value(std::to_string(wpm));
+        it->second->text.set_value(text);
+        it->second->call.set_value(call);
+    }
+
+    // Refresh the waterfall callsign tags from the live channel set.
+    labels_.clear();
+    for (const auto& [cid, item] : items_) {
+        const std::string c = item->call.get_value().raw();
+        if (!c.empty()) {
+            const double f = std::atof(item->freq.get_value().raw().c_str());
+            labels_[f] = c;
+        }
+    }
+    waterfall_.queue_draw();
+}
+
+void CwSkimmerPanel::removeChannel(int id) {
+    auto it = items_.find(id);
+    if (it == items_.end())
+        return;
+    for (guint i = 0; i < store_->get_n_items(); ++i)
+        if (store_->get_item(i).get() == it->second.get()) {
+            store_->remove(i);
+            break;
+        }
+    items_.erase(it);
+}
+
+void CwSkimmerPanel::clear() {
+    store_->remove_all();
+    items_.clear();
+    labels_.clear();
+    std::fill(pixels_.begin(), pixels_.end(), 0);
+    waterfall_.queue_draw();
+}

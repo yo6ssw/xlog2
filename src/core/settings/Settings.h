@@ -58,6 +58,11 @@ struct Settings {
     int         audioChannels   = 1;      // must match the server
     std::string audioDevice     = "default";  // ALSA playback device
 
+    // [skimmer] — CW Skimmer panel (decodes the rig-audio stream's passband)
+    std::string skimmerDock     = "left";   // top|bottom|left|right
+    bool        skimmerVisible  = false;
+    int         skimmerPanelPos = 0;         // saved dock/divider size (0 = unset)
+
     // [dxcluster]
     std::string dxHost;
     int         dxPort = 7300;
