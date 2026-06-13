@@ -79,10 +79,91 @@ const std::unordered_map<std::string, char>& morseTable() {
     return t;
 }
 
-char decodeSymbol(const std::string& sym) {
+int editDistance(const std::string& a, const std::string& b) {
+    const std::size_t n = a.size(), m = b.size();
+    std::vector<int> prev(m + 1), cur(m + 1);
+    for (std::size_t j = 0; j <= m; ++j) prev[j] = static_cast<int>(j);
+    for (std::size_t i = 1; i <= n; ++i) {
+        cur[0] = static_cast<int>(i);
+        for (std::size_t j = 1; j <= m; ++j) {
+            const int sub = prev[j - 1] + (a[i - 1] == b[j - 1] ? 0 : 1);
+            cur[j] = std::min({sub, prev[j] + 1, cur[j - 1] + 1});
+        }
+        std::swap(prev, cur);
+    }
+    return prev[m];
+}
+
+// Decode one character. This is the heart borrowed from fldigi's SOM decoder:
+// rather than hard-classifying each mark into a dit/dash and looking the string
+// up (which drops or mis-decodes the whole character when one element sits near
+// the dit/dah boundary), match the *raw mark durations* against each Morse
+// pattern's ideal duration vector and pick the best fit. Deferring the dit/dah
+// decision to the character level lets the whole character's timing resolve a
+// borderline element — and the decoder *abstains* on genuine ambiguity instead
+// of guessing.
+//
+//   dur       : the char's mark durations (hops), one per element
+//   sym       : the same marks hard-classified to '.'/'-' (exact-lookup fallback)
+//   dit, dah  : learned dit / dah length references (hops); dah defaults to 2.5x
+//
+// Order: confident SOM (same length) -> exact string lookup (old behaviour) ->
+// edit-distance recovery (length errors). So it is never worse than exact lookup.
+char decodeChar(const std::vector<float>& dur, const std::string& sym,
+                double dit, double dah, bool mature) {
     const auto& t = morseTable();
-    auto it = t.find(sym);
-    return it == t.end() ? '\0' : it->second;
+
+    // 1) SOM: nearest same-length pattern by per-element duration distance (mean
+    //    squared error in dit units). This is the primary decision *once the
+    //    channel is established* (`mature`: it has already cleanly decoded a couple
+    //    of characters, so the dit/dah references are settled) — only then is
+    //    deferring the per-element call to the character's timing more reliable
+    //    than a hard classification. During cold start the references are unsettled
+    //    and the SOM would manufacture wrong characters (polluting the callsign),
+    //    so it is skipped in favour of exact lookup until the channel proves real.
+    //    Accept only when the best fit is good and clearly ahead of the runner-up,
+    //    so ambiguous elements are left to abstain rather than be guessed.
+    if (mature && dit > 0.0 && dah > 0.0) {
+        double best = 1e9, second = 1e9;
+        char bestCh = '\0';
+        for (const auto& [pat, ch] : t) {
+            if (pat.size() != dur.size())
+                continue;
+            double dist = 0.0;
+            for (std::size_t i = 0; i < pat.size(); ++i) {
+                const double ideal = (pat[i] == '-') ? dah : dit;
+                const double e = (dur[i] - ideal) / dit;
+                dist += e * e;
+            }
+            dist /= pat.size();
+            if (dist < best) { second = best; best = dist; bestCh = ch; }
+            else if (dist < second) { second = dist; }
+        }
+        // Commit only to a good fit that is clearly ahead of the runner-up (a
+        // *ratio* margin, which scales with the error magnitude — so a pattern
+        // fitting ~2x better wins, while a near-tie abstains rather than guesses).
+        if (bestCh && best < 0.5 && second > best * 1.8)
+            return bestCh;
+    }
+
+    // 2) Exact lookup of the hard-classified string (the original primary path;
+    //    also the path taken during cold start before the SOM is trusted).
+    if (auto it = t.find(sym); it != t.end())
+        return it->second;
+
+    // 3) Edit-distance recovery for length errors (a merged/split element makes an
+    //    invalid pattern). Confident single edit only, and not on short symbols
+    //    where one error is genuinely ambiguous (E/T/I/A/N/M).
+    if (sym.size() < 4)
+        return '\0';
+    int eBest = 99, eSecond = 99;
+    char eCh = '\0';
+    for (const auto& [pat, ch] : t) {
+        const int d = editDistance(sym, pat);
+        if (d < eBest) { eSecond = eBest; eBest = d; eCh = ch; }
+        else if (d < eSecond) { eSecond = d; }
+    }
+    return (eBest <= 1 && eSecond > eBest) ? eCh : '\0';
 }
 
 // Does the last whitespace-delimited token of `text` look like a callsign?
@@ -143,7 +224,11 @@ struct Channel {
     double rotRe = 1.0, rotIm = 0.0; // per-sample LO rotation (from the bin freq)
     double f1Re = 0.0, f1Im = 0.0;   // low-pass stage 1
     double f2Re = 0.0, f2Im = 0.0;   // low-pass stage 2
-    double noisePow = 0.0;           // min-tracked key-up power (per-channel noise)
+    double noisePow = 0.0;           // gently-tracked key-up power; the decode threshold
+                                     // denominator (kept compressed for clean keying)
+    double snrFloor = 0.0;           // aggressively-tracked true noise floor, for the SNR
+                                     // gate only — reaches the real floor so peak/floor is a
+                                     // wide, meaningful SNR (separate from the decode noise)
     double peakPow  = 0.0;           // tracked key-down power; a ghost is an attenuated
                                      // artifact, so the stronger of two ghosts is the real one
 
@@ -154,14 +239,21 @@ struct Channel {
     // the first element is a dah (robust where a 2-means clustering collapses).
     double markUnit = 0.0;
     double gapUnit  = 0.0;
+    double dahUnit  = 0.0;    // adaptive dah-mark length (hops), the SOM's "3-unit"
+                              // reference; learned from dahs because the finite
+                              // window compresses the measured dah:dit ratio below 3
 
-    std::string symbol;       // elements of the character in progress
+    std::string symbol;       // hard dit/dash classification (exact-lookup fallback)
+    std::vector<float> elemHops;  // raw mark durations (hops) of the char in progress,
+                                  // for the duration-vector (SOM) character match
     std::string text;         // rolling decoded text
     std::string call;
     int    richChars = 0;     // count of decoded multi-element chars (real-CW evidence)
     bool   charDone = false;  // current gap already closed the character?
     bool   wordDone = false;  // current gap already added a word space?
     int    idleHops = 0;      // finalised quiet frames since the last character
+    int    carrierGone = 0;   // frames since the carrier peak was clearly present;
+                              // a robust transmission-boundary signal (noise-immune)
     int    wpm = 0;
     bool   shown = false;     // has onChannel been emitted for this id?
     bool   dirty = false;     // text/wpm/call changed
@@ -169,22 +261,24 @@ struct Channel {
 
 void appendChar(Channel& ch, char c) {
     ch.text.push_back(c);
-    if (ch.text.size() > 60)
-        ch.text.erase(0, ch.text.size() - 60);
+    if (ch.text.size() > 100)   // keep only the last 100 decoded chars in the UI
+        ch.text.erase(0, ch.text.size() - 100);
     if (std::string call = callsignIn(ch.text); !call.empty())
         ch.call = call;
 }
 
 void closeSymbol(Channel& ch) {
-    if (!ch.symbol.empty()) {
-        if (char c = decodeSymbol(ch.symbol)) {
+    if (!ch.elemHops.empty()) {
+        if (char c = decodeChar(ch.elemHops, ch.symbol, ch.markUnit, ch.dahUnit,
+                                ch.richChars >= 2)) {
             appendChar(ch, c);
             // A valid character of two or more elements is evidence of real CW —
             // a lone band-noise burst only ever makes a one-element 'E' or 'T'.
-            if (ch.symbol.size() >= 2)
+            if (ch.elemHops.size() >= 2)
                 ++ch.richChars;
         }
         ch.symbol.clear();
+        ch.elemHops.clear();
         ch.dirty = true;
     }
 }
@@ -198,14 +292,22 @@ void unitTrack(double& ref, double x) {
     else ref += 0.02 * (x - ref);
 }
 
-// A finalised mark (key-down run) just ended: append a dit or dah and refine the
-// dit length from dits only.
+// A finalised mark (key-down run) just ended. Record its raw duration for the
+// SOM character match, and hard-classify it (dit/dah) to maintain the dit and dah
+// length references and the fallback string. The hard call is only for reference
+// tracking + fallback; the actual character decision is the SOM's (decodeChar).
 void decodeMark(Channel& ch, int durHops, double hopMs) {
     const double d = std::max(1, durHops);
     const bool dah = ch.markUnit > 0.0 && d > 1.8 * ch.markUnit;
-    if (!dah) unitTrack(ch.markUnit, d);
-    else if (ch.markUnit <= 0.0) ch.markUnit = d;  // first-ever mark seeds even if a dah
+    if (!dah) {
+        unitTrack(ch.markUnit, d);             // dits define the dit length
+    } else {
+        if (ch.markUnit <= 0.0) ch.markUnit = d;  // first-ever mark seeds even if a dah
+        // Track the dah length toward the dah cluster (EMA; the SOM's "3-unit" ref).
+        ch.dahUnit = ch.dahUnit <= 0.0 ? d : ch.dahUnit + 0.2 * (d - ch.dahUnit);
+    }
     ch.symbol.push_back(dah ? '-' : '.');
+    ch.elemHops.push_back(static_cast<float>(d));
     const double unit = (ch.markUnit + (ch.gapUnit > 0 ? ch.gapUnit : ch.markUnit)) / 2.0;
     ch.wpm = std::clamp(static_cast<int>(std::lround(
                  1200.0 / std::max(1.0, unit * hopMs))), 5, 80);
@@ -341,6 +443,10 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
     const double dispMaxHz = kMax * binHz;
 
     const int    removeAfterHops = static_cast<int>(30000.0 / hopMs);  // drop after 30 s idle
+    // After this much continuous silence the next keying is a new transmission —
+    // likely a different op on the same frequency — so the channel re-learns its
+    // speed and power from scratch instead of carrying the previous station's.
+    const int    newStationHops = static_cast<int>(3000.0 / hopMs);    // 3 s gap
     const int    spawnPersist = 3;     // frames a peak must persist before a channel spawns
     // Channels must be at least the per-channel receiver's bandwidth apart, or two
     // of them sit inside one carrier's passband and decode it identically (the
@@ -480,6 +586,23 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
             for (auto it = channels.begin(); it != channels.end();) {
                 Channel& ch = it->second;
 
+                // Carrier-presence tracking off the FFT peak (noise-immune, unlike the
+                // decoded key-state): a real op keys a clear peak every dit/dah, so the
+                // counter stays low through a transmission and only climbs in true
+                // silence. After a transmission's worth of silence, reset the
+                // per-station adaptive state once so the next op on this frequency is
+                // learned fresh (speed + power), instead of carrying the previous
+                // station's references (which would garble a slower/weaker op).
+                if (mag[ch.bin] > spawnTh)
+                    ch.carrierGone = 0;
+                else
+                    ++ch.carrierGone;
+                if (ch.carrierGone == newStationHops) {
+                    ch.markUnit = ch.gapUnit = ch.dahUnit = 0.0;
+                    ch.peakPow  = ch.snrFloor;
+                    ch.call.clear();
+                }
+
                 // Narrowband receiver: down-convert this hop's samples to baseband
                 // at the carrier, 2-stage low-pass, and take the output power as
                 // the keying envelope. The low-pass (not the FFT window) sets the
@@ -498,17 +621,36 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 const double lm = std::sqrt(ch.loRe * ch.loRe + ch.loIm * ch.loIm);
                 if (lm > 1e-9) { ch.loRe /= lm; ch.loIm /= lm; }  // keep the phasor unit-length
 
-                // Per-channel noise = min-tracked key-up power (down fast, up slow).
+                // Per-channel noise floor: fall fast so it reaches the true floor
+                // within a key-up gap, rise very slowly so a held mark barely lifts
+                // it. A floor that doesn't settle would compress the SNR and blur
+                // strong vs weak signals.
                 if (ch.noisePow <= 0.0) ch.noisePow = P;
                 else if (P < ch.noisePow) ch.noisePow += 0.1 * (P - ch.noisePow);
                 else ch.noisePow += 0.002 * (P - ch.noisePow);
+                // Separate true-floor tracker for the SNR gate: fall fast to the real
+                // floor in a key-up gap, rise very slowly so a held mark barely lifts
+                // it — a settled floor makes peak/floor a wide, honest SNR.
+                if (ch.snrFloor <= 0.0) ch.snrFloor = P;
+                else if (P < ch.snrFloor) ch.snrFloor += 0.5 * (P - ch.snrFloor);
+                else ch.snrFloor += 0.0003 * (P - ch.snrFloor);
                 // Track the key-down level (fast up, slow down) as a strength proxy
                 // (the per-channel SNR numerator, and the ghost-dedup tiebreak).
                 if (P > ch.peakPow) ch.peakPow = P;
                 else ch.peakPow += 0.001 * (P - ch.peakPow);
                 const double zdb = 10.0 * std::log10((P + 1e-12) / (ch.noisePow + 1e-12));
                 // Soft tone-present probability — never a hard per-frame decision.
-                const double pOn = 1.0 / (1.0 + std::exp(-(zdb - kZ0) / kZs));
+                double pOn = 1.0 / (1.0 + std::exp(-(zdb - kZ0) / kZs));
+                // Min-SNR gate on the decoder: a channel whose characteristic SNR
+                // (its keyed peak level vs its own noise floor) is below the floor is
+                // not decoded at all — its keying is forced to key-up (silence), so
+                // only signals over the SNR are considered. Channels above the floor
+                // keep the original, well-tuned per-frame dynamics, so raising the
+                // slider never degrades the decode of the signals it keeps.
+                const double chSnr = 10.0 * std::log10((ch.peakPow + 1e-12) /
+                                                       (ch.snrFloor + 1e-12));
+                if (chSnr < minSnr)
+                    pOn = 0.0;
                 const double eOn  = std::log(std::max(1e-4, pOn));
                 const double eOff = std::log(std::max(1e-4, 1.0 - pOn));
 
@@ -560,26 +702,18 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                     ch.keyHist = (ch.keyHist << 1) | static_cast<unsigned __int128>(st ? 1 : 0);
                 }
 
-                // Per-channel SNR: the keyed level vs this channel's own noise.
-                // peakPow's slow decay gives it hysteresis, so it stays high through
-                // element/word gaps and only falls once the signal is truly gone.
-                const double snrDb = 10.0 * std::log10((ch.peakPow + 1e-12) /
-                                                       (ch.noisePow + 1e-12));
-
-                // Drop on long silence, or — once shown — when the signal fades
-                // below the minimum SNR (also removes channels live when the
-                // operator raises the slider).
-                if (ch.idleHops > removeAfterHops || (ch.shown && snrDb < minSnr)) {
+                if (ch.idleHops > removeAfterHops) {
                     if (ch.shown)
                         postRemoved(it->first);
                     it = channels.erase(it);
                     continue;
                 }
                 // Surface a channel only once it has shown real-CW structure (a
-                // couple of multi-element characters) AND clears the minimum SNR —
-                // a noise burst that makes a lone 'E'/'T', or any low-SNR artifact,
-                // never qualifies and stays hidden. Thereafter, re-emit on change.
-                if (ch.shown || (ch.richChars >= 2 && snrDb >= minSnr)) {
+                // couple of multi-element characters); a noise burst that only ever
+                // makes a lone 'E'/'T' never qualifies and stays hidden. Below the
+                // min-SNR floor the keying isn't decoded at all (see above), so a
+                // weak channel produces no characters and never surfaces here.
+                if (ch.shown || ch.richChars >= 2) {
                     if (!ch.shown || ch.dirty) {
                         ch.shown = true;
                         ch.dirty = false;
