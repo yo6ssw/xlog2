@@ -93,6 +93,15 @@ CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     snrBox->append(*snrLabel_);
     append(*snrBox);
 
+    // --- Paranoid: only show channels whose call is confirmed in the master DB --
+    knownOnly_ = Gtk::make_managed<Gtk::CheckButton>("Show only calls in database");
+    knownOnly_->set_sensitive(false);   // until a DB is loaded (see setCallDbInfo)
+    knownOnly_->signal_toggled().connect([this]() {
+        if (!updatingKnown_)
+            signalKnownOnly_.emit(knownOnly_->get_active());
+    });
+    append(*knownOnly_);
+
     // --- decode list: store -> selection -> view ---------------------------
     store_     = Gio::ListStore<SkimmerItem>::create();
     selection_ = Gtk::SingleSelection::create(store_);
@@ -292,4 +301,17 @@ void CwSkimmerPanel::setMinSnr(int db) {
     snrScale_->set_value(db);
     snrLabel_->set_text(std::to_string(db) + " dB");
     updatingSnr_ = false;
+}
+
+void CwSkimmerPanel::setKnownOnly(bool on) {
+    updatingKnown_ = true;
+    knownOnly_->set_active(on);
+    updatingKnown_ = false;
+}
+
+void CwSkimmerPanel::setCallDbInfo(bool loaded, std::size_t count) {
+    knownOnly_->set_sensitive(loaded);
+    knownOnly_->set_label(loaded
+        ? "Show only calls in database (" + std::to_string(count) + ")"
+        : "Show only calls in database (none loaded)");
 }

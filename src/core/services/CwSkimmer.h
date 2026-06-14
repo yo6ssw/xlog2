@@ -10,6 +10,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 // What the skimmer analyses. sampleRate/channels must match the PCM that is fed
@@ -70,6 +71,19 @@ public:
     // signal sits well above its noise. Thread-safe; live; persisted by the shell.
     void setMinSnr(float db) { minSnrDb_.store(db, std::memory_order_relaxed); }
 
+    // Load a Super-Check-Partial master-callsign list (one call per line, e.g.
+    // MASTER.SCP) used to validate and correct decoded callsigns — the single
+    // biggest accuracy lever in VE3NEA's CW Skimmer. A decoded call that matches
+    // the list is "known"; one a single edit away from exactly one list entry is
+    // corrected to it; otherwise it stays an unvalidated guess. Returns the number
+    // of calls loaded (0 if the file is absent/unreadable). Thread-safe.
+    std::size_t loadCallsignDb(const std::string& path);
+    bool hasCallsignDb() const;
+
+    // Paranoid mode: only surface channels whose callsign is confirmed in the DB
+    // (no effect when no DB is loaded). Thread-safe; live; persisted by the shell.
+    void setKnownCallsOnly(bool on) { knownOnly_.store(on, std::memory_order_relaxed); }
+
     // Feed decoded PCM (int16, interleaved). Called from the audio worker thread;
     // downmixes to mono and queues it. No-op when not running or when the rate
     // does not match the configured one.
@@ -85,12 +99,19 @@ private:
     std::atomic<bool>  running_{false};
     std::atomic<float> gateDb_{0.0f};    // detection gating offset (dB); see setGate
     std::atomic<float> minSnrDb_{0.0f};  // minimum per-channel SNR (dB); see setMinSnr
+    std::atomic<bool>  knownOnly_{false};// Paranoid: surface only DB-confirmed calls
     std::thread        thread_;
 
     std::mutex              mu_;
     std::condition_variable cv_;
     std::vector<float>      queue_;   // mono samples awaiting analysis
     int                     rate_ = 0;  // configured rate (guards pushPcm)
+
+    // Master-callsign list (SCP). An immutable set behind a shared_ptr so the
+    // worker can grab a reference cheaply while loadCallsignDb() can swap in a new
+    // one under the mutex without disturbing an in-flight decode.
+    std::shared_ptr<const std::unordered_set<std::string>> callDb_;
+    mutable std::mutex      dbMu_;
 
     // Liveness token for posted closures (see the other services): recreated on
     // each start so a late callback from a previous session is dropped.

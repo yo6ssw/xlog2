@@ -2,12 +2,17 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cmath>
+#include <fstream>
 #include <map>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace {
+
+using CallSet = std::unordered_set<std::string>;
 
 constexpr int kDisplayCols = 256;  // waterfall width the panel renders
 
@@ -166,9 +171,44 @@ char decodeChar(const std::vector<float>& dur, const std::string& sym,
     return (eBest <= 1 && eSecond > eBest) ? eCh : '\0';
 }
 
-// Does the last whitespace-delimited token of `text` look like a callsign?
-// (Letters + digits, 3..10 chars, at least one of each, only [A-Z0-9/].)
-std::string callsignIn(const std::string& text) {
+// Find the master-callsign list entry for `tok`: an exact match (so `known`
+// becomes true and the call is returned unchanged), or — if there is no exact
+// match — a unique entry exactly one edit away (corrected, also `known`). Edit-
+// distance-1 variants (delete/substitute/insert over the call alphabet) are
+// generated and looked up in the set, which is far cheaper than scanning a
+// 100k-entry list; the correction is accepted only when exactly one distinct
+// entry matches, so an ambiguous near-call is never silently changed.
+std::string lookupCall(const std::string& tok, const CallSet& db, bool& known) {
+    known = false;
+    if (db.count(tok)) { known = true; return tok; }
+    static const char alpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/";
+    CallSet hits;
+    std::string v;
+    for (std::size_t i = 0; i < tok.size(); ++i) {       // deletions
+        v = tok; v.erase(i, 1);
+        if (db.count(v)) hits.insert(v);
+    }
+    for (std::size_t i = 0; i < tok.size(); ++i)          // substitutions
+        for (const char* a = alpha; *a; ++a) {
+            if (*a == tok[i]) continue;
+            v = tok; v[i] = *a;
+            if (db.count(v)) hits.insert(v);
+        }
+    for (std::size_t i = 0; i <= tok.size(); ++i)         // insertions
+        for (const char* a = alpha; *a; ++a) {
+            v = tok; v.insert(v.begin() + i, *a);
+            if (db.count(v)) hits.insert(v);
+        }
+    if (hits.size() == 1) { known = true; return *hits.begin(); }
+    return tok;  // not in the DB and no unambiguous correction — keep the guess
+}
+
+// The last whitespace-delimited token of `text`, if it looks like a callsign
+// (letters + digits, 3..10 chars, at least one of each, only [A-Z0-9/]). When a
+// master-callsign set is supplied it is also validated/corrected against it and
+// `known` reports whether the result is confirmed in the list.
+std::string callsignIn(const std::string& text, const CallSet* db, bool& known) {
+    known = false;
     std::size_t end = text.find_last_not_of(' ');
     if (end == std::string::npos)
         return {};
@@ -186,7 +226,11 @@ std::string callsignIn(const std::string& text) {
         else if (c != '/')
             return {};
     }
-    return (hasDigit && hasAlpha) ? tok : std::string{};
+    if (!(hasDigit && hasAlpha))
+        return {};
+    if (db && !db->empty())
+        return lookupCall(tok, *db, known);
+    return tok;  // no DB: heuristic match only, never "known"
 }
 
 // Frames of look-ahead for the per-channel ON/OFF Viterbi. The most-probable
@@ -257,21 +301,25 @@ struct Channel {
     int    wpm = 0;
     bool   shown = false;     // has onChannel been emitted for this id?
     bool   dirty = false;     // text/wpm/call changed
+    bool   callKnown = false; // ch.call is confirmed in the master-callsign DB
 };
 
-void appendChar(Channel& ch, char c) {
+void appendChar(Channel& ch, char c, const CallSet* db) {
     ch.text.push_back(c);
     if (ch.text.size() > 100)   // keep only the last 100 decoded chars in the UI
         ch.text.erase(0, ch.text.size() - 100);
-    if (std::string call = callsignIn(ch.text); !call.empty())
+    bool known = false;
+    if (std::string call = callsignIn(ch.text, db, known); !call.empty()) {
         ch.call = call;
+        ch.callKnown = known;
+    }
 }
 
-void closeSymbol(Channel& ch) {
+void closeSymbol(Channel& ch, const CallSet* db) {
     if (!ch.elemHops.empty()) {
         if (char c = decodeChar(ch.elemHops, ch.symbol, ch.markUnit, ch.dahUnit,
                                 ch.richChars >= 2)) {
-            appendChar(ch, c);
+            appendChar(ch, c, db);
             // A valid character of two or more elements is evidence of real CW —
             // a lone band-noise burst only ever makes a one-element 'E' or 'T'.
             if (ch.elemHops.size() >= 2)
@@ -318,16 +366,16 @@ void decodeMark(Channel& ch, int durHops, double hopMs) {
 // inter-character then word thresholds, close the pending character and add a
 // space — once each. Doing this *during* the gap (not when the next mark starts)
 // means the last character of a transmission is emitted instead of being lost.
-void growGap(Channel& ch, int gapHops) {
+void growGap(Channel& ch, int gapHops, const CallSet* db) {
     if (ch.markUnit <= 0.0) return;  // no unit reference yet (lead-in)
     const double gu = ch.gapUnit > 0.0 ? ch.gapUnit : ch.markUnit;
     const double units = gapHops / gu;
     if (!ch.charDone && units >= 2.0) {  // inter-character gap
-        closeSymbol(ch);
+        closeSymbol(ch, db);
         ch.charDone = true;
     }
     if (!ch.wordDone && units >= 6.0 && !ch.text.empty() && ch.text.back() != ' ') {
-        appendChar(ch, ' ');
+        appendChar(ch, ' ', db);
         ch.wordDone = true;
         ch.dirty = true;
     }
@@ -368,6 +416,45 @@ void CwSkimmer::stop() {
     std::lock_guard<std::mutex> lk(mu_);
     queue_.clear();
     rate_ = 0;
+}
+
+std::size_t CwSkimmer::loadCallsignDb(const std::string& path) {
+    std::ifstream in(path);
+    if (!in)
+        return 0;
+    auto set = std::make_shared<CallSet>();
+    std::string line;
+    while (std::getline(in, line)) {
+        // One call per line; tolerate comments/headers and stray whitespace or
+        // comma separators. Uppercase and keep only valid call characters.
+        for (char& c : line) c = static_cast<char>(std::toupper((unsigned char)c));
+        std::size_t i = 0;
+        while (i < line.size()) {
+            if (line[i] == '#') break;  // comment to end of line
+            std::size_t j = i;
+            while (j < line.size()) {
+                const char c = line[j];
+                if ((c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '/') ++j;
+                else break;
+            }
+            if (j > i) {
+                const std::string tok = line.substr(i, j - i);
+                if (tok.size() >= 3 && tok.size() <= 12)
+                    set->insert(tok);
+            }
+            i = (j > i) ? j : i + 1;
+        }
+    }
+    {
+        std::lock_guard<std::mutex> lk(dbMu_);
+        callDb_ = set;
+    }
+    return set->size();
+}
+
+bool CwSkimmer::hasCallsignDb() const {
+    std::lock_guard<std::mutex> lk(dbMu_);
+    return callDb_ && !callDb_->empty();
 }
 
 void CwSkimmer::pushPcm(const std::int16_t* samples, int frames, int channels,
@@ -484,6 +571,16 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 break;
             chunk.swap(queue_);
         }
+        // Grab the current master-callsign set + Paranoid flag once per chunk
+        // (cheap shared_ptr copy + atomic read), so a mid-run loadCallsignDb()
+        // swap is picked up without locking inside the per-character decode.
+        std::shared_ptr<const CallSet> db;
+        {
+            std::lock_guard<std::mutex> lk(dbMu_);
+            db = callDb_;
+        }
+        const CallSet* dbp = db ? db.get() : nullptr;
+        const bool knownOnly = knownOnly_.load(std::memory_order_relaxed);
         if (decim == 1) {
             buf.insert(buf.end(), chunk.begin(), chunk.end());
         } else {
@@ -601,6 +698,7 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                     ch.markUnit = ch.gapUnit = ch.dahUnit = 0.0;
                     ch.peakPow  = ch.snrFloor;
                     ch.call.clear();
+                    ch.callKnown = false;
                 }
 
                 // Narrowband receiver: down-convert this hop's samples to baseband
@@ -684,7 +782,7 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                         ch.runHops = 1;
                     } else if (st == ch.curState) {
                         ++ch.runHops;
-                        if (!ch.curState) growGap(ch, ch.runHops);  // close char/word as silence grows
+                        if (!ch.curState) growGap(ch, ch.runHops, dbp);  // close char/word as silence grows
                     } else if (st) {                 // gap -> mark: the gap just ended
                         const double gu = ch.gapUnit > 0.0 ? ch.gapUnit : ch.markUnit;
                         if (ch.markUnit > 0.0 && ch.runHops < 1.8 * gu)
@@ -702,7 +800,11 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                     ch.keyHist = (ch.keyHist << 1) | static_cast<unsigned __int128>(st ? 1 : 0);
                 }
 
-                if (ch.idleHops > removeAfterHops) {
+                // Drop on long silence; under Paranoid (known-only), also drop a
+                // shown channel that has gone quiet (~new-station gap) without ever
+                // confirming a callsign — so the list stays calls-in-DB only.
+                if (ch.idleHops > removeAfterHops ||
+                    (knownOnly && ch.shown && !ch.callKnown && ch.idleHops > newStationHops)) {
                     if (ch.shown)
                         postRemoved(it->first);
                     it = channels.erase(it);
@@ -712,8 +814,10 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 // couple of multi-element characters); a noise burst that only ever
                 // makes a lone 'E'/'T' never qualifies and stays hidden. Below the
                 // min-SNR floor the keying isn't decoded at all (see above), so a
-                // weak channel produces no characters and never surfaces here.
-                if (ch.shown || ch.richChars >= 2) {
+                // weak channel produces no characters and never surfaces here. Under
+                // Paranoid, hold a channel back until its callsign is DB-confirmed.
+                const bool eligible = ch.richChars >= 2 && (!knownOnly || ch.callKnown);
+                if (ch.shown || eligible) {
                     if (!ch.shown || ch.dirty) {
                         ch.shown = true;
                         ch.dirty = false;

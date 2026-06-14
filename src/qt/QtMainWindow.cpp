@@ -165,6 +165,17 @@ QtMainWindow::QtMainWindow()
         cfg().skimmerMinSnr = db;
         skimmer_.setMinSnr(static_cast<float>(db));
     });
+    connect(skimmerPanel_, &QtCwSkimmerPanel::knownOnlyChanged, this, [this](bool on) {
+        cfg().skimmerKnownOnly = on;
+        skimmer_.setKnownCallsOnly(on);
+    });
+    // Master-callsign list (Super Check Partial), used to validate/correct decoded
+    // callsigns. Optional: drop a MASTER.SCP at $XDG_DATA_HOME/xlog2/master.scp.
+    {
+        const std::size_t n = skimmer_.loadCallsignDb(
+            envPath("XDG_DATA_HOME", ".local/share") + "/master.scp");
+        skimmerPanel_->setCallDbInfo(n > 0, n);
+    }
 
     buildMenus();
 
@@ -1126,6 +1137,8 @@ void QtMainWindow::loadSettings() {
     skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
     skimmerPanel_->setMinSnr(cfg().skimmerMinSnr);
     skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
+    skimmerPanel_->setKnownOnly(cfg().skimmerKnownOnly);
+    skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
 
     // CW-skimmer dock placement + visibility.
     const Qt::DockWidgetArea skArea = dockAreaFromString(cfg().skimmerDock);

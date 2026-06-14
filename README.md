@@ -48,7 +48,9 @@ you can switch between them freely.
 - **CW Skimmer** — a dockable multi-channel CW decoder: it decodes every CW
   signal in the rig-audio passband at once, showing a waterfall with callsign
   labels plus a per-signal decode table (frequency / WPM / text / call), with
-  Gate and Min-SNR controls. See
+  Gate and Min-SNR controls. Decoded callsigns are validated/corrected against an
+  optional Super-Check-Partial list (drop a `MASTER.SCP` at
+  `$XDG_DATA_HOME/xlog2/master.scp`), with a "calls in database only" mode. See
   [docs/cw-skimmer-decoder.md](docs/cw-skimmer-decoder.md) for how it works.
 - **LoTW** — *Upload* signs/submits new QSOs via ARRL's `tqsl`; *Download
   confirmations* fetches confirmed QSOs and marks matches (call+band+mode+date).

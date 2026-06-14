@@ -25,11 +25,15 @@ public:
     void removeChannel(int id);
     void clear();
 
-    // Set a slider without emitting its signal (restore from settings).
+    // Set a control without emitting its signal (restore from settings).
     void setGate(int db);
     void setMinSnr(int db);
-    sigc::signal<void(int)>& signalGate()   { return signalGate_; }    // operator moved the gate
-    sigc::signal<void(int)>& signalMinSnr() { return signalMinSnr_; }  // ...the min-SNR slider
+    void setKnownOnly(bool on);
+    // Label the Paranoid check button with the loaded DB size, or disable if none.
+    void setCallDbInfo(bool loaded, std::size_t count);
+    sigc::signal<void(int)>&  signalGate()      { return signalGate_; }     // moved the gate
+    sigc::signal<void(int)>&  signalMinSnr()    { return signalMinSnr_; }   // moved min-SNR
+    sigc::signal<void(bool)>& signalKnownOnly() { return signalKnownOnly_; }// toggled DB-only
 
 private:
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
@@ -42,14 +46,17 @@ private:
     Gtk::Label*      gateLabel_ = nullptr;
     Gtk::Scale*      snrScale_  = nullptr;
     Gtk::Label*      snrLabel_  = nullptr;
+    Gtk::CheckButton* knownOnly_ = nullptr;
     bool             updatingGate_ = false;  // suppress emission during a programmatic set
     bool             updatingSnr_  = false;
+    bool             updatingKnown_ = false;
     Gtk::ColumnView  columnView_;
     Glib::RefPtr<Gio::ListStore<SkimmerItem>> store_;
     Glib::RefPtr<Gtk::SingleSelection>        selection_;
     std::map<int, Glib::RefPtr<SkimmerItem>>  items_;  // id -> live row
-    sigc::signal<void(int)> signalGate_;
-    sigc::signal<void(int)> signalMinSnr_;
+    sigc::signal<void(int)>  signalGate_;
+    sigc::signal<void(int)>  signalMinSnr_;
+    sigc::signal<void(bool)> signalKnownOnly_;
 
     // Waterfall pixel history (cols_ wide, kHistory tall; RGB24, newest at top).
     static constexpr int kHistory = 400;

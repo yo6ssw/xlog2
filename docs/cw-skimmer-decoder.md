@@ -247,13 +247,31 @@ Three guards keep it honest:
   errors from a merged/split element (a single confident edit on a ≥4-element
   symbol, e.g. `------`→`0`). So it is never worse than the old exact lookup.
 
-### 3.7 Callsign extraction
+### 3.7 Callsign extraction + master-callsign validation
 
-`callsignIn()` pattern-matches the last whitespace-delimited token of the decoded
-text: 3–10 chars of `[A-Z0-9/]` with at least one letter and one digit. It is a
-**heuristic**, not a validator. The single biggest accuracy lever in the real CW
-Skimmer — checking against a master callsign / SCP dictionary — is a deliberate
-**TODO** here.
+`callsignIn()` first pattern-matches the last whitespace-delimited token of the
+decoded text: 3–10 chars of `[A-Z0-9/]` with at least one letter and one digit.
+
+If a **master-callsign list** (Super-Check-Partial, e.g. `MASTER.SCP`) has been
+loaded — `CwSkimmer::loadCallsignDb()`, from `$XDG_DATA_HOME/xlog2/master.scp` —
+the token is then **validated and corrected** against it (`lookupCall()`), which
+is the single biggest accuracy lever in the real CW Skimmer:
+
+- an exact list hit marks the call **known** (DB-confirmed);
+- otherwise, edit-distance-1 variants (delete / substitute / insert over the call
+  alphabet) are looked up in the set, and if **exactly one** distinct list entry
+  matches, the call is corrected to it (also known) — this fixes the common
+  single-character decode errors (`K3L`→`K3LR`, `W1AX`→`W1AW`) directly;
+- if neither, the call stays an **unvalidated guess** (not known).
+
+The list is an immutable `unordered_set` behind a `shared_ptr`, swapped under a
+mutex so a reload never disturbs an in-flight decode; the worker grabs a
+reference once per audio chunk. The correction is generate-and-test against the
+hash set (cheap even for a 100k-entry list) and only runs on an exact miss.
+
+The **Paranoid** control (`setKnownCallsOnly`, §6) uses the known flag to surface
+only channels with a DB-confirmed call. Without a loaded list the heuristic match
+is used as before and nothing is ever "known".
 
 ---
 
@@ -322,14 +340,16 @@ already-decoded text.
 
 ## 6. Operator controls
 
-Both panels (Qt `QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) expose two sliders.
-Each is a thread-safe atomic the worker reads every frame, so changes take effect
-live and survive a stop/start; both persist in the `[skimmer]` settings group.
+Both panels (Qt `QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) expose two sliders and
+a checkbox. Each is a thread-safe atomic the worker reads every frame, so changes
+take effect live and survive a stop/start; all persist in the `[skimmer]`
+settings group.
 
 | Control | Range | Acts on | Effect |
 |---|---|---|---|
 | **Gate** | −12…+24 dB (0 = default) | channel **spawn** threshold (`spawnTh`) | Squelch on *detection*. Higher → only stronger peaks above the noise floor start a channel (rejects noise/ghosts); a channel that clears it still decodes at full sensitivity. Lower → catches weaker signals (more noise channels). |
 | **Min SNR** | 0…30 dB (0 = off) | the **decoder** (`pOn` forced to 0 below it) | Per-channel signal-vs-own-noise floor. A channel whose characteristic SNR is below the slider is not decoded — its keying is treated as silence, so it produces no text and never surfaces. Stronger signals survive a higher setting than weaker ones. |
+| **Show only calls in database** | on/off (disabled if no `master.scp`) | channel **surfacing** (the known flag) | Paranoid mode: only channels whose decoded callsign is confirmed in the master-callsign list are shown; an already-shown channel that goes quiet without ever confirming a call is dropped. Callsign correction (§3.7) happens regardless of this toggle. |
 
 The waterfall uses an *inferno*-style palette (dark/cool noise floor → hot
 purple→red→orange→yellow→white) with the colour stops packed into the upper range
@@ -368,12 +388,14 @@ All in `CwSkimmer::worker()` unless noted. Values are at the ~12 kHz working rat
 
 - **Cold start.** The first character or two of a transmission is often wrong —
   the unit length isn't yet learned. Inherent to streaming Morse decoders.
-- **No dictionary.** Callsigns are pattern-matched, not validated against a
-  master/SCP list. This is the largest remaining accuracy gap and the main TODO.
-- **Heavy QRN.** Per-channel SNR separates copyable signals from low-SNR junk
-  well on a normal noise floor, but in pathological broadband noise that forms
-  fake Morse *as strong as* the signal, no SNR threshold can separate them — only
-  a dictionary check would.
+- **Dictionary is optional.** Callsign validation/correction (§3.7) only kicks in
+  when a `master.scp` is present. Without it, callsigns are heuristic-matched
+  only, and the accuracy ceiling is lower — in heavy QRN that forms fake Morse
+  *as strong as* the signal, per-channel SNR can't separate them and only the
+  dictionary check rejects the junk. With a list loaded, Paranoid mode closes
+  most of that gap.
+- **Single passband, not wideband IQ.** This decodes the rig's audio passband
+  (a few kHz), not a whole band like an SDR-fed skimmer.
 - **Single passband, not wideband IQ.** This decodes the rig's audio passband
   (a few kHz), not a whole band like an SDR-fed skimmer.
 - **Frequency resolution.** Two genuinely independent stations closer than the
@@ -408,6 +430,8 @@ by construction. It is maturity- and confidence-gated, with exact lookup and an
 edit-distance length-error recovery as fallbacks, so it never decodes worse than
 the old exact lookup.
 
-The remaining open improvement is the **master-callsign / SCP dictionary check**
-(§3.7) — the single biggest accuracy lever in the real CW Skimmer, and a
-deliberate TODO here.
+The other big accuracy lever from CW Skimmer — the **master-callsign / SCP
+dictionary check** — is also implemented (§3.7): decoded callsigns are validated
+and edit-distance-corrected against an optional `MASTER.SCP`, with a Paranoid
+mode that surfaces only DB-confirmed calls. This is what closes the heavy-QRN gap
+that pure DSP can't.

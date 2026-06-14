@@ -1,5 +1,6 @@
 #include "QtCwSkimmerPanel.h"
 
+#include <QCheckBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QImage>
@@ -170,6 +171,13 @@ QtCwSkimmerPanel::QtCwSkimmerPanel(QWidget* parent) : QWidget(parent) {
     });
     layout->addLayout(snrRow);
 
+    // Paranoid: only show channels whose callsign is confirmed in the master DB.
+    knownOnly_ = new QCheckBox("Show only calls in database");
+    knownOnly_->setEnabled(false);   // until a DB is loaded (see setCallDbInfo)
+    connect(knownOnly_, &QCheckBox::toggled, this,
+            [this](bool on) { emit knownOnlyChanged(on); });
+    layout->addWidget(knownOnly_);
+
     model_ = new QStandardItemModel(0, 4, this);
     model_->setHorizontalHeaderLabels({"Freq", "WPM", "Text", "Call"});
     table_ = new QTableView;
@@ -196,6 +204,18 @@ void QtCwSkimmerPanel::setMinSnr(int db) {
     QSignalBlocker block(snr_);
     snr_->setValue(db);
     snrLabel_->setText(QString("%1 dB").arg(db));
+}
+
+void QtCwSkimmerPanel::setKnownOnly(bool on) {
+    QSignalBlocker block(knownOnly_);
+    knownOnly_->setChecked(on);
+}
+
+void QtCwSkimmerPanel::setCallDbInfo(bool loaded, std::size_t count) {
+    knownOnly_->setEnabled(loaded);
+    knownOnly_->setText(loaded
+        ? QString("Show only calls in database (%1)").arg(count)
+        : QString("Show only calls in database (none loaded)"));
 }
 
 void QtCwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,

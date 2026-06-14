@@ -54,6 +54,7 @@ Settings Settings::load(const IniFile& ini) {
     s.skimmerPanelPos = ini.getInt("skimmer", "position", s.skimmerPanelPos);
     s.skimmerGate     = ini.getInt("skimmer", "gate", s.skimmerGate);
     s.skimmerMinSnr   = ini.getInt("skimmer", "min_snr", s.skimmerMinSnr);
+    s.skimmerKnownOnly = ini.getBool("skimmer", "known_only", s.skimmerKnownOnly);
 
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
     s.dxPort        = ini.getInt("dxcluster", "port", s.dxPort);
@@ -119,6 +120,7 @@ void Settings::store(IniFile& ini) const {
         ini.setInt("skimmer", "position", skimmerPanelPos);
     ini.setInt("skimmer", "gate", skimmerGate);
     ini.setInt("skimmer", "min_snr", skimmerMinSnr);
+    ini.setBool("skimmer", "known_only", skimmerKnownOnly);
 
     ini.setString("dxcluster", "host", dxHost);
     ini.setInt("dxcluster", "port", dxPort);
