@@ -19,6 +19,13 @@ void MainPresenter::routeRigUpdate(double mhz, const std::string& mode) {
         log->setRigFrequency(mhz);
         log->setRigMode(mode);
     }
+    // Only repaint the status line when the reading actually changes — the rig
+    // polls every ~500 ms, and rewriting it every tick both wastes work and wipes
+    // out any other status message between ticks.
+    if (mhz == lastRigMhz_ && mode == lastRigMode_)
+        return;
+    lastRigMhz_  = mhz;
+    lastRigMode_ = mode;
     std::string s = "Rig: " + std::to_string(mhz) + " MHz";
     if (!mode.empty())
         s += " " + mode;

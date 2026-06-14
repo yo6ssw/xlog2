@@ -49,4 +49,10 @@ private:
     LogPagePresenter* pendingUpload_ = nullptr;
     std::vector<long> pendingUploadIds_;
     LogPagePresenter* pendingLookup_ = nullptr;
+
+    // Last rig reading shown in the status bar; the rig polls every ~500 ms but we
+    // only refresh the status line when the frequency or mode actually changes, so
+    // a steady rig doesn't repaint it every tick (and stomp other status messages).
+    double            lastRigMhz_ = -1.0;
+    std::string       lastRigMode_;
 };
