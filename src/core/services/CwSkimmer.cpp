@@ -787,6 +787,16 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                         const double gu = ch.gapUnit > 0.0 ? ch.gapUnit : ch.markUnit;
                         if (ch.markUnit > 0.0 && ch.runHops < 1.8 * gu)
                             unitTrack(ch.gapUnit, ch.runHops);  // an element gap defines the gap unit
+                        // The element gap and the dit are the same unit (measured
+                        // ratio ~1.0), so keep gapUnit anchored to markUnit. Without
+                        // this, one glitch-short gap min-tracks gapUnit too low; real
+                        // element gaps then exceed 1.8*gapUnit, so they neither update
+                        // it (it can't climb back) nor read as element gaps — every
+                        // gap then looks like a character gap and the text decodes as
+                        // a string of one-element E's and T's.
+                        if (ch.markUnit > 0.0)
+                            ch.gapUnit = std::clamp(ch.gapUnit, 0.7 * ch.markUnit,
+                                                                1.3 * ch.markUnit);
                         ch.curState = true;
                         ch.runHops = 1;
                     } else {                          // mark -> gap: the mark just ended
