@@ -10,6 +10,7 @@ class QStandardItemModel;
 class QStandardItem;
 class QSlider;
 class QLabel;
+class QCheckBox;
 class SkimmerWaterfall;  // defined in the .cpp (plain QWidget, no moc needed)
 
 // Qt CW-Skimmer panel: a scrolling waterfall of the rig-audio passband with the
@@ -32,10 +33,14 @@ public:
     // settings).
     void setGate(int db);
     void setMinSnr(int db);
+    void setKnownOnly(bool on);
+    // Label the Paranoid checkbox with the loaded DB size, or disable it if none.
+    void setCallDbInfo(bool loaded, std::size_t count);
 
 signals:
     void gateChanged(int db);    // operator moved the detection-gate slider
     void minSnrChanged(int db);  // operator moved the per-channel min-SNR slider
+    void knownOnlyChanged(bool on);  // operator toggled the "DB calls only" box
 
 private:
     SkimmerWaterfall*   waterfall_ = nullptr;
@@ -43,6 +48,7 @@ private:
     QLabel*             gateLabel_ = nullptr;
     QSlider*            snr_       = nullptr;
     QLabel*             snrLabel_  = nullptr;
+    QCheckBox*          knownOnly_ = nullptr;
     QTableView*         table_     = nullptr;
     QStandardItemModel* model_     = nullptr;
     // id -> the row's first item, so a row can be found (item->row()) and updated

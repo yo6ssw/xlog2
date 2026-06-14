@@ -157,9 +157,11 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   replacing any Schmitt/debounce); finalised runs are decoded with min-tracked
   dit-mark / element-gap references (kept *separate* because the finite window
   inflates marks and shrinks gaps), characters flushed as the inter-character
-  silence elapses. Callsigns are pattern-matched out of the decoded text (a
-  master-callsign/SCP dictionary check — CW Skimmer's biggest accuracy lever — is
-  a deliberate TODO). Emits `onWaterfall` (a max-pooled spectrum row),
+  silence elapses. Callsigns are pattern-matched out of the decoded text and then
+  validated/edit-distance-corrected against an optional master-callsign list
+  (`$XDG_DATA_HOME/xlog2/master.scp`, Super Check Partial) — CW Skimmer's biggest
+  accuracy lever — with a Paranoid mode that surfaces only DB-confirmed calls.
+  Emits `onWaterfall` (a max-pooled spectrum row),
   `onChannel` (id = FFT bin, pitch, wpm, rolling text, call) and
   `onChannelRemoved`, all marshalled to the UI thread. The dockable panels
   (`QtCwSkimmerPanel`, gtkmm `CwSkimmerPanel`) show a scrolling waterfall with

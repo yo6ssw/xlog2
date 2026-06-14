@@ -64,6 +64,7 @@ struct Settings {
     int         skimmerPanelPos = 0;         // saved dock/divider size (0 = unset)
     int         skimmerGate     = 0;         // detection gating level, dB (see CwSkimmer)
     int         skimmerMinSnr   = 0;         // minimum per-channel SNR, dB (see CwSkimmer)
+    bool        skimmerKnownOnly = false;    // Paranoid: only surface DB-confirmed calls
 
     // [dxcluster]
     std::string dxHost;

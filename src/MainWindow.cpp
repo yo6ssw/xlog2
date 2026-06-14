@@ -200,6 +200,17 @@ MainWindow::MainWindow()
         cfg().skimmerMinSnr = db;
         skimmer_.setMinSnr(static_cast<float>(db));
     });
+    skimmerPanel_.signalKnownOnly().connect([this](bool on) {
+        cfg().skimmerKnownOnly = on;
+        skimmer_.setKnownCallsOnly(on);
+    });
+    // Master-callsign list (Super Check Partial), used to validate/correct decoded
+    // callsigns. Optional: drop a MASTER.SCP at $XDG_DATA_HOME/xlog2/master.scp.
+    {
+        const std::size_t n = skimmer_.loadCallsignDb(Glib::build_filename(
+            Glib::get_user_data_dir(), "xlog2", "master.scp"));
+        skimmerPanel_.setCallDbInfo(n > 0, n);
+    }
     paddle_.onStatus = [this](const std::string& s) { setStatus(s); };
     // Mute the rig-audio stream while keying (semi-break-in) when configured to.
     paddle_.onTransmit = [this](bool tx) { audio_.setMuted(tx && cfg().paddleMuteAudio); };
@@ -1549,6 +1560,8 @@ void MainWindow::applySkimmerConfig() {
     skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
     skimmerPanel_.setMinSnr(cfg().skimmerMinSnr);
     skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
+    skimmerPanel_.setKnownOnly(cfg().skimmerKnownOnly);
+    skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
     if (cfg().skimmerVisible)
         startSkimmer();
 }
