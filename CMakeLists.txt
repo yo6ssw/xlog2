@@ -49,6 +49,7 @@ add_library(xlog_core STATIC
     src/core/services/Udp.cpp
     src/core/services/Lotw.cpp
     src/core/services/Qrz.cpp
+    src/core/services/QrzCache.cpp
     src/core/services/CwKeyer.cpp
     src/core/services/DxCluster.cpp
     src/core/services/Audio.cpp

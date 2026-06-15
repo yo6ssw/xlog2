@@ -6,6 +6,7 @@
 #include "Settings.h"
 
 #include <string>
+#include <utility>
 #include <vector>
 
 // Shell-level orchestration with no toolkit dependency: owns the configuration
@@ -38,9 +39,16 @@ public:
     // A finished QRZ lookup: prefill the requesting tab + show the popup.
     void routeQrzResult(const QrzResult& result, const std::string& error);
 
+    // A finished bulk locator fill: write the locators back to the requesting tab.
+    void routeQrzLocatorFill(
+        const std::vector<std::pair<std::string, std::string>>& callLocators,
+        int fromCache, int fetched, const std::string& error);
+
     // --- pending-target bookkeeping (set before kicking off async work) ---
     void beginLotwUpload(LogPagePresenter* target, std::vector<long> ids);
-    void beginQrzLookup(LogPagePresenter* target);
+    // silent = fill the form but show no popup (used by DX-spot double-click).
+    void beginQrzLookup(LogPagePresenter* target, bool silent = false);
+    void beginQrzLocatorFill(LogPagePresenter* target);
 
 private:
     void status(const std::string& s) { view_.setStatus(s); }
@@ -49,6 +57,8 @@ private:
     LogPagePresenter* pendingUpload_ = nullptr;
     std::vector<long> pendingUploadIds_;
     LogPagePresenter* pendingLookup_ = nullptr;
+    bool              pendingLookupSilent_ = false;
+    LogPagePresenter* pendingFill_ = nullptr;
 
     // Last rig reading shown in the status bar; the rig polls every ~500 ms but we
     // only refresh the status line when the frequency or mode actually changes, so

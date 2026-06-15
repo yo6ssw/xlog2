@@ -4,6 +4,8 @@
 #include "LogPagePresenter.h"
 #include "TimeUtil.h"
 
+#include <map>
+
 void MainPresenter::routeUdp(const std::vector<Qso>& qsos, const std::string& source) {
     LogPagePresenter* log = view_.currentLog();
     if (!log || qsos.empty())
@@ -61,9 +63,12 @@ void MainPresenter::routeLotwUploadResult(bool ok, const std::string& message) {
 
 void MainPresenter::routeQrzResult(const QrzResult& result, const std::string& error) {
     LogPagePresenter* log = pendingLookup_;
+    const bool silent = pendingLookupSilent_;
     pendingLookup_ = nullptr;
+    pendingLookupSilent_ = false;
     if (!error.empty()) {
-        status("QRZ lookup: " + error);
+        if (!silent)  // a spot-triggered prefill shouldn't nag if QRZ isn't set up
+            status("QRZ lookup: " + error);
         return;
     }
     if (log && view_.isLogLive(log))
@@ -72,7 +77,27 @@ void MainPresenter::routeQrzResult(const QrzResult& result, const std::string& e
     if (!result.name.empty())    msg += " — " + result.name;
     if (!result.country.empty()) msg += " (" + result.country + ")";
     status(msg);
-    view_.showQrzResult(result);
+    if (!silent)  // silent prefill (e.g. from a DX-spot double-click): no popup
+        view_.showQrzResult(result);
+}
+
+void MainPresenter::routeQrzLocatorFill(
+    const std::vector<std::pair<std::string, std::string>>& callLocators,
+    int fromCache, int fetched, const std::string& error) {
+    LogPagePresenter* log = pendingFill_;
+    pendingFill_ = nullptr;
+    if (!error.empty()) {
+        status("QRZ locator fill failed: " + error);
+        return;
+    }
+    int filled = 0;
+    if (log && view_.isLogLive(log)) {
+        std::map<std::string, std::string> m(callLocators.begin(), callLocators.end());
+        filled = log->applyLocatorFill(m);
+    }
+    status("Filled " + std::to_string(filled) + " locator(s) — " +
+           std::to_string(fromCache) + " cached, " + std::to_string(fetched) +
+           " fetched.");
 }
 
 void MainPresenter::beginLotwUpload(LogPagePresenter* target, std::vector<long> ids) {
@@ -80,6 +105,11 @@ void MainPresenter::beginLotwUpload(LogPagePresenter* target, std::vector<long> 
     pendingUploadIds_ = std::move(ids);
 }
 
-void MainPresenter::beginQrzLookup(LogPagePresenter* target) {
+void MainPresenter::beginQrzLookup(LogPagePresenter* target, bool silent) {
     pendingLookup_ = target;
+    pendingLookupSilent_ = silent;
+}
+
+void MainPresenter::beginQrzLocatorFill(LogPagePresenter* target) {
+    pendingFill_ = target;
 }

@@ -134,6 +134,12 @@ QtMainWindow::QtMainWindow()
                 if (auto* log = currentLog()) {
                     log->applyDxSpot(call.toStdString(), mhz);
                     rig_.setFrequency(mhz);
+                    // Prefill name/QTH/locator: cache-first, fetch+cache on miss.
+                    // Silent — no popup per double-click.
+                    if (!call.isEmpty() && !qrz_.isBusy()) {
+                        presenter_.beginQrzLookup(log, /*silent=*/true);
+                        qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, call.toStdString());
+                    }
                 }
             });
     connect(dxPanel_, &QtDxClusterPanel::sendCommand, this,
@@ -239,6 +245,14 @@ QtMainWindow::QtMainWindow()
     qrz_.onResult = [this](const QrzResult& r, const std::string& err) {
         presenter_.routeQrzResult(r, err);
     };
+    qrz_.onFillProgress = [this](int done, int total) {
+        setStatus("QRZ locator fill: " + std::to_string(done) + "/" +
+                  std::to_string(total) + "…");
+    };
+    qrz_.onFillResult = [this](const std::vector<std::pair<std::string, std::string>>& r,
+                               int fromCache, int fetched, const std::string& err) {
+        presenter_.routeQrzLocatorFill(r, fromCache, fetched, err);
+    };
     cluster_.onLine = [this](const std::string& l) { dxPanel_->addLine(l); };
     cluster_.onStatus = [this](const std::string& s) {
         dxPanel_->addLine(s);
@@ -276,6 +290,13 @@ QtMainWindow::QtMainWindow()
     qApp->installEventFilter(this);
 
     loadSettings();
+    // Point the QRZ result cache at a file under the data dir (created if needed).
+    {
+        const std::string dir = envPath("XDG_DATA_HOME", ".local/share");
+        std::error_code ec;
+        std::filesystem::create_directories(dir, ec);
+        qrz_.setCache(dir + "/qrz-cache.sqlite", cfg().qrzCacheDays);
+    }
     if (tabs_->count() == 0)
         openDefaultLog();
     updateWindowTitle();
@@ -441,6 +462,7 @@ void QtMainWindow::buildMenus() {
     auto* find = log->addAction("Find…", this, &QtMainWindow::onFind);
     find->setShortcut(QKeySequence::Find);
     log->addAction("Fill DXCC entities", this, &QtMainWindow::onFillDxcc);
+    log->addAction("Fill missing locators (QRZ)", this, &QtMainWindow::onFillLocators);
     log->addAction("Statistics…", this, &QtMainWindow::onStatistics);
 
     auto* net = menuBar()->addMenu("&Network");
@@ -671,6 +693,23 @@ void QtMainWindow::onFind() {
 void QtMainWindow::onFillDxcc() {
     if (auto* p = currentPage())
         p->backfillDxcc();
+}
+
+void QtMainWindow::onFillLocators() {
+    auto* page = currentPage();
+    if (!page)
+        return;
+    if (cfg().qrzUser.empty() || cfg().qrzPassword.empty()) {
+        setStatus("Set your QRZ.com username and password in Edit ▸ Settings ▸ QRZ first.");
+        return;
+    }
+    if (qrz_.isBusy()) { setStatus("A QRZ operation is already in progress."); return; }
+    const std::vector<std::string> calls = page->presenter().callsignsMissingLocator();
+    if (calls.empty()) { setStatus("No QSOs are missing a locator."); return; }
+    presenter_.beginQrzLocatorFill(&page->presenter());
+    setStatus("Filling locators for " + std::to_string(calls.size()) +
+              " callsign(s) via QRZ…");
+    qrz_.fillLocators(cfg().qrzUser, cfg().qrzPassword, calls);
 }
 
 void QtMainWindow::onAbout() {
@@ -906,6 +945,7 @@ void QtMainWindow::applySettings(const Settings& s) {
 
     cfg().qrzUser = s.qrzUser;
     cfg().qrzPassword = s.qrzPassword;
+    cfg().qrzCacheDays = s.qrzCacheDays;
 
     cfg().myLocator = s.myLocator;
 
@@ -957,6 +997,8 @@ void QtMainWindow::applySettings(const Settings& s) {
                               cfg().skimmerBwOffsetDb);
 
     mapPanel_->setFrom(cfg().myLocator);
+    qrz_.setCache(envPath("XDG_DATA_HOME", ".local/share") + "/qrz-cache.sqlite",
+                  cfg().qrzCacheDays);
 
     setStatus("Settings saved.");
 }

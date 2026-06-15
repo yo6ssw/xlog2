@@ -141,12 +141,15 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         auto& g = addPage(*stack, "qrz", "QRZ");
         qrzUser_ = entry(s.qrzUser);
         qrzPass_ = entry(s.qrzPassword); qrzPass_->set_visibility(false);
+        qrzCacheDays_ = entry(std::to_string(s.qrzCacheDays));
         field(g, "QRZ username:", *qrzUser_, 0);
         field(g, "QRZ password:", *qrzPass_, 1);
+        field(g, "Cache lifetime (days):", *qrzCacheDays_, 2);
         auto* hint = Gtk::make_managed<Gtk::Label>(
-            "Used for the Call field's QRZ.com XML lookup. Stored mode 0600.");
+            "Used for the Call field's QRZ.com XML lookup. Stored mode 0600.\n"
+            "Cached lookups skip the network until this old (0 = no cache).");
         hint->set_xalign(0.0);
-        g.attach(*hint, 0, 2, 2, 1);
+        g.attach(*hint, 0, 3, 2, 1);
     }
 
     // --- CW Keyer ---
@@ -287,6 +290,7 @@ Settings SettingsDialog::collect() const {
 
     s.qrzUser = qrzUser_->get_text().raw();
     s.qrzPassword = qrzPass_->get_text().raw();
+    s.qrzCacheDays = toInt(qrzCacheDays_, s.qrzCacheDays);
 
     s.keyerHost = strOr(keyerHost_, "127.0.0.1");
     s.keyerPort = toInt(keyerPort_, 6789);

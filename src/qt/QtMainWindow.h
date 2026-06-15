@@ -66,6 +66,7 @@ private:
     void onStatistics();
     void onFind();
     void onFillDxcc();
+    void onFillLocators();  // bulk-fill missing QSO locators via QRZ (+ cache)
     void onAbout();
 
     // The consolidated Edit ▸ Settings dialog and the routine that applies its

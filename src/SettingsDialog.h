@@ -50,6 +50,7 @@ private:
     // --- qrz ---
     Gtk::Entry* qrzUser_ = nullptr;
     Gtk::Entry* qrzPass_ = nullptr;
+    Gtk::Entry* qrzCacheDays_ = nullptr;
     // --- keyer ---
     Gtk::Entry* keyerHost_ = nullptr;
     Gtk::Entry* keyerPort_ = nullptr;
