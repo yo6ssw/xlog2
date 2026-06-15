@@ -2,7 +2,8 @@
 
 #include "RemoteKeyProtocol.h"
 
-#include <alsa/asoundlib.h>
+#include <pipewire/pipewire.h>
+#include <spa/param/audio/format-utils.h>
 
 #include <netdb.h>
 #include <sys/socket.h>
@@ -15,6 +16,7 @@
 #include <cstdint>
 #include <cstring>
 #include <deque>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -48,6 +50,157 @@ int connectUdp(const std::string& host, int port, std::string& err) {
     if (fd < 0)
         err = std::strerror(errno);
     return fd;
+}
+
+// Native-PipeWire sidetone generator. A click-free (ramped-envelope) sine is
+// synthesized directly in the realtime process() callback, gated by an external
+// key-state atomic — there is no input ring, the callback IS the source.
+//
+// Crucially it requests a *graph-friendly* quantum via PW_KEY_NODE_LATENCY rather
+// than the minimum: the old ALSA "default" path opened a 6 ms buffer through the
+// pipewire-alsa shim, which dragged the whole graph to its smallest quantum and
+// chronically xran, glitching every other stream on the sink (notably the
+// rig-audio stream). A native node at ~10 ms keeps the feel tight without
+// destabilizing the graph.
+struct PwSidetone {
+    static constexpr unsigned kRate = 48000;
+
+    pw_thread_loop*    loop   = nullptr;
+    pw_stream*         stream = nullptr;
+    std::atomic<bool>* toneOn = nullptr;   // key state, owned by the keyer
+
+    double phase    = 0.0;   // oscillator phase, carried across callbacks
+    double gain     = 0.0;   // current envelope (0..1), ramped per sample
+    double phaseInc = 0.0;
+    double gainStep = 0.0;
+    double amp      = 0.0;
+
+    bool init(int toneHz, int levelPct, const std::string& target,
+              std::atomic<bool>* tone, std::string& err);
+    void shutdown();
+
+    static void onProcess(void* data);
+};
+
+void PwSidetone::onProcess(void* data) {
+    auto* st = static_cast<PwSidetone*>(data);
+    pw_buffer* pb = pw_stream_dequeue_buffer(st->stream);
+    if (pb == nullptr)
+        return;
+    spa_buffer* buf = pb->buffer;
+    auto* dst = static_cast<std::int16_t*>(buf->datas[0].data);
+    if (dst == nullptr) {
+        pw_stream_queue_buffer(st->stream, pb);
+        return;
+    }
+    const std::uint32_t stride    = sizeof(std::int16_t);  // mono
+    const std::uint32_t maxFrames = buf->datas[0].maxsize / stride;
+    std::uint32_t n = pb->requested ? static_cast<std::uint32_t>(pb->requested) : maxFrames;
+    if (n > maxFrames)
+        n = maxFrames;
+
+    for (std::uint32_t i = 0; i < n; ++i) {
+        const bool on = st->toneOn->load(std::memory_order_relaxed);  // per-sample for low latency
+        if (on && st->gain < 1.0)
+            st->gain = std::min(1.0, st->gain + st->gainStep);
+        else if (!on && st->gain > 0.0)
+            st->gain = std::max(0.0, st->gain - st->gainStep);
+        dst[i] = static_cast<std::int16_t>(st->gain > 0.0 ? std::sin(st->phase) * st->gain * st->amp : 0.0);
+        st->phase += st->phaseInc;
+        if (st->phase >= 2.0 * M_PI)
+            st->phase -= 2.0 * M_PI;
+    }
+
+    buf->datas[0].chunk->offset = 0;
+    buf->datas[0].chunk->stride = static_cast<std::int32_t>(stride);
+    buf->datas[0].chunk->size   = n * stride;
+    pw_stream_queue_buffer(st->stream, pb);
+}
+
+bool PwSidetone::init(int toneHz, int levelPct, const std::string& target,
+                      std::atomic<bool>* tone, std::string& err) {
+    static std::once_flag pwInitOnce;
+    std::call_once(pwInitOnce, [] { pw_init(nullptr, nullptr); });
+
+    toneOn   = tone;
+    phase    = 0.0;
+    gain     = 0.0;
+    phaseInc = 2.0 * M_PI * toneHz / kRate;
+    gainStep = 1.0 / (kRate * 0.005);                       // 5 ms attack/decay envelope
+    amp      = (levelPct / 100.0) * 0.6 * 32767.0;          // headroom below full scale
+
+    // Value-initialized then assigned (rather than a designated initializer) so the
+    // unused callbacks are zeroed without tripping -Wmissing-field-initializers.
+    static const pw_stream_events streamEvents = [] {
+        pw_stream_events e{};
+        e.version = PW_VERSION_STREAM_EVENTS;
+        e.process = PwSidetone::onProcess;
+        return e;
+    }();
+
+    loop = pw_thread_loop_new("xlog2-sidetone", nullptr);
+    if (loop == nullptr) {
+        err = "pw_thread_loop_new failed";
+        return false;
+    }
+
+    pw_properties* props = pw_properties_new(
+        PW_KEY_MEDIA_TYPE,       "Audio",
+        PW_KEY_MEDIA_CATEGORY,   "Playback",
+        PW_KEY_MEDIA_ROLE,       "Production",
+        PW_KEY_APP_NAME,         "xlog2",
+        PW_KEY_NODE_NAME,        "xlog2-sidetone",
+        PW_KEY_NODE_DESCRIPTION, "xlog2 CW sidetone",
+        PW_KEY_NODE_LATENCY,     "512/48000",  // ~10.7 ms: tight feel, graph-friendly quantum
+        nullptr);
+    if (!target.empty() && target != "default")
+        pw_properties_set(props, PW_KEY_TARGET_OBJECT, target.c_str());
+
+    stream = pw_stream_new_simple(pw_thread_loop_get_loop(loop), "xlog2-sidetone",
+                                  props, &streamEvents, this);
+    if (stream == nullptr) {
+        err = "pw_stream_new_simple failed";
+        pw_thread_loop_destroy(loop);
+        loop = nullptr;
+        return false;
+    }
+
+    std::uint8_t podBuf[1024];
+    spa_pod_builder b = SPA_POD_BUILDER_INIT(podBuf, sizeof(podBuf));
+    spa_audio_info_raw info{};
+    info.format      = SPA_AUDIO_FORMAT_S16;
+    info.channels    = 1;
+    info.rate        = kRate;
+    info.position[0] = SPA_AUDIO_CHANNEL_MONO;
+    const spa_pod* params[1];
+    params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &info);
+
+    const auto flags = static_cast<pw_stream_flags>(
+        PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS);
+    if (pw_stream_connect(stream, PW_DIRECTION_OUTPUT, PW_ID_ANY, flags, params, 1) < 0) {
+        err = "pw_stream_connect failed";
+        shutdown();
+        return false;
+    }
+    if (pw_thread_loop_start(loop) < 0) {
+        err = "pw_thread_loop_start failed";
+        shutdown();
+        return false;
+    }
+    return true;
+}
+
+void PwSidetone::shutdown() {
+    if (loop != nullptr)
+        pw_thread_loop_stop(loop);
+    if (stream != nullptr) {
+        pw_stream_destroy(stream);
+        stream = nullptr;
+    }
+    if (loop != nullptr) {
+        pw_thread_loop_destroy(loop);
+        loop = nullptr;
+    }
 }
 
 }  // namespace
@@ -272,72 +425,26 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     ::close(fd);
 }
 
-// Renders a click-free sidetone to ALSA, gated by toneOn_ (the key state). Runs
-// independently of the keying worker: a missing device just means no sidetone,
-// never a stall in keying. Opened lazily and retried so startup never blocks.
+// Renders a click-free sidetone via a native PipeWire stream, gated by toneOn_
+// (the key state). The audio is generated on PipeWire's realtime thread (see
+// PwSidetone); this worker only owns the backend's lifetime and idles until stop.
+// Runs independently of the keying worker: a missing sink just means no sidetone,
+// never a stall in keying.
 void RemotePaddleKeyer::sidetoneWorker(RemotePaddleConfig cfg) {
-    constexpr unsigned kRate  = 48000;
-    // Keep these small: the sidetone is the operator's only instant feedback (the
-    // on-air signal lags by cwsd's playout delay), and its felt latency is set by
-    // the ALSA queue depth, not the 1 ms input chain. A short block + shallow
-    // buffer puts a fresh key edge on the speaker in ~5 ms. Underruns just click
-    // and self-recover (see the -EPIPE handling below); for the lowest, most
-    // reliable latency point the sidetone at a raw hw:/plughw: device rather than
-    // a PipeWire/PulseAudio "default" that may clamp the buffer.
-    constexpr int      kBlockMs = 3;
-    constexpr int      kBlock   = kRate * kBlockMs / 1000;  // ~3 ms render blocks
+    const int toneHz   = cfg.toneHz > 0 ? cfg.toneHz : 600;
+    const int levelPct = cfg.level < 0 ? 0 : (cfg.level > 100 ? 100 : cfg.level);
 
-    const int    toneHz   = cfg.toneHz > 0 ? cfg.toneHz : 600;
-    const int    levelPct = cfg.level < 0 ? 0 : (cfg.level > 100 ? 100 : cfg.level);
-    const double amp      = (levelPct / 100.0) * 0.6 * 32767.0;  // headroom below full scale
-    const double phaseInc = 2.0 * M_PI * toneHz / kRate;
-    const double gainStep = 1.0 / (kRate * 0.005);      // 5 ms attack/decay envelope
-
-    snd_pcm_t* pcm = nullptr;
-    bool       reportedMissing = false;
-    double     phase = 0.0;
-    double     gain  = 0.0;                             // current envelope, ramped per sample
-    std::vector<std::int16_t> block(kBlock);
-
-    while (running_.load()) {
-        if (pcm == nullptr) {
-            if (snd_pcm_open(&pcm, cfg.device.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0 ||
-                snd_pcm_set_params(pcm, SND_PCM_FORMAT_S16_LE, SND_PCM_ACCESS_RW_INTERLEAVED,
-                                   1, kRate, 1, 6000 /* ~6 ms latency target */) < 0) {
-                if (pcm) { snd_pcm_close(pcm); pcm = nullptr; }
-                if (!reportedMissing) {
-                    postStatus("Paddle keyer: sidetone device " + cfg.device + " unavailable.");
-                    reportedMissing = true;
-                }
-                std::this_thread::sleep_for(std::chrono::milliseconds(200));
-                continue;
-            }
-            reportedMissing = false;
-        }
-
-        for (int i = 0; i < kBlock; ++i) {
-            const bool on = toneOn_.load(std::memory_order_relaxed);  // per-sample for low latency
-            if (on && gain < 1.0)       gain = std::min(1.0, gain + gainStep);
-            else if (!on && gain > 0.0) gain = std::max(0.0, gain - gainStep);
-            block[i] = static_cast<std::int16_t>(gain > 0.0 ? std::sin(phase) * gain * amp : 0.0);
-            phase += phaseInc;
-            if (phase >= 2.0 * M_PI)
-                phase -= 2.0 * M_PI;
-        }
-
-        const snd_pcm_sframes_t w = snd_pcm_writei(pcm, block.data(), kBlock);
-        if (w == -EPIPE) {
-            snd_pcm_prepare(pcm);          // underrun: recover and keep going
-        } else if (w < 0) {
-            snd_pcm_close(pcm);
-            pcm = nullptr;                 // reopen on the next iteration
-        }
+    PwSidetone tone;
+    std::string err;
+    if (!tone.init(toneHz, levelPct, cfg.device, &toneOn_, err)) {
+        postStatus("Paddle keyer: sidetone unavailable — " + err);
+        return;  // keying continues without local audio feedback
     }
 
-    if (pcm != nullptr) {
-        snd_pcm_drop(pcm);
-        snd_pcm_close(pcm);
-    }
+    while (running_.load())
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    tone.shutdown();
 }
 
 void RemotePaddleKeyer::postStatus(const std::string& s) {
