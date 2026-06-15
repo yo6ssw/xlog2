@@ -49,6 +49,8 @@ private:
     QtLogPage* currentPage() const;
     QtLogPage* openDefaultLog();
     void registerPage(QtLogPage* page);
+    // Move a QSO from one logbook tab to another (row context menu "Move to").
+    void moveQso(QtLogPage* from, long id, LogPagePresenter* target);
     void updateTabTitle(QtLogPage* page);
     void updateWindowTitle();
 

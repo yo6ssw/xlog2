@@ -60,6 +60,12 @@ public:
     // presenter (UDP QSOs, rig readings, QRZ/LoTW results).
     LogPagePresenter& presenter() { return presenter_; }
 
+    // Shell-wired hooks for the row context menu's "Move to" submenu.
+    // queryMoveTargets returns (title, presenter) for every OTHER open logbook;
+    // requestMove asks the shell to move the QSO with the given id there.
+    std::function<std::vector<std::pair<std::string, LogPagePresenter*>>()> queryMoveTargets;
+    std::function<void(long, LogPagePresenter*)> requestMove;
+
     // Shared column layout (order/width/visibility) persistence.
     void applyColumnLayout(const IniFile& ini);
     void storeColumnLayout(IniFile& ini);
@@ -107,6 +113,9 @@ private:
     void pinFiller();  // keep the empty filler column last
 
     void onSelectionChanged();
+    // Row context menu (right-click a QSO): Delete + Move to.
+    void showRowContextMenu(Gtk::ListItem* li, Gtk::Widget& anchor, double x, double y);
+    void confirmDeleteRow(long id);
     void status(const Glib::ustring& msg) { signalStatus_.emit(msg); }
 
     LogPagePresenter presenter_;
@@ -121,6 +130,13 @@ private:
     std::vector<std::pair<std::string, Glib::RefPtr<Gtk::ColumnViewColumn>>> columns_;
     Glib::RefPtr<Gtk::ColumnViewColumn>   filler_;
     Glib::RefPtr<Gio::SimpleActionGroup>  colActions_;
+
+    // Row context menu: one popover parented to the column view (stable parent),
+    // its model rebuilt per click. moveTargets_ parallels the "Move to" items.
+    Glib::RefPtr<Gio::SimpleActionGroup>  rowActions_;
+    Gtk::PopoverMenu*                     rowMenu_ = nullptr;
+    long                                  contextId_ = 0;
+    std::vector<LogPagePresenter*>        moveTargets_;
 
     Gtk::Entry    date_, timeOn_, timeOff_, call_, freq_;
     Gtk::Entry    rstSent_, rstRcvd_, name_, qth_, locator_, power_, comment_;

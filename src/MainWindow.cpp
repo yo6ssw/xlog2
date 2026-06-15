@@ -450,6 +450,19 @@ void MainWindow::registerTab(LogPage* page) {
             setStatus("Keyer: " + keyer_.lastError());
     });
 
+    // Row context menu "Move to": list every other open logbook, and perform
+    // the move (add to the target, remove from this page) on request.
+    page->queryMoveTargets = [this, page]() {
+        std::vector<std::pair<std::string, LogPagePresenter*>> out;
+        for (int i = 0; i < notebook_.get_n_pages(); ++i)
+            if (auto* p = dynamic_cast<LogPage*>(notebook_.get_nth_page(i)); p && p != page)
+                out.emplace_back(p->title(), &p->presenter());
+        return out;
+    };
+    page->requestMove = [this, page](long id, LogPagePresenter* target) {
+        moveQso(page, id, target);
+    };
+
     auto* labelBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     labelBox->set_spacing(4);
     auto* label = Gtk::make_managed<Gtk::Label>(page->title());
@@ -492,6 +505,20 @@ void MainWindow::closePage(LogPage* page) {
     if (notebook_.get_n_pages() == 0)
         openDefaultLog();
     updateTitle();
+}
+
+void MainWindow::moveQso(LogPage* from, long id, LogPagePresenter* target) {
+    if (!from || !target)
+        return;
+    const Qso* q = from->presenter().findQso(id);
+    if (!q)
+        return;
+    Qso copy = *q;
+    copy.id = 0;  // the target assigns a fresh row id on insert
+    const std::string call = copy.call;
+    target->addExternalQso(copy);     // add + refresh + tab-label update
+    from->presenter().deleteQso(id);  // remove from the source
+    setStatus("Moved QSO with " + call + " to " + target->title() + ".");
 }
 
 LogPage* MainWindow::findPageByPath(const std::string& path) {

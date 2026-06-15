@@ -57,6 +57,8 @@ private:
     void     onPageChanged(LogPage* page);
     void     closePage(LogPage* page);
     LogPage* findPageByPath(const std::string& path);
+    // Move a QSO from one logbook tab to another (row context menu "Move to").
+    void     moveQso(LogPage* from, long id, LogPagePresenter* target);
 
     // --- menu actions ---
     void onNewTab();

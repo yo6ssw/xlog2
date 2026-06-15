@@ -166,6 +166,24 @@ void LogPagePresenter::onRowSelected(long id) {
     }
 }
 
+const Qso* LogPagePresenter::findQso(long id) const {
+    for (const auto& q : logbook_.qsos())
+        if (q.id == id)
+            return &q;
+    return nullptr;
+}
+
+void LogPagePresenter::deleteQso(long id) {
+    if (id == 0)
+        return;
+    logbook_.remove(id);
+    refreshList();
+    if (editingId_ == id)
+        clearForm();  // the deleted row was loaded in the form
+    changed();
+    status("QSO deleted.");
+}
+
 void LogPagePresenter::onSetNow() {
     FormData f = view_.formData();
     f.date    = timeutil::utcNow("%Y-%m-%d");
