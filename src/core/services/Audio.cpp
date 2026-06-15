@@ -1,7 +1,9 @@
 #include "Audio.h"
 
-#include <alsa/asoundlib.h>
 #include <opus/opus.h>
+
+#include <pipewire/pipewire.h>
+#include <spa/param/audio/format-utils.h>
 
 #include <netdb.h>
 #include <poll.h>
@@ -9,10 +11,13 @@
 #include <unistd.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <mutex>
 #include <vector>
 
 namespace {
@@ -23,6 +28,21 @@ constexpr int         kMaxFrame     = 5760;  // 120 ms at 48 kHz, the largest op
 constexpr int         kKeepaliveMs  = 2000;  // resubscribe well within cwsd's timeout
 constexpr int         kMaxConceal   = 10;    // cap concealed frames per gap; a larger
                                              // jump is a restart/long dropout, not loss
+
+// Drift-compensating playout buffer. The rig's capture clock and the local DAC
+// clock are independent crystals: even with zero packet loss they drift, so a
+// fixed cushion slowly drains (consumer faster -> underrun) or fills (producer
+// faster -> overrun), each an audible click. We steer the ring fill toward a
+// target every tick: top up with Opus PLC when it runs low (also covers jitter
+// gaps before they underrun), and drop a frame when a smoothed measure runs high.
+constexpr int    kTargetMs        = 150;   // cushion to steer the ring fill toward
+constexpr int    kLowMs           = 80;    // below this -> expand (insert PLC) to target
+constexpr int    kHighMs          = 230;   // smoothed fill above this -> compress (drop)
+constexpr int    kTickMs          = 10;    // max poll wait while playing, so the buffer
+                                           // is serviced even when no packet arrives
+constexpr int    kMaxInsertPerTick = 8;    // bound PLC top-up per tick (~160 ms cap)
+constexpr double kFillEmaAlpha    = 0.01;  // ~2 s smoothing for the compress decision,
+                                           // so transient jitter bursts are not trimmed
 
 std::uint32_t readBe32(const std::uint8_t* p) {
     return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
@@ -57,36 +77,193 @@ int connectUdp(const std::string& host, int port, std::string& err) {
     return fd;
 }
 
-// Open ALSA playback for the stream's rate/channels. Returns nullptr on failure
-// (a missing device must not block: it is retried on the worker).
-snd_pcm_t* openPlayback(const AudioStreamConfig& cfg) {
-    snd_pcm_t* pcm = nullptr;
-    if (snd_pcm_open(&pcm, cfg.device.c_str(), SND_PCM_STREAM_PLAYBACK, 0) < 0)
-        return nullptr;
-    if (snd_pcm_set_params(pcm,
-                           SND_PCM_FORMAT_S16_LE,
-                           SND_PCM_ACCESS_RW_INTERLEAVED,
-                           cfg.channels,
-                           static_cast<unsigned>(cfg.sampleRate),
-                           1,          // allow ALSA soft-resampling
-                           250000) < 0 /* ~250 ms buffer: low rates resample to the
-                                          device's native rate with coarse periods, so
-                                          a tight buffer underruns on the slightest
-                                          network jitter — choppy audio. */) {
-        snd_pcm_close(pcm);
-        return nullptr;
+// PipeWire playback backend. A native pw_stream fed from a lock-free SPSC ring:
+// the decode worker is the single producer, PipeWire's realtime process() callback
+// the single consumer. The ring decouples the (bursty, network-paced) producer from
+// the (steady, device-clock-paced) consumer; the worker steers its fill for drift.
+struct PwBackend {
+    pw_thread_loop* loop    = nullptr;
+    pw_stream*      stream  = nullptr;
+    int             channels = 1;
+
+    // Interleaved int16 samples; capacity is a power of two so index masking wraps.
+    // head/tail are free-running 32-bit counters (their unsigned difference is the
+    // occupancy); the producer owns head, the consumer owns tail.
+    std::vector<std::int16_t>  ring;
+    std::uint32_t              mask = 0;
+    std::atomic<std::uint32_t> head{0};
+    std::atomic<std::uint32_t> tail{0};
+
+    // Status sink (set by the worker) so stream errors reach the UI. Called from the
+    // PipeWire loop thread, never the RT process callback.
+    std::function<void(const std::string&)> status;
+
+    bool init(int rate, int ch, const std::string& target, std::string& err);
+    void shutdown();
+
+    // Producer (worker thread).
+    std::uint32_t pushSamples(const std::int16_t* src, std::uint32_t n) {
+        const std::uint32_t cap = mask + 1;
+        const std::uint32_t h   = head.load(std::memory_order_relaxed);
+        const std::uint32_t t   = tail.load(std::memory_order_acquire);
+        std::uint32_t toWrite = std::min(n, cap - (h - t));
+        for (std::uint32_t i = 0; i < toWrite; ++i)
+            ring[(h + i) & mask] = src[i];
+        head.store(h + toWrite, std::memory_order_release);
+        return toWrite;  // < n means the ring was full (samples dropped)
     }
-    return pcm;
+    long occupancyFrames() const {
+        const std::uint32_t h = head.load(std::memory_order_relaxed);
+        const std::uint32_t t = tail.load(std::memory_order_acquire);
+        return static_cast<long>((h - t) / static_cast<std::uint32_t>(channels));
+    }
+
+    // Consumer (RT process callback) — lock-free, no allocation.
+    std::uint32_t popSamples(std::int16_t* dst, std::uint32_t n) {
+        const std::uint32_t h = head.load(std::memory_order_acquire);
+        const std::uint32_t t = tail.load(std::memory_order_relaxed);
+        std::uint32_t toRead = std::min(n, h - t);
+        for (std::uint32_t i = 0; i < toRead; ++i)
+            dst[i] = ring[(t + i) & mask];
+        tail.store(t + toRead, std::memory_order_release);
+        return toRead;
+    }
+
+    static void onProcess(void* data);
+    static void onStateChanged(void* data, enum pw_stream_state old,
+                               enum pw_stream_state state, const char* error);
+};
+
+void PwBackend::onProcess(void* data) {
+    auto* be = static_cast<PwBackend*>(data);
+    pw_buffer* pb = pw_stream_dequeue_buffer(be->stream);
+    if (pb == nullptr)
+        return;
+    spa_buffer* buf = pb->buffer;
+    auto* dst = static_cast<std::int16_t*>(buf->datas[0].data);
+    if (dst == nullptr) {
+        pw_stream_queue_buffer(be->stream, pb);
+        return;
+    }
+    const std::uint32_t stride    = sizeof(std::int16_t) * static_cast<std::uint32_t>(be->channels);
+    const std::uint32_t maxFrames = buf->datas[0].maxsize / stride;
+    std::uint32_t reqFrames = pb->requested ? static_cast<std::uint32_t>(pb->requested) : maxFrames;
+    if (reqFrames > maxFrames)
+        reqFrames = maxFrames;
+
+    const std::uint32_t want = reqFrames * static_cast<std::uint32_t>(be->channels);
+    const std::uint32_t got  = be->popSamples(dst, want);
+    if (got < want)  // underflow: the drift compensator should make this rare
+        std::memset(dst + got, 0, (want - got) * sizeof(std::int16_t));
+
+    buf->datas[0].chunk->offset = 0;
+    buf->datas[0].chunk->stride = static_cast<std::int32_t>(stride);
+    buf->datas[0].chunk->size   = reqFrames * stride;
+    pw_stream_queue_buffer(be->stream, pb);
 }
 
-// Write ~150 ms of silence to build a cushion before real audio plays. ALSA
-// starts playback near-empty, so without this a single late datagram underruns
-// immediately and keeps re-underrunning; priming on open and after each recovery
-// keeps the stream smooth at low sample rates.
-void primePlayback(snd_pcm_t* pcm, const AudioStreamConfig& cfg) {
-    const int frames = cfg.sampleRate * 150 / 1000;
-    std::vector<int16_t> silence(static_cast<std::size_t>(frames) * cfg.channels, 0);
-    snd_pcm_writei(pcm, silence.data(), frames);
+void PwBackend::onStateChanged(void* data, enum pw_stream_state /*old*/,
+                               enum pw_stream_state state, const char* error) {
+    auto* be = static_cast<PwBackend*>(data);
+    if (state == PW_STREAM_STATE_ERROR && be->status)
+        be->status(std::string("Audio: PipeWire stream error: ") + (error ? error : "unknown"));
+}
+
+bool PwBackend::init(int rate, int ch, const std::string& target, std::string& err) {
+    // Value-initialized then assigned (rather than a designated initializer) so the
+    // unused callbacks are zeroed without tripping -Wmissing-field-initializers.
+    static const pw_stream_events streamEvents = [] {
+        pw_stream_events e{};
+        e.version       = PW_VERSION_STREAM_EVENTS;
+        e.state_changed = PwBackend::onStateChanged;
+        e.process       = PwBackend::onProcess;
+        return e;
+    }();
+
+    static std::once_flag pwInitOnce;
+    std::call_once(pwInitOnce, [] { pw_init(nullptr, nullptr); });
+
+    channels = ch;
+    std::uint32_t cap = 1024;
+    while (cap < static_cast<std::uint32_t>(rate) * static_cast<std::uint32_t>(ch))
+        cap <<= 1;  // >= ~1 s of audio, power of two
+    ring.assign(cap, 0);
+    mask = cap - 1;
+    head.store(0);
+    tail.store(0);
+
+    // Pre-fill the cushion before the loop runs so the first process() callbacks
+    // play silence rather than underrunning while the first packets arrive.
+    std::vector<std::int16_t> prime(static_cast<std::size_t>(rate) * kTargetMs / 1000 * ch, 0);
+    pushSamples(prime.data(), static_cast<std::uint32_t>(prime.size()));
+
+    loop = pw_thread_loop_new("xlog2-audio", nullptr);
+    if (loop == nullptr) {
+        err = "pw_thread_loop_new failed";
+        return false;
+    }
+
+    pw_properties* props = pw_properties_new(
+        PW_KEY_MEDIA_TYPE,        "Audio",
+        PW_KEY_MEDIA_CATEGORY,    "Playback",
+        PW_KEY_MEDIA_ROLE,        "Music",  // monitoring, not comms: avoid ducking
+        PW_KEY_APP_NAME,          "xlog2",
+        PW_KEY_NODE_NAME,         "xlog2-rig-audio",
+        PW_KEY_NODE_DESCRIPTION,  "xlog2 rig audio",
+        nullptr);
+    if (!target.empty() && target != "default")
+        pw_properties_set(props, PW_KEY_TARGET_OBJECT, target.c_str());
+
+    stream = pw_stream_new_simple(pw_thread_loop_get_loop(loop), "xlog2-rig-audio",
+                                  props, &streamEvents, this);
+    if (stream == nullptr) {
+        err = "pw_stream_new_simple failed";
+        pw_thread_loop_destroy(loop);
+        loop = nullptr;
+        return false;
+    }
+
+    std::uint8_t podBuf[1024];
+    spa_pod_builder b = SPA_POD_BUILDER_INIT(podBuf, sizeof(podBuf));
+    spa_audio_info_raw info{};
+    info.format   = SPA_AUDIO_FORMAT_S16;
+    info.channels = static_cast<std::uint32_t>(ch);
+    info.rate     = static_cast<std::uint32_t>(rate);
+    if (ch == 1) {
+        info.position[0] = SPA_AUDIO_CHANNEL_MONO;
+    } else {
+        info.position[0] = SPA_AUDIO_CHANNEL_FL;
+        info.position[1] = SPA_AUDIO_CHANNEL_FR;
+    }
+    const spa_pod* params[1];
+    params[0] = spa_format_audio_raw_build(&b, SPA_PARAM_EnumFormat, &info);
+
+    const auto flags = static_cast<pw_stream_flags>(
+        PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS | PW_STREAM_FLAG_RT_PROCESS);
+    if (pw_stream_connect(stream, PW_DIRECTION_OUTPUT, PW_ID_ANY, flags, params, 1) < 0) {
+        err = "pw_stream_connect failed";
+        shutdown();
+        return false;
+    }
+    if (pw_thread_loop_start(loop) < 0) {
+        err = "pw_thread_loop_start failed";
+        shutdown();
+        return false;
+    }
+    return true;
+}
+
+void PwBackend::shutdown() {
+    if (loop != nullptr)
+        pw_thread_loop_stop(loop);  // quiesce the RT thread before tearing down
+    if (stream != nullptr) {
+        pw_stream_destroy(stream);
+        stream = nullptr;
+    }
+    if (loop != nullptr) {
+        pw_thread_loop_destroy(loop);
+        loop = nullptr;
+    }
 }
 
 }  // namespace
@@ -157,8 +334,17 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
         return;
     }
 
-    snd_pcm_t*           pcm = nullptr;
-    bool                 playbackReported = false;
+    PwBackend pw;
+    pw.status = [this](const std::string& s) { postStatus(s); };
+    std::string perr;
+    if (!pw.init(cfg.sampleRate, cfg.channels, cfg.device, perr)) {
+        postStatus("Audio: PipeWire init failed: " + perr);
+        opus_decoder_destroy(dec);
+        ::close(fd);
+        running_.store(false);
+        return;
+    }
+
     std::vector<int16_t> pcmBuf(static_cast<std::size_t>(kMaxFrame) * cfg.channels);
     std::uint8_t         rx[kMaxPacket];
 
@@ -175,25 +361,42 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
     std::uint32_t expectedSeq = 0;
     const int     defaultFrame = std::max(1, cfg.sampleRate / 50);  // 20 ms fallback
 
-    // Send one decoded/concealed frame to the skimmer tap and ALSA. Returns false if
-    // the playback device died (caller reopens it on the next datagram).
-    auto play = [&](int frames) -> bool {
+    // Drift-compensation state. Watermarks are in frames (= samples/channel, the
+    // unit the ring reports). avgBuffered is a slow EMA so the compress (drop)
+    // decision tracks clock drift, not transient jitter bursts.
+    const int targetFrames = cfg.sampleRate * kTargetMs / 1000;
+    const int lowFrames    = cfg.sampleRate * kLowMs / 1000;
+    const int highFrames   = cfg.sampleRate * kHighMs / 1000;
+    int       lastFrameSamples = defaultFrame;  // PLC frame size; tracks the stream
+    double    avgBuffered      = -1.0;
+
+    // Send one decoded/concealed frame to the skimmer tap and the playout ring.
+    auto play = [&](int frames) {
         if (frames <= 0)
-            return true;
+            return;
         if (onPcm && !muted_.load(std::memory_order_relaxed))
             onPcm(pcmBuf.data(), frames, cfg.channels, cfg.sampleRate);
         if (muted_.load(std::memory_order_relaxed))
             std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});
-        const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
-        if (w == -EPIPE) {
-            snd_pcm_prepare(pcm);     // underrun: recover...
-            primePlayback(pcm, cfg);  // ...and re-cushion so it doesn't recur immediately
-        } else if (w < 0) {
-            snd_pcm_close(pcm);
-            pcm = nullptr;  // reopen on the next datagram
-            return false;
+        pw.pushSamples(pcmBuf.data(), static_cast<std::uint32_t>(frames) * cfg.channels);
+    };
+
+    // Expand: while the fill is below target, synthesize PLC frames to top it up.
+    // Runs every tick (even with no packet), so a jitter gap or a drained ring is
+    // refilled with extrapolated audio instead of underrunning into silence.
+    auto topUp = [&]() {
+        if (!haveSeq)
+            return;  // need a warmed-up decoder before PLC is meaningful
+        long b = pw.occupancyFrames();
+        if (b >= lowFrames)
+            return;
+        for (int i = 0; i < kMaxInsertPerTick && b < targetFrames; ++i) {
+            const int g = opus_decode(dec, nullptr, 0, pcmBuf.data(), lastFrameSamples, 0);
+            if (g <= 0)
+                break;
+            play(g);
+            b += g;
         }
-        return true;
     };
 
     postStatus("Audio: streaming from " + cfg.host + ":" + std::to_string(cfg.port) + ".");
@@ -211,7 +414,11 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
         }
         const auto until = std::chrono::duration_cast<std::chrono::milliseconds>(
                                std::min(nextKeepalive, nextStats) - now).count();
-        const int timeoutMs = until > 0 ? static_cast<int>(until) : 0;
+        int timeoutMs = until > 0 ? static_cast<int>(until) : 0;
+        // Once audio is flowing, wake at least every kTickMs so the ring is serviced
+        // (PLC top-up) during gaps between packets, not only on arrival.
+        if (haveSeq && timeoutMs > kTickMs)
+            timeoutMs = kTickMs;
 
         pollfd fds[2] = {{fd, POLLIN, 0}, {wake_[0], POLLIN, 0}};
         const int rc = ::poll(fds, 2, timeoutMs);
@@ -222,29 +429,10 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
         }
         if (fds[1].revents & POLLIN)
             break;  // stop() signalled
-        if (!(fds[0].revents & POLLIN))
-            continue;  // keepalive timeout, no audio yet
-
-        // Lazily (re)open playback so a missing device never blocks startup and a
-        // device that disappears mid-stream is retried.
-        if (pcm == nullptr) {
-            pcm = openPlayback(cfg);
-            if (pcm == nullptr) {
-                if (!playbackReported) {
-                    postStatus("Audio: playback device " + cfg.device + " unavailable.");
-                    playbackReported = true;
-                }
-                // Drain and discard so the socket buffer does not grow unbounded.
-                while (::recv(fd, rx, sizeof(rx), MSG_DONTWAIT) > 0) {
-                }
-                continue;
-            }
-            primePlayback(pcm, cfg);  // start with a cushion so jitter can't underrun
-            postStatus("Audio: playing to " + cfg.device + ".");
-            playbackReported = false;
-        }
+        const bool haveData = (fds[0].revents & POLLIN);
 
         // Drain every queued datagram, decoding and playing each.
+        if (haveData)
         for (;;) {
             const ssize_t n = ::recv(fd, rx, sizeof(rx), MSG_DONTWAIT);
             if (n < 0)
@@ -262,7 +450,6 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                 frameSamples = defaultFrame;
 
             // Conceal the gap between the last decoded packet and this one.
-            bool deviceDead = false;
             if (haveSeq) {
                 const std::int32_t diff = static_cast<std::int32_t>(seq - expectedSeq);
                 if (diff < 0)
@@ -277,28 +464,38 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                     const int g = useFec
                         ? opus_decode(dec, pkt, len, pcmBuf.data(), frameSamples, 1)
                         : opus_decode(dec, nullptr, 0, pcmBuf.data(), frameSamples, 0);
-                    if (g > 0 && !play(g)) {
-                        deviceDead = true;
-                        break;
-                    }
+                    play(g);
                 }
             }
-            if (deviceDead)
-                break;
 
             const int frames = opus_decode(dec, pkt, len, pcmBuf.data(), kMaxFrame, 0);
             if (frames < 0)
                 continue;  // corrupt packet (don't advance expectedSeq off a bad header)
             expectedSeq = seq + 1;
             haveSeq = true;
+            lastFrameSamples = frameSamples;
             ++framesDecoded;
-            if (!play(frames))
-                break;
+
+            // Compress: if the smoothed fill runs long (DAC slower than the rig's
+            // capture clock, or latency accreted from jitter top-ups) drop this frame
+            // to shed ~one frame of latency. The EMA keeps transient bursts from
+            // triggering a drop; snapping the average to target after one keeps drops
+            // isolated rather than clustered.
+            const long b = pw.occupancyFrames();
+            avgBuffered = avgBuffered < 0 ? b : avgBuffered + (b - avgBuffered) * kFillEmaAlpha;
+            if (avgBuffered > highFrames) {
+                avgBuffered = targetFrames;
+                continue;  // drop (decoder state already advanced)
+            }
+            play(frames);
         }
+
+        // Maintain the cushion every tick, including when no packet arrived: expand
+        // with PLC if the fill has run low (jitter gap or drained ring).
+        topUp();
     }
 
-    if (pcm != nullptr)
-        snd_pcm_close(pcm);
+    pw.shutdown();
     opus_decoder_destroy(dec);
     ::close(fd);
 }
