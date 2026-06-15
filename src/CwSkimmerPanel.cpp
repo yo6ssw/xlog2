@@ -51,6 +51,13 @@ CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     waterfall_.set_draw_func(sigc::mem_fun(*this, &CwSkimmerPanel::onDrawWaterfall));
     append(waterfall_);
 
+    // Rows arrive in bursts (the skimmer emits several per audio chunk, reaching
+    // us as a clump of queued UI posts), so scrolling on arrival lurches several
+    // pixels then stalls. Buffer the rows and drain them on a steady ~60 Hz timer
+    // (≤1 row/tick, mild catch-up on backlog) for a smooth scroll regardless of
+    // arrival jitter.
+    Glib::signal_timeout().connect(sigc::mem_fun(*this, &CwSkimmerPanel::drainWaterfall), 16);
+
     // --- detection-gate slider: higher = stronger signals only -------------
     auto* gateBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     gateBox->set_spacing(6);
@@ -170,6 +177,16 @@ void CwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
                                   double maxHz) {
     minHz_ = minHz;
     maxHz_ = maxHz;
+    if (mags.empty())
+        return;
+    pending_.push_back(mags);
+    // Bound latency under a sustained overrun: never hold more than a screen's
+    // worth of backlog — drop the oldest rather than fall ever further behind.
+    while (static_cast<int>(pending_.size()) > kHistory)
+        pending_.pop_front();
+}
+
+void CwSkimmerPanel::scrollOneRow(const std::vector<float>& mags) {
     const int cols = static_cast<int>(mags.size());
     if (cols <= 0)
         return;
@@ -182,7 +199,20 @@ void CwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
                  static_cast<std::size_t>(cols_) * (kHistory - 1) * sizeof(uint32_t));
     for (int x = 0; x < cols_; ++x)
         pixels_[x] = heat(mags[x]);
+}
+
+bool CwSkimmerPanel::drainWaterfall() {
+    if (pending_.empty())
+        return true;  // keep the timer running
+    // One row per tick normally; advance a couple when a burst has piled up so the
+    // backlog drains without a visible multi-pixel jump.
+    int steps = pending_.size() > 8 ? 2 : 1;
+    for (; steps > 0 && !pending_.empty(); --steps) {
+        scrollOneRow(pending_.front());
+        pending_.pop_front();
+    }
     waterfall_.queue_draw();
+    return true;
 }
 
 void CwSkimmerPanel::onDrawWaterfall(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h) {
@@ -285,6 +315,7 @@ void CwSkimmerPanel::clear() {
     store_->remove_all();
     items_.clear();
     labels_.clear();
+    pending_.clear();
     std::fill(pixels_.begin(), pixels_.end(), 0);
     waterfall_.queue_draw();
 }

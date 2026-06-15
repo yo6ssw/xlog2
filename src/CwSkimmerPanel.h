@@ -5,6 +5,7 @@
 #include <gtkmm.h>
 
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <string>
 #include <vector>
@@ -40,6 +41,8 @@ private:
         const Glib::ustring& title,
         std::function<Glib::ustring(const SkimmerItem&)> getter, bool expand = false);
     void onDrawWaterfall(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
+    void scrollOneRow(const std::vector<float>& mags);  // advance the image one row
+    bool drainWaterfall();                              // steady-cadence playout tick
 
     Gtk::DrawingArea waterfall_;
     Gtk::Scale*      gateScale_ = nullptr;
@@ -64,4 +67,5 @@ private:
     std::vector<uint32_t> pixels_;
     double                minHz_ = 0.0, maxHz_ = 0.0;
     std::map<double, std::string> labels_;  // pitch Hz -> callsign tag
+    std::deque<std::vector<float>> pending_;  // rows awaiting steady playout
 };

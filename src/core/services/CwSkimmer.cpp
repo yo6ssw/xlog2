@@ -558,6 +558,7 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
     std::map<int, Channel> channels;   // id (original bin) -> state
     std::map<int, int>     cand;       // candidate peak bin -> consecutive-frame count
 
+    // Target waterfall row rate (rows/s); the divisor sets the scroll speed.
     int waterfallDecim = std::max(1, static_cast<int>((rate / hop) / 38.0));
     int sinceEmit = 0;
     std::vector<float> rowMax(kDisplayCols, 0.0f);

@@ -10,11 +10,13 @@
 #include <QSlider>
 #include <QStandardItemModel>
 #include <QTableView>
+#include <QTimer>
 #include <QVBoxLayout>
 
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <map>
 #include <vector>
 
@@ -58,11 +60,32 @@ public:
     explicit SkimmerWaterfall(QWidget* parent = nullptr) : QWidget(parent) {
         setMinimumHeight(120);
         setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+        // Rows arrive in bursts: the skimmer worker emits several per audio chunk
+        // and they reach us as a clump of queued UI posts, so scrolling on arrival
+        // lurches multiple pixels then stalls. Buffer the rows and drain them on a
+        // steady ~60 Hz timer (≤1 px/frame, mild catch-up on backlog) so the
+        // waterfall scrolls smoothly regardless of arrival jitter.
+        scrollTimer_ = new QTimer(this);
+        scrollTimer_->setTimerType(Qt::PreciseTimer);
+        connect(scrollTimer_, &QTimer::timeout, this, [this] { drain(); });
+        scrollTimer_->start(16);
     }
 
     void addRow(const std::vector<float>& mags, double minHz, double maxHz) {
         minHz_ = minHz;
         maxHz_ = maxHz;
+        if (mags.empty())
+            return;
+        pending_.push_back(mags);
+        // Bound latency under a sustained overrun: never hold more than a screen's
+        // worth of backlog — drop the oldest rather than fall ever further behind.
+        while (static_cast<int>(pending_.size()) > kHistory)
+            pending_.pop_front();
+    }
+
+private:
+    // Advance the spectrogram by one buffered row (scroll down, write it on top).
+    void scrollOne(const std::vector<float>& mags) {
         const int cols = static_cast<int>(mags.size());
         if (cols <= 0)
             return;
@@ -71,15 +94,28 @@ public:
             img_.fill(Qt::black);  // QImage is uninitialised; clear so the not-yet-
                                    // filled scrollback shows black, not stale memory
         }
-        // Scroll down by one scanline, then write the new row at the top.
         const int bpl = img_.bytesPerLine();
         for (int y = img_.height() - 1; y > 0; --y)
             std::memcpy(img_.scanLine(y), img_.scanLine(y - 1), bpl);
         QRgb* top = reinterpret_cast<QRgb*>(img_.scanLine(0));
         for (int x = 0; x < cols; ++x)
             top[x] = heat(mags[x]);
+    }
+
+    // Steady-cadence consumer: one row per tick normally; advance a couple when a
+    // burst has piled up so the backlog drains without a visible multi-pixel jump.
+    void drain() {
+        if (pending_.empty())
+            return;
+        int steps = pending_.size() > 8 ? 2 : 1;
+        for (; steps > 0 && !pending_.empty(); --steps) {
+            scrollOne(pending_.front());
+            pending_.pop_front();
+        }
         update();
     }
+
+public:
 
     // labels: x-position (Hz) -> callsign text, drawn along the top.
     void setLabels(std::map<double, QString> labels) {
@@ -125,6 +161,8 @@ private:
     QImage  img_;
     double  minHz_ = 0.0, maxHz_ = 0.0;
     std::map<double, QString> labels_;
+    std::deque<std::vector<float>> pending_;  // rows awaiting steady playout
+    QTimer* scrollTimer_ = nullptr;
 };
 
 // -----------------------------------------------------------------------------
