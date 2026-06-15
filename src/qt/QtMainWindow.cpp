@@ -347,6 +347,33 @@ void QtMainWindow::registerPage(QtLogPage* page) {
         keyer_.send(t.toStdString());
     });
     connect(page, &QtLogPage::abortCw, this, [this]() { keyer_.abort(); });
+
+    // Row context menu "Move to": list every other open logbook, and perform
+    // the move (add to the target, remove from this page) on request.
+    page->queryMoveTargets = [this, page]() {
+        std::vector<std::pair<std::string, LogPagePresenter*>> out;
+        for (int i = 0; i < tabs_->count(); ++i)
+            if (auto* p = qobject_cast<QtLogPage*>(tabs_->widget(i)); p && p != page)
+                out.emplace_back(p->title(), &p->presenter());
+        return out;
+    };
+    page->requestMove = [this, page](long id, LogPagePresenter* target) {
+        moveQso(page, id, target);
+    };
+}
+
+void QtMainWindow::moveQso(QtLogPage* from, long id, LogPagePresenter* target) {
+    if (!from || !target)
+        return;
+    const Qso* q = from->presenter().findQso(id);
+    if (!q)
+        return;
+    Qso copy = *q;
+    copy.id = 0;  // the target assigns a fresh row id on insert
+    const std::string call = copy.call;
+    target->addExternalQso(copy);     // add + refresh + tab-title update
+    from->presenter().deleteQso(id);  // remove from the source
+    setStatus("Moved QSO with " + call + " to " + target->title() + ".");
 }
 
 void QtMainWindow::updateTabTitle(QtLogPage* page) {

@@ -11,6 +11,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenu>
+#include <QMessageBox>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
 #include <QTableView>
@@ -103,6 +104,11 @@ void QtLogPage::buildUi() {
                 menu.exec(header->mapToGlobal(pos));
             });
     outer->addWidget(table_, 1);
+
+    // Right-click a row for the Delete / Move to context menu.
+    table_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(table_, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint& pos) { showRowContextMenu(pos); });
 
     connect(search_, &QLineEdit::textChanged, this,
             [this](const QString& t) { proxy_->setFilterFixedString(t); });
@@ -215,6 +221,48 @@ void QtLogPage::onSelectionChanged() {
         return;
     const int sourceRow = proxy_->mapToSource(sel.first()).row();
     presenter_.onRowSelected(model_->idAt(sourceRow));
+}
+
+void QtLogPage::showRowContextMenu(const QPoint& pos) {
+    const QModelIndex idx = table_->indexAt(pos);
+    if (!idx.isValid())
+        return;
+    table_->selectRow(idx.row());  // also loads it into the form
+    const long id = model_->idAt(proxy_->mapToSource(idx).row());
+    if (id == 0)
+        return;
+
+    QMenu menu;
+    connect(menu.addAction("Delete QSO"), &QAction::triggered, this,
+            [this, id]() { confirmDeleteRow(id); });
+
+    // "Move to" lists every other open logbook (supplied by the shell).
+    if (queryMoveTargets) {
+        const auto targets = queryMoveTargets();
+        if (!targets.empty()) {
+            QMenu* sub = menu.addMenu("Move to");
+            for (const auto& [title, target] : targets)
+                connect(sub->addAction(QString::fromStdString(title)),
+                        &QAction::triggered, this, [this, id, target]() {
+                            if (requestMove)
+                                requestMove(id, target);
+                        });
+        }
+    }
+    menu.exec(table_->viewport()->mapToGlobal(pos));
+}
+
+void QtLogPage::confirmDeleteRow(long id) {
+    const Qso* q = presenter_.findQso(id);
+    if (!q)
+        return;
+    const QString call = q->call.empty() ? QStringLiteral("this QSO")
+                                         : QString::fromStdString(q->call);
+    if (QMessageBox::question(
+            this, "Delete QSO",
+            QString("Delete %1?\n\nThis permanently removes the QSO from the logbook.")
+                .arg(call)) == QMessageBox::Yes)
+        presenter_.deleteQso(id);
 }
 
 // --- ILogPageView ------------------------------------------------------------

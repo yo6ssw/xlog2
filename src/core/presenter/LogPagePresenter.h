@@ -67,6 +67,12 @@ public:
     void onDelete();
     void onClear();
     void onRowSelected(long id);    // load a stored row into the form
+
+    // Row context-menu operations (identify the QSO by its stored id, not the
+    // form's editingId_, so they work on any right-clicked row).
+    const Qso* findQso(long id) const;  // stored QSO by id, nullptr if none
+    void deleteQso(long id);            // delete a specific stored QSO
+
     void onSetNow();
     void onLookupCallClicked();
     void onSendCwClicked(int index);

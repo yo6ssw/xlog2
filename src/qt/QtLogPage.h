@@ -9,7 +9,10 @@
 #include <QWidget>
 
 #include <array>
+#include <functional>
 #include <string>
+#include <utility>
+#include <vector>
 
 class QLineEdit;
 class QComboBox;
@@ -29,6 +32,12 @@ public:
     explicit QtLogPage(QWidget* parent = nullptr);
 
     LogPagePresenter& presenter() { return presenter_; }
+
+    // Shell-wired hooks for the row context menu's "Move to" submenu.
+    // queryMoveTargets returns (title, presenter) for every OTHER open logbook;
+    // requestMove asks the shell to move the QSO with the given id there.
+    std::function<std::vector<std::pair<std::string, LogPagePresenter*>>()> queryMoveTargets;
+    std::function<void(long, LogPagePresenter*)> requestMove;
 
     // Logbook operations (delegate to the presenter).
     void newInMemory()                       { presenter_.newInMemory(); }
@@ -78,6 +87,9 @@ signals:
 private:
     void buildUi();
     void onSelectionChanged();
+    // Row context menu (right-click a QSO): Delete + Move to.
+    void showRowContextMenu(const QPoint& pos);
+    void confirmDeleteRow(long id);
 
     LogPagePresenter presenter_;
 

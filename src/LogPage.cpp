@@ -86,10 +86,22 @@ Glib::RefPtr<Gtk::ColumnViewColumn> LogPage::makeColumn(
     const Glib::ustring& title, std::function<std::string(const Qso&)> getter,
     bool expand) {
     auto factory = Gtk::SignalListItemFactory::create();
-    factory->signal_setup().connect([](const Glib::RefPtr<Gtk::ListItem>& li) {
+    factory->signal_setup().connect([this](const Glib::RefPtr<Gtk::ListItem>& li) {
         auto* label = Gtk::make_managed<Gtk::Label>();
         label->set_xalign(0.0);
         li->set_child(*label);
+
+        // Secondary-button click anywhere in the row opens the row context menu.
+        // The ListItem outlives its child label, so a raw pointer is safe; its
+        // get_item() yields whichever QSO is currently bound to this row slot.
+        auto click = Gtk::GestureClick::create();
+        click->set_button(GDK_BUTTON_SECONDARY);
+        Gtk::ListItem* liPtr = li.get();
+        click->signal_pressed().connect(
+            [this, liPtr, label](int, double x, double y) {
+                showRowContextMenu(liPtr, *label, x, y);
+            });
+        label->add_controller(click);
     });
     factory->signal_bind().connect(
         [getter](const Glib::RefPtr<Gtk::ListItem>& li) {
@@ -169,6 +181,87 @@ void LogPage::buildLogView() {
 
     columnView_.set_reorderable(true);  // drag headers to reorder
     buildColumnMenus();                 // right-click header for explicit reorder/hide
+
+    // Row context menu actions (Delete / Move to). The popover is parented once
+    // to the column view; showRowContextMenu rebuilds its model per click.
+    rowActions_ = Gio::SimpleActionGroup::create();
+    auto del = Gio::SimpleAction::create("delete");
+    del->signal_activate().connect(
+        [this](const Glib::VariantBase&) { confirmDeleteRow(contextId_); });
+    rowActions_->add_action(del);
+    auto move = Gio::SimpleAction::create(
+        "move", Glib::Variant<Glib::ustring>::variant_type());
+    move->signal_activate().connect([this](const Glib::VariantBase& p) {
+        const int idx = std::stoi(
+            Glib::VariantBase::cast_dynamic<Glib::Variant<Glib::ustring>>(p).get().raw());
+        if (idx >= 0 && idx < static_cast<int>(moveTargets_.size()) && requestMove)
+            requestMove(contextId_, moveTargets_[idx]);
+    });
+    rowActions_->add_action(move);
+    insert_action_group("row", rowActions_);
+
+    rowMenu_ = Gtk::make_managed<Gtk::PopoverMenu>();
+    rowMenu_->set_parent(columnView_);
+    rowMenu_->set_has_arrow(false);
+}
+
+void LogPage::showRowContextMenu(Gtk::ListItem* li, Gtk::Widget& anchor,
+                                 double x, double y) {
+    auto* item = dynamic_cast<QsoItem*>(li->get_item().get());
+    if (!item)
+        return;
+    contextId_ = item->qso.id;
+    selection_->set_selected(li->get_position());  // also loads it into the form
+
+    auto menu = Gio::Menu::create();
+    menu->append("Delete QSO", "row.delete");
+
+    // "Move to" lists every other open logbook (supplied by the shell).
+    moveTargets_.clear();
+    if (queryMoveTargets) {
+        const auto targets = queryMoveTargets();
+        if (!targets.empty()) {
+            auto sub = Gio::Menu::create();
+            for (std::size_t i = 0; i < targets.size(); ++i) {
+                moveTargets_.push_back(targets[i].second);
+                sub->append(targets[i].first, "row.move::" + std::to_string(i));
+            }
+            menu->append_submenu("Move to", sub);
+        }
+    }
+    rowMenu_->set_menu_model(menu);
+
+    // Pop up under the pointer: translate the click point (in the cell's
+    // coordinates) into the column view's space, the popover's parent.
+    if (auto p = anchor.compute_point(columnView_, Gdk::Graphene::Point(x, y)))
+        rowMenu_->set_pointing_to(
+            Gdk::Rectangle(static_cast<int>(p->get_x()),
+                           static_cast<int>(p->get_y()), 1, 1));
+    rowMenu_->popup();
+}
+
+void LogPage::confirmDeleteRow(long id) {
+    const Qso* q = presenter_.findQso(id);
+    if (!q)
+        return;
+    const Glib::ustring call = q->call.empty() ? Glib::ustring("this QSO")
+                                               : Glib::ustring(q->call);
+    auto dialog = Gtk::AlertDialog::create("Delete " + call + "?");
+    dialog->set_detail("This permanently removes the QSO from the logbook.");
+    dialog->set_buttons({"Cancel", "Delete"});
+    dialog->set_cancel_button(0);
+    dialog->set_default_button(0);
+    auto* win = dynamic_cast<Gtk::Window*>(get_root());
+    if (!win)
+        return;
+    dialog->choose(*win, [this, dialog, id](const Glib::RefPtr<Gio::AsyncResult>& res) {
+        try {
+            if (dialog->choose_finish(res) == 1)
+                presenter_.deleteQso(id);
+        } catch (const Glib::Error&) {
+            // dialog dismissed (Escape) — nothing to do
+        }
+    });
 }
 
 void LogPage::buildColumnMenus() {
