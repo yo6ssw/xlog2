@@ -252,8 +252,21 @@ void RigController::worker(std::shared_ptr<Run> run) {
             pbwidth_t cw = 0;
             if (rig_get_mode(asRig(rig_), RIG_VFO_CURR, &cm, &cw) == RIG_OK) {
                 const pbwidth_t tw = passbandForFilter(asRig(rig_), cm, setFilt);
-                if (tw > 0)
+                // A filter switch only changes the passband width, not the mode.
+                // hamlib's rig_set_mode short-circuits ("mode not changing, so
+                // ignoring") and never sends the command when the mode is
+                // unchanged AND the target VFO differs from the rig's current
+                // VFO — which is always the case via netrigctl (RIG_VFO_CURR is
+                // fixed up to VFOA while the remote reports its VFO as "Main").
+                // Our 500 ms poll caches the mode, so the width change is then
+                // dropped client-side and never reaches the rig. Pin the VFO
+                // first so the set takes hamlib's targetable branch and is
+                // actually transmitted — this is exactly what `rigctl` itself
+                // does (V VFOA; M ...; V Main).
+                if (tw > 0) {
+                    rig_set_vfo(asRig(rig_), RIG_VFO_A);
                     rig_set_mode(asRig(rig_), RIG_VFO_CURR, cm, tw);
+                }
             }
         }
 
