@@ -331,6 +331,10 @@ void LogPagePresenter::setCwMessages(const std::array<std::string, 9>& msgs) {
 }
 
 void LogPagePresenter::applyDxSpot(const std::string& call, double mhz) {
+    // Start a fresh entry for the spotted station: clearing drops any stale
+    // editingId_/name/QTH/locator from a previously loaded QSO, so the QRZ
+    // prefill (which only fills an empty locator) can populate the grid.
+    clearForm();
     view_.setCall(strutil::toUpper(call));
     setRigFrequency(mhz);  // fills freq + auto-detects band
     status("DX spot: " + strutil::toUpper(call) + " on " + formatMhz(mhz) + " MHz.");
