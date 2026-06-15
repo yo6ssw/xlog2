@@ -866,6 +866,7 @@ void MainWindow::applySettings(const Settings& s) {
     cfg().paddleLevel = s.paddleLevel;
     cfg().paddleSidetoneDevice = s.paddleSidetoneDevice;
     cfg().paddleMuteAudio = s.paddleMuteAudio;
+    cfg().paddleMuteTailMs = s.paddleMuteTailMs;
 
     cfg().audioHost = s.audioHost;
     cfg().audioPort = s.audioPort;
@@ -1007,6 +1008,7 @@ void MainWindow::startPaddleKeyer() {
     pc.wpm      = cfg().paddleWpm;
     pc.iambicB  = cfg().paddleIambicB;
     pc.autospace = cfg().paddleAutospace;
+    pc.muteTailMs = cfg().paddleMuteTailMs;
     pc.sidetone = cfg().paddleSidetone;
     pc.toneHz   = cfg().paddleToneHz;
     pc.level    = cfg().paddleLevel;

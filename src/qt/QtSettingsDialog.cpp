@@ -129,6 +129,8 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
         paddleDevice_ = new QLineEdit(qstr(s.paddleSidetoneDevice));
         paddleDevice_->setPlaceholderText("ALSA playback device, e.g. default");
         paddleMute_ = new QCheckBox("Mute rig audio while keying"); paddleMute_->setChecked(s.paddleMuteAudio);
+        paddleMuteTail_ = new QSpinBox; paddleMuteTail_->setRange(0, 5000); paddleMuteTail_->setSuffix(" ms");
+        paddleMuteTail_->setValue(s.paddleMuteTailMs);
         f->addRow("Host:", paddleHost_);
         f->addRow("Port:", paddlePort_);
         f->addRow("Speed (wpm):", paddleWpm_);
@@ -139,6 +141,7 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
         f->addRow("Volume (0–100):", paddleLevel_);
         f->addRow("Sidetone device:", paddleDevice_);
         f->addRow(paddleMute_);
+        f->addRow("Mute tail:", paddleMuteTail_);
     }
 
     // --- Audio ---
@@ -235,6 +238,7 @@ Settings QtSettingsDialog::result() const {
     s.paddleLevel = paddleLevel_->value();
     s.paddleSidetoneDevice = sstrOr(paddleDevice_, "default");
     s.paddleMuteAudio = paddleMute_->isChecked();
+    s.paddleMuteTailMs = paddleMuteTail_->value();
 
     s.audioHost = sstrOr(audioHost_, "127.0.0.1");
     s.audioPort = audioPort_->value();

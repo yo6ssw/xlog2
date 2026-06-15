@@ -41,6 +41,7 @@ Settings Settings::load(const IniFile& ini) {
     s.paddleLevel   = ini.getInt("paddle", "level", s.paddleLevel);
     s.paddleSidetoneDevice = ini.getString("paddle", "sidetone_device", s.paddleSidetoneDevice);
     s.paddleMuteAudio = ini.getBool("paddle", "mute_audio", s.paddleMuteAudio);
+    s.paddleMuteTailMs = ini.getInt("paddle", "mute_tail_ms", s.paddleMuteTailMs);
 
     s.audioEnabled    = ini.getBool("audio", "enabled", s.audioEnabled);
     s.audioHost       = ini.getString("audio", "host", s.audioHost);
@@ -109,6 +110,7 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("paddle", "level", paddleLevel);
     ini.setString("paddle", "sidetone_device", paddleSidetoneDevice);
     ini.setBool("paddle", "mute_audio", paddleMuteAudio);
+    ini.setInt("paddle", "mute_tail_ms", paddleMuteTailMs);
 
     ini.setBool("audio", "enabled", audioEnabled);
     ini.setString("audio", "host", audioHost);

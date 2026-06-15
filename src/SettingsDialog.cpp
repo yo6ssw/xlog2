@@ -175,6 +175,7 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         paddleDevice_->set_placeholder_text("ALSA playback device, e.g. default");
         paddleMute_ = Gtk::make_managed<Gtk::CheckButton>("Mute rig audio while keying");
         paddleMute_->set_active(s.paddleMuteAudio);
+        paddleMuteTail_ = entry(std::to_string(s.paddleMuteTailMs));
         field(g, "Host:", *paddleHost_, 0);
         field(g, "Port:", *paddlePort_, 1);
         field(g, "Speed (wpm):", *paddleWpm_, 2);
@@ -185,6 +186,7 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         field(g, "Volume (0–100):", *paddleLevel_, 7);
         field(g, "Sidetone device:", *paddleDevice_, 8);
         g.attach(*paddleMute_, 1, 9);
+        field(g, "Mute tail (ms):", *paddleMuteTail_, 10);
     }
 
     // --- Audio ---
@@ -291,6 +293,7 @@ Settings SettingsDialog::collect() const {
     s.paddleLevel = toInt(paddleLevel_, 50);
     s.paddleSidetoneDevice = strOr(paddleDevice_, "default");
     s.paddleMuteAudio = paddleMute_->get_active();
+    s.paddleMuteTailMs = std::max(0, toInt(paddleMuteTail_, s.paddleMuteTailMs));
 
     s.audioHost = strOr(audioHost_, "127.0.0.1");
     s.audioPort = toInt(audioPort_, 7355);

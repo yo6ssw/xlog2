@@ -44,8 +44,9 @@ public:
     // streaming — a live "the stream is working" indicator for the UI.
     std::function<void(unsigned long framesDecoded)> onStats;
     // A tap on the decoded PCM (int16, interleaved), fired straight from the
-    // worker thread for each datagram while unmuted — feeds the CW skimmer. Set
-    // it before start() and leave it set for the client's lifetime; the sink
+    // worker thread for every datagram — including while muted, so the CW skimmer
+    // keeps copying the band during transmit even though the output is silenced.
+    // Set it before start() and leave it set for the client's lifetime; the sink
     // (e.g. CwSkimmer::pushPcm) must be cheap and thread-safe.
     std::function<void(const int16_t* samples, int frames, int channels, int sampleRate)> onPcm;
 
@@ -59,8 +60,10 @@ public:
     bool isStreaming() const { return running_.load(); }
 
     // Mute playback without unsubscribing: the worker keeps receiving + decoding
-    // (so it stays subscribed and the decoder stays in sync) but plays silence.
-    // Used to silence the rig-audio stream while transmitting (see RemotePaddleKeyer).
+    // (so it stays subscribed and the decoder stays in sync) and still feeds the
+    // onPcm tap, but plays silence to the output device. Used to silence the
+    // rig-audio stream while transmitting (see RemotePaddleKeyer) without starving
+    // the CW skimmer.
     void setMuted(bool m) { muted_.store(m, std::memory_order_relaxed); }
 
 private:

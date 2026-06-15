@@ -266,7 +266,9 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
 
     // Transmit hangs on after the last key-up so the audio mute bridges normal
     // character/word spacing instead of flapping per element (a PTT-hang analogue).
-    const std::uint64_t hangUs = std::max<std::uint64_t>(400000ull, 10 * ditUs);
+    // The tail length is operator-configurable; 0 releases the mute at key-up.
+    const std::uint64_t hangUs =
+        static_cast<std::uint64_t>(std::max(0, cfg.muteTailMs)) * 1000ull;
     bool          transmitting = false;
     std::uint64_t lastKeyUpUs  = 0;
 
