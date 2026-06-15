@@ -6,6 +6,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <regex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -114,9 +115,18 @@ int editDistance(const std::string& a, const std::string& b) {
 //
 // Order: confident SOM (same length) -> exact string lookup (old behaviour) ->
 // edit-distance recovery (length errors). So it is never worse than exact lookup.
+//
+// `confident` reports whether the character was a clean decode (a committed SOM
+// fit or an exact hard-classified lookup) rather than an edit-distance recovery
+// of a malformed symbol. It gates the master-list substitution correction
+// (`lookupCall`): a cleanly-decoded character is never overwritten, so a valid
+// call that is merely absent from the list (e.g. a special-event `RI0SP`) is not
+// rewritten into a one-edit list neighbour (`RA0SP`). Only an uncertain (length-
+// error-recovered) character is open to substitution.
 char decodeChar(const std::vector<float>& dur, const std::string& sym,
-                double dit, double dah, bool mature) {
+                double dit, double dah, bool mature, bool& confident) {
     const auto& t = morseTable();
+    confident = false;
 
     // 1) SOM: nearest same-length pattern by per-element duration distance (mean
     //    squared error in dit units). This is the primary decision *once the
@@ -147,14 +157,18 @@ char decodeChar(const std::vector<float>& dur, const std::string& sym,
         // Commit only to a good fit that is clearly ahead of the runner-up (a
         // *ratio* margin, which scales with the error magnitude — so a pattern
         // fitting ~2x better wins, while a near-tie abstains rather than guesses).
-        if (bestCh && best < 0.5 && second > best * 1.8)
+        if (bestCh && best < 0.5 && second > best * 1.8) {
+            confident = true;
             return bestCh;
+        }
     }
 
     // 2) Exact lookup of the hard-classified string (the original primary path;
     //    also the path taken during cold start before the SOM is trusted).
-    if (auto it = t.find(sym); it != t.end())
+    if (auto it = t.find(sym); it != t.end()) {
+        confident = true;
         return it->second;
+    }
 
     // 3) Edit-distance recovery for length errors (a merged/split element makes an
     //    invalid pattern). Confident single edit only, and not on short symbols
@@ -178,7 +192,16 @@ char decodeChar(const std::vector<float>& dur, const std::string& sym,
 // generated and looked up in the set, which is far cheaper than scanning a
 // 100k-entry list; the correction is accepted only when exactly one distinct
 // entry matches, so an ambiguous near-call is never silently changed.
-std::string lookupCall(const std::string& tok, const CallSet& db, bool& known) {
+//
+// `conf` is aligned 1:1 with `tok`: '1' where the character was a clean decode,
+// '0' where it was an uncertain (length-error-recovered) one. A *substitution*
+// is only attempted at uncertain positions, so a cleanly-decoded valid call that
+// is simply absent from the list (a special-event call) is never rewritten into
+// a one-edit list neighbour. Deletions/insertions still run everywhere: they
+// repair a token that came out the wrong length (a merged/split element), which
+// is inherently a decode error rather than a competing valid call.
+std::string lookupCall(const std::string& tok, const std::string& conf,
+                       const CallSet& db, bool& known) {
     known = false;
     if (db.count(tok)) { known = true; return tok; }
     static const char alpha[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789/";
@@ -188,12 +211,17 @@ std::string lookupCall(const std::string& tok, const CallSet& db, bool& known) {
         v = tok; v.erase(i, 1);
         if (db.count(v)) hits.insert(v);
     }
-    for (std::size_t i = 0; i < tok.size(); ++i)          // substitutions
+    for (std::size_t i = 0; i < tok.size(); ++i) {        // substitutions
+        // Skip a character the decoder was sure about — overwriting it would
+        // turn one valid call into another (the RI0SP→RA0SP failure mode).
+        if (i >= conf.size() || conf[i] != '0')
+            continue;
         for (const char* a = alpha; *a; ++a) {
             if (*a == tok[i]) continue;
             v = tok; v[i] = *a;
             if (db.count(v)) hits.insert(v);
         }
+    }
     for (std::size_t i = 0; i <= tok.size(); ++i)         // insertions
         for (const char* a = alpha; *a; ++a) {
             v = tok; v.insert(v.begin() + i, *a);
@@ -203,11 +231,30 @@ std::string lookupCall(const std::string& tok, const CallSet& db, bool& known) {
     return tok;  // not in the DB and no unambiguous correction — keep the guess
 }
 
-// The last whitespace-delimited token of `text`, if it looks like a callsign
-// (letters + digits, 3..10 chars, at least one of each, only [A-Z0-9/]). When a
-// master-callsign set is supplied it is also validated/corrected against it and
-// `known` reports whether the result is confirmed in the list.
-std::string callsignIn(const std::string& text, const CallSet* db, bool& known) {
+// Amateur-callsign *syntax* check, applied before a decoded token is treated as
+// a callsign at all (so noise words and prosigns — `TEST`, `CQ`, `599`, `QSO` —
+// are never surfaced or fed to the master-list correction). The structural core
+// is an ITU-style prefix (a letter + optional letter/digit, or a digit + letter)
+// + a single digit + a 1–4 letter suffix; it accepts every real call, including
+// 2-letter prefixes (`RI0SP`, `KH6AA`), digit-first prefixes (`9A1A`, `2E0ABC`)
+// and `E7`/`H4`-style letter+digit prefixes. The base is then wrapped to also
+// accept an optional **portable prefix** (`DL/…`) and **portable suffix**
+// (`…/P`, `…/MM`, `…/QRP`) — the parts a bare prefix-only pattern misses.
+bool isCallsign(const std::string& tok) {
+    static const std::regex re(
+        R"(^(?:[A-Z0-9]{1,4}/)?(?:[A-Z][A-Z0-9]?|[0-9][A-Z])\d[A-Z]{1,4}(?:/[A-Z0-9]{1,4})?$)",
+        std::regex::optimize);
+    return std::regex_match(tok, re);
+}
+
+// The last whitespace-delimited token of `text`, if it is a syntactically valid
+// callsign (`isCallsign`). When a master-callsign set is supplied it is also
+// validated/corrected against it and
+// `known` reports whether the result is confirmed in the list. `conf` is the
+// per-character decode-confidence string aligned 1:1 with `text` (see
+// `lookupCall`); it gates the substitution correction.
+std::string callsignIn(const std::string& text, const std::string& conf,
+                       const CallSet* db, bool& known) {
     known = false;
     std::size_t end = text.find_last_not_of(' ');
     if (end == std::string::npos)
@@ -215,21 +262,13 @@ std::string callsignIn(const std::string& text, const CallSet* db, bool& known) 
     std::size_t start = text.find_last_of(' ', end);
     start = (start == std::string::npos) ? 0 : start + 1;
     const std::string tok = text.substr(start, end - start + 1);
-    if (tok.size() < 3 || tok.size() > 10)
+    if (tok.size() < 3 || tok.size() > 16 || !isCallsign(tok))
         return {};
-    bool hasDigit = false, hasAlpha = false;
-    for (char c : tok) {
-        if (c >= '0' && c <= '9')
-            hasDigit = true;
-        else if (c >= 'A' && c <= 'Z')
-            hasAlpha = true;
-        else if (c != '/')
-            return {};
+    if (db && !db->empty()) {
+        const std::string tokConf =
+            start < conf.size() ? conf.substr(start, end - start + 1) : std::string{};
+        return lookupCall(tok, tokConf, *db, known);
     }
-    if (!(hasDigit && hasAlpha))
-        return {};
-    if (db && !db->empty())
-        return lookupCall(tok, *db, known);
     return tok;  // no DB: heuristic match only, never "known"
 }
 
@@ -291,6 +330,9 @@ struct Channel {
     std::vector<float> elemHops;  // raw mark durations (hops) of the char in progress,
                                   // for the duration-vector (SOM) character match
     std::string text;         // rolling decoded text
+    std::string conf;         // per-char decode confidence aligned 1:1 with `text`
+                              // ('1' clean decode, '0' length-error-recovered);
+                              // gates the master-list substitution correction
     std::string call;
     int    richChars = 0;     // count of decoded multi-element chars (real-CW evidence)
     bool   charDone = false;  // current gap already closed the character?
@@ -304,12 +346,15 @@ struct Channel {
     bool   callKnown = false; // ch.call is confirmed in the master-callsign DB
 };
 
-void appendChar(Channel& ch, char c, const CallSet* db) {
+void appendChar(Channel& ch, char c, bool confident, const CallSet* db) {
     ch.text.push_back(c);
-    if (ch.text.size() > 100)   // keep only the last 100 decoded chars in the UI
+    ch.conf.push_back(confident ? '1' : '0');  // kept aligned 1:1 with ch.text
+    if (ch.text.size() > 100) { // keep only the last 100 decoded chars in the UI
         ch.text.erase(0, ch.text.size() - 100);
+        ch.conf.erase(0, ch.conf.size() - 100);
+    }
     bool known = false;
-    if (std::string call = callsignIn(ch.text, db, known); !call.empty()) {
+    if (std::string call = callsignIn(ch.text, ch.conf, db, known); !call.empty()) {
         ch.call = call;
         ch.callKnown = known;
     }
@@ -317,9 +362,10 @@ void appendChar(Channel& ch, char c, const CallSet* db) {
 
 void closeSymbol(Channel& ch, const CallSet* db) {
     if (!ch.elemHops.empty()) {
+        bool confident = false;
         if (char c = decodeChar(ch.elemHops, ch.symbol, ch.markUnit, ch.dahUnit,
-                                ch.richChars >= 2)) {
-            appendChar(ch, c, db);
+                                ch.richChars >= 2, confident)) {
+            appendChar(ch, c, confident, db);
             // A valid character of two or more elements is evidence of real CW —
             // a lone band-noise burst only ever makes a one-element 'E' or 'T'.
             if (ch.elemHops.size() >= 2)
@@ -375,7 +421,7 @@ void growGap(Channel& ch, int gapHops, const CallSet* db) {
         ch.charDone = true;
     }
     if (!ch.wordDone && units >= 6.0 && !ch.text.empty() && ch.text.back() != ' ') {
-        appendChar(ch, ' ', db);
+        appendChar(ch, ' ', /*confident=*/true, db);  // a separator, never part of a token
         ch.wordDone = true;
         ch.dirty = true;
     }
