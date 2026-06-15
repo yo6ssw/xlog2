@@ -23,6 +23,11 @@ Settings Settings::load(const IniFile& ini) {
     s.qrzUser     = ini.getString("qrz", "username", s.qrzUser);
     s.qrzPassword = ini.getString("qrz", "password", s.qrzPassword);
 
+    s.myLocator   = ini.getString("station", "locator", s.myLocator);
+    s.mapDock     = ini.getString("map", "dock", s.mapDock);
+    s.mapVisible  = ini.getBool("map", "visible", s.mapVisible);
+    s.mapPanelPos = ini.getInt("map", "position", s.mapPanelPos);
+
     s.keyerHost  = ini.getString("keyer", "host", s.keyerHost);
     s.keyerPort  = ini.getInt("keyer", "port", s.keyerPort);
     s.keyerSpeed = ini.getInt("keyer", "speed", s.keyerSpeed);
@@ -92,6 +97,11 @@ void Settings::store(IniFile& ini) const {
 
     ini.setString("qrz", "username", qrzUser);
     ini.setString("qrz", "password", qrzPassword);
+
+    ini.setString("station", "locator", myLocator);
+    ini.setString("map", "dock", mapDock);
+    ini.setBool("map", "visible", mapVisible);
+    ini.setInt("map", "position", mapPanelPos);
 
     ini.setString("keyer", "host", keyerHost);
     ini.setInt("keyer", "port", keyerPort);

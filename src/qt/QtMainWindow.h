@@ -25,6 +25,7 @@ class QActionGroup;
 class QtDxClusterPanel;
 class QtRigPanel;
 class QtCwSkimmerPanel;
+class QtMapPanel;
 class QtLogPage;
 class LogPagePresenter;
 
@@ -87,6 +88,7 @@ private:
     void startPaddleKeyer();
     void onClusterConnectToggle();
     void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
+    void onMapDock(const std::string& side);      // move the map dock to a side
     void startSkimmer();
     void stopSkimmer();
 
@@ -132,12 +134,15 @@ private:
     QtRigPanel*       rigPanel_ = nullptr;
     QDockWidget*      skimmerDock_  = nullptr;
     QtCwSkimmerPanel* skimmerPanel_ = nullptr;
+    QDockWidget*      mapDock_  = nullptr;
+    QtMapPanel*       mapPanel_ = nullptr;
     QAction*          udpAction_ = nullptr;
     QAction*          audioAction_ = nullptr;
     QAction*          paddleAction_ = nullptr;
     QActionGroup*     dxDockGroup_ = nullptr;   // Cluster ▸ Dock radio (top/bottom/left/right)
     QActionGroup*     rigDockGroup_ = nullptr;  // Rig ▸ Dock radio
     QActionGroup*     skimmerDockGroup_ = nullptr;  // Skimmer ▸ Dock radio
+    QActionGroup*     mapDockGroup_ = nullptr;       // Map ▸ Dock radio
 
     // Latest frequency/mode from rig_.onUpdate, rendered together with the
     // passband/filter that arrives in the paired rig_.onFilter call.
@@ -152,5 +157,7 @@ private:
     Qt::Orientation   pendingRigDockOrient_ = Qt::Horizontal;
     int               pendingSkimmerDockSize_   = 0;
     Qt::Orientation   pendingSkimmerDockOrient_ = Qt::Horizontal;
+    int               pendingMapDockSize_   = 0;
+    Qt::Orientation   pendingMapDockOrient_ = Qt::Horizontal;
     bool              dockSizeRestored_  = false;
 };

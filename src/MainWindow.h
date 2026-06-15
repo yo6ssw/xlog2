@@ -10,6 +10,7 @@
 #include "IMainView.h"
 #include "Lotw.h"
 #include "MainPresenter.h"
+#include "MapPanel.h"
 #include "Qrz.h"
 #include "Qso.h"
 #include "RemotePaddleKeyer.h"
@@ -121,6 +122,12 @@ private:
     void startSkimmer();
     void stopSkimmer();
 
+    // --- world map ---
+    void onMapToggleShow();                     // show/hide the panel
+    void onMapDock(const Glib::ustring& side);  // dock-side radio action
+    void applyMapDock();                        // (re)build the paned
+    void applyMapConfig();                      // after load: dock + seed locator
+
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
     void onClusterToggleShow();       // show/hide the panel
@@ -194,6 +201,13 @@ private:
     Gtk::Paned       skimmerPaned_;                // wraps rigPaned_ + skimmerPanel_
     Glib::RefPtr<Gio::SimpleAction> skimmerShowAction_;
     Glib::RefPtr<Gio::SimpleAction> skimmerDockAction_;
+
+    // World-map panel + layout. mapPaned_ wraps the skimmer/rig/DX/notebook area
+    // (skimmerPaned_) and mapPanel_, so the map docks independently.
+    MapPanel         mapPanel_;
+    Gtk::Paned       mapPaned_;                     // wraps skimmerPaned_ + mapPanel_
+    Glib::RefPtr<Gio::SimpleAction> mapShowAction_;
+    Glib::RefPtr<Gio::SimpleAction> mapDockAction_;
     // Latest frequency/mode from rig_.onUpdate, rendered together with the
     // passband/filter that arrives in the paired rig_.onFilter call.
     double           lastMhz_ = 0.0;

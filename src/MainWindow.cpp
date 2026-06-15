@@ -90,9 +90,11 @@ MainWindow::MainWindow()
     notebook_.set_vexpand(true);
     notebook_.signal_switch_page().connect(
         [this](Gtk::Widget* page, guint) {
-            if (auto* lp = dynamic_cast<LogPage*>(page))
+            if (auto* lp = dynamic_cast<LogPage*>(page)) {
                 set_title("xlog2 — " + lp->title() + "  (" +
                           std::to_string(lp->qsoCount()) + " QSOs)");
+                mapPanel_.setTo(lp->presenter().currentLocator());  // map "to" = new tab
+            }
         });
 
     // The notebook and the DX-cluster panel share a Gtk::Paned whose
@@ -117,10 +119,13 @@ MainWindow::MainWindow()
     rigPaned_.set_vexpand(true);
     // The skimmer panel docks around the rig/DX/notebook area via a third paned.
     skimmerPaned_.set_vexpand(true);
-    vbox->append(skimmerPaned_);
+    // The map panel docks around the whole lot via a fourth paned.
+    mapPaned_.set_vexpand(true);
+    vbox->append(mapPaned_);
     applyDxDock();       // initial layout (defaults); reapplied after loadSettings
     applyRigDock();      // wraps paned_ + rigPanel_
     applySkimmerDock();  // wraps rigPaned_ + skimmerPanel_
+    applyMapDock();      // wraps skimmerPaned_ + mapPanel_
 
     cluster_.onSpot   = [this](const DxSpot& s) { dxPanel_.addSpot(s); };
     cluster_.onLine   = [this](const std::string& l) { dxPanel_.addLine(l); };
@@ -297,6 +302,11 @@ void MainWindow::buildActions() {
         "skimmershow", sigc::mem_fun(*this, &MainWindow::onSkimmerToggleShow), false);
     skimmerDockAction_ = add_action_radio_string(
         "skimmerdock", sigc::mem_fun(*this, &MainWindow::onSkimmerDock), "left");
+
+    mapShowAction_ = add_action_bool(
+        "mapshow", sigc::mem_fun(*this, &MainWindow::onMapToggleShow), false);
+    mapDockAction_ = add_action_radio_string(
+        "mapdock", sigc::mem_fun(*this, &MainWindow::onMapDock), "right");
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -368,6 +378,16 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     skimmerMenu->append_submenu("Doc_k", skimmerDockMenu);
     menu->append_submenu("S_kimmer", skimmerMenu);
 
+    auto mapMenu = Gio::Menu::create();
+    mapMenu->append("_Show panel", "win.mapshow");
+    auto mapDockMenu = Gio::Menu::create();
+    mapDockMenu->append("_Top",    "win.mapdock::top");
+    mapDockMenu->append("_Bottom", "win.mapdock::bottom");
+    mapDockMenu->append("_Left",   "win.mapdock::left");
+    mapDockMenu->append("_Right",  "win.mapdock::right");
+    mapMenu->append_submenu("Doc_k", mapDockMenu);
+    menu->append_submenu("_Map", mapMenu);
+
     auto clusterMenu = Gio::Menu::create();
     clusterMenu->append("_Show panel", "win.dxshow");
     clusterMenu->append("_Connect / Disconnect", "win.dxconnect");
@@ -434,6 +454,10 @@ void MainWindow::registerTab(LogPage* page) {
     page->signalAbortCw().connect([this]() {
         if (!keyer_.abort())
             setStatus("Keyer: " + keyer_.lastError());
+    });
+    page->signalLocator().connect([this, page](const std::string& g) {
+        if (page == currentPage())  // only the visible tab drives the map
+            mapPanel_.setTo(g);
     });
 
     // Row context menu "Move to": list every other open logbook, and perform
@@ -851,6 +875,8 @@ void MainWindow::applySettings(const Settings& s) {
     cfg().qrzUser = s.qrzUser;
     cfg().qrzPassword = s.qrzPassword;
 
+    cfg().myLocator = s.myLocator;
+
     cfg().keyerHost = s.keyerHost;
     cfg().keyerPort = s.keyerPort;
     cfg().keyerSpeed = s.keyerSpeed;
@@ -897,6 +923,8 @@ void MainWindow::applySettings(const Settings& s) {
     skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
     skimmer_.setBandwidthNorm(cfg().skimmerBwNormDb, cfg().skimmerBwNormRefHz,
                               cfg().skimmerBwOffsetDb);
+
+    mapPanel_.setFrom(cfg().myLocator);
 
     setStatus("Settings saved.");
 }
@@ -1225,6 +1253,62 @@ void MainWindow::stopSkimmer() {
     skimmerPanel_.clear();
 }
 
+// --- world map ---------------------------------------------------------------
+
+void MainWindow::applyMapDock() {
+    // Mirror applySkimmerDock() on mapPaned_, whose "content" child is the entire
+    // skimmer/rig/DX/notebook area (skimmerPaned_).
+    mapPaned_.property_start_child().set_value(nullptr);
+    mapPaned_.property_end_child().set_value(nullptr);
+    const bool horizontal = (cfg().mapDock == "left" || cfg().mapDock == "right");
+    mapPaned_.set_orientation(horizontal ? Gtk::Orientation::HORIZONTAL
+                                         : Gtk::Orientation::VERTICAL);
+    const bool panelFirst = (cfg().mapDock == "top" || cfg().mapDock == "left");
+    if (panelFirst) {
+        mapPaned_.set_start_child(mapPanel_);
+        mapPaned_.set_end_child(skimmerPaned_);
+    } else {
+        mapPaned_.set_start_child(skimmerPaned_);
+        mapPaned_.set_end_child(mapPanel_);
+    }
+    mapPaned_.set_resize_start_child(!panelFirst);
+    mapPaned_.set_resize_end_child(panelFirst);
+    mapPaned_.set_shrink_start_child(false);
+    mapPaned_.set_shrink_end_child(false);
+    mapPanel_.set_visible(cfg().mapVisible);
+}
+
+void MainWindow::applyMapConfig() {
+    if (cfg().mapDock != "top" && cfg().mapDock != "bottom" &&
+        cfg().mapDock != "left" && cfg().mapDock != "right")
+        cfg().mapDock = "right";
+    if (mapDockAction_)
+        mapDockAction_->set_state(Glib::Variant<Glib::ustring>::create(cfg().mapDock));
+    if (mapShowAction_)
+        mapShowAction_->set_state(Glib::Variant<bool>::create(cfg().mapVisible));
+    applyMapDock();
+    if (cfg().mapPanelPos > 0)
+        mapPaned_.set_position(cfg().mapPanelPos);
+    mapPanel_.setFrom(cfg().myLocator);  // seed the home point
+}
+
+void MainWindow::onMapToggleShow() {
+    bool state = false;
+    mapShowAction_->get_state(state);
+    cfg().mapVisible = state;
+    mapPanel_.set_visible(cfg().mapVisible);
+}
+
+void MainWindow::onMapDock(const Glib::ustring& side) {
+    cfg().mapDock = side.raw();
+    mapDockAction_->set_state(Glib::Variant<Glib::ustring>::create(side));
+    if (!cfg().mapVisible) {  // picking a dock implies wanting the panel shown
+        cfg().mapVisible = true;
+        mapShowAction_->set_state(Glib::Variant<bool>::create(true));
+    }
+    applyMapDock();
+}
+
 void MainWindow::onClusterConnect() {
     if (cluster_.isConnected()) {
         cluster_.disconnect();
@@ -1287,6 +1371,11 @@ void MainWindow::saveSettings() {
         const int pos = skimmerPaned_.get_position();
         if (pos > 0)
             cfg().skimmerPanelPos = pos;
+    }
+    if (cfg().mapVisible) {
+        const int pos = mapPaned_.get_position();
+        if (pos > 0)
+            cfg().mapPanelPos = pos;
     }
     cfg().store(ini);  // udp/rig/lotw/qrz/keyer/dxcluster scalars
 
@@ -1371,6 +1460,7 @@ void MainWindow::loadSettings() {
     applyRigConfig();
     // Apply the skimmer dock/visibility (starts the skimmer if it was shown).
     applySkimmerConfig();
+    applyMapConfig();
 }
 
 void MainWindow::setStatus(const std::string& msg) {

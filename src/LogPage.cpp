@@ -66,6 +66,7 @@ LogPage::LogPage() : Gtk::Box(Gtk::Orientation::VERTICAL), presenter_(*this) {
     presenter_.onLookupCall = [this](const std::string& c) { signalLookupCall_.emit(c); };
     presenter_.onSendCw     = [this](const std::string& t) { signalSendCw_.emit(t); };
     presenter_.onAbortCw    = [this]() { signalAbortCw_.emit(); };
+    presenter_.onLocator    = [this](const std::string& g) { signalLocator_.emit(g); };
 
     buildLogView();
     buildSearch();
@@ -524,6 +525,7 @@ void LogPage::buildEntryForm() {
         [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
     mode_.property_selected().signal_changed().connect(
         [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
+    locator_.signal_changed().connect([this]() { if (!loadingForm_) presenter_.onLocatorChanged(); });
 }
 
 void LogPage::onSelectionChanged() {

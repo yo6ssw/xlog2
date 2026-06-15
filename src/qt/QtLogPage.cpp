@@ -42,6 +42,7 @@ QtLogPage::QtLogPage(QWidget* parent) : QWidget(parent), presenter_(*this) {
     presenter_.onLookupCall = [this](const std::string& c) { emit lookupCall(QString::fromStdString(c)); };
     presenter_.onSendCw     = [this](const std::string& t) { emit sendCw(QString::fromStdString(t)); };
     presenter_.onAbortCw    = [this]() { emit abortCw(); };
+    presenter_.onLocator    = [this](const std::string& g) { emit locatorChanged(QString::fromStdString(g)); };
 
     buildUi();
     presenter_.start();  // populate rows + reset the form (widgets now exist)
@@ -213,6 +214,7 @@ void QtLogPage::buildUi() {
     connect(date_, &QLineEdit::textChanged, this, [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
     connect(band_, &QComboBox::currentIndexChanged, this, [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
     connect(mode_, &QComboBox::currentIndexChanged, this, [this]() { if (!loadingForm_) presenter_.onDupeKeyChanged(); });
+    connect(locator_, &QLineEdit::textChanged, this, [this]() { if (!loadingForm_) presenter_.onLocatorChanged(); });
 }
 
 void QtLogPage::onSelectionChanged() {

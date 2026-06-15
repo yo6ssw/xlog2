@@ -39,6 +39,7 @@ add_library(xlog_core STATIC
     src/core/logic/Statistics.cpp
     src/core/logic/DupeMessage.cpp
     src/core/logic/QsoMapper.cpp
+    src/core/logic/Geo.cpp
     src/core/settings/IniFile.cpp
     src/core/settings/Settings.cpp
     src/core/presenter/LogPagePresenter.cpp
@@ -103,6 +104,7 @@ if(XLOG_BUILD_GTK)
         src/DxClusterPanel.cpp
         src/RigPanel.cpp
         src/CwSkimmerPanel.cpp
+        src/MapPanel.cpp
     )
     target_link_libraries(xlog2-gtk PRIVATE xlog_core PkgConfig::GTKMM)
     if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -111,6 +113,9 @@ if(XLOG_BUILD_GTK)
     install(TARGETS xlog2-gtk RUNTIME DESTINATION bin)
     install(FILES packaging/xlog2-gtk.desktop DESTINATION share/applications)
 endif()
+
+# Shared runtime data (world-map coastline), installed for both frontends.
+install(FILES data/coastline.txt DESTINATION share/xlog2)
 
 # ---------------------------------------------------------------------------
 # Qt Widgets backend (sources added in a later phase)
@@ -132,6 +137,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtRigPanel.cpp
         src/qt/QtCwSkimmerPanel.cpp
         src/qt/QtSettingsDialog.cpp
+        src/qt/QtMapPanel.cpp
         src/qt/FlowLayout.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
@@ -141,6 +147,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtRigPanel.h
         src/qt/QtCwSkimmerPanel.h
         src/qt/QtSettingsDialog.h
+        src/qt/QtMapPanel.h
     )
     set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
     target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)

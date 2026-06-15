@@ -6,6 +6,7 @@
 #include "QtDxClusterPanel.h"
 #include "QtRigPanel.h"
 #include "QtCwSkimmerPanel.h"
+#include "QtMapPanel.h"
 #include "QtSettingsDialog.h"
 #include "QtLogPage.h"
 #include "Statistics.h"
@@ -107,7 +108,11 @@ QtMainWindow::QtMainWindow()
             p->deleteLater();
         }
     });
-    connect(tabs_, &QTabWidget::currentChanged, this, [this](int) { updateWindowTitle(); });
+    connect(tabs_, &QTabWidget::currentChanged, this, [this](int) {
+        updateWindowTitle();
+        if (auto* p = currentPage())  // move the map "to" to the newly-active tab
+            mapPanel_->setTo(p->presenter().currentLocator());
+    });
 
     status_ = new QLabel("Ready.");
     statusBar()->addWidget(status_, 1);
@@ -170,6 +175,13 @@ QtMainWindow::QtMainWindow()
         cfg().skimmerKnownOnly = on;
         skimmer_.setKnownCallsOnly(on);
     });
+    mapDock_  = new QDockWidget("World map", this);
+    mapDock_->setObjectName("mapDock");
+    mapPanel_ = new QtMapPanel;
+    mapDock_->setWidget(mapPanel_);
+    addDockWidget(Qt::RightDockWidgetArea, mapDock_);
+    mapDock_->hide();
+
     // Master-callsign list (Super Check Partial), used to validate/correct decoded
     // callsigns. Optional: drop a MASTER.SCP at $XDG_DATA_HOME/xlog2/master.scp.
     {
@@ -348,6 +360,10 @@ void QtMainWindow::registerPage(QtLogPage* page) {
         keyer_.send(t.toStdString());
     });
     connect(page, &QtLogPage::abortCw, this, [this]() { keyer_.abort(); });
+    connect(page, &QtLogPage::locatorChanged, this, [this, page](const QString& g) {
+        if (page == currentPage())  // only the visible tab drives the map
+            mapPanel_->setTo(g.toStdString());
+    });
 
     // Row context menu "Move to": list every other open logbook, and perform
     // the move (add to the target, remove from this page) on request.
@@ -516,7 +532,30 @@ void QtMainWindow::buildMenus() {
         });
     }
 
+    auto* map = menuBar()->addMenu("&Map");
+    auto* mapShow = mapDock_->toggleViewAction();
+    mapShow->setText("Show panel");
+    map->addAction(mapShow);
+    auto* mapDockMenu = map->addMenu("Dock");
+    mapDockGroup_ = new QActionGroup(this);
+    const std::pair<const char*, const char*> mapSides[] = {
+        {"Top", "top"}, {"Bottom", "bottom"}, {"Left", "left"}, {"Right", "right"}};
+    for (const auto& [label, side] : mapSides) {
+        auto* a = mapDockMenu->addAction(label);
+        a->setCheckable(true);
+        a->setData(QString::fromLatin1(side));
+        mapDockGroup_->addAction(a);
+        const std::string s = side;
+        connect(a, &QAction::triggered, this, [this, s]() { onMapDock(s); });
+    }
+
     menuBar()->addMenu("&Help")->addAction("About xlog2", this, &QtMainWindow::onAbout);
+}
+
+void QtMainWindow::onMapDock(const std::string& side) {
+    cfg().mapDock = side;
+    addDockWidget(dockAreaFromString(side), mapDock_);  // move to the chosen side
+    mapDock_->show();                                   // picking a dock implies showing it
 }
 
 void QtMainWindow::onNewTab() {
@@ -868,6 +907,8 @@ void QtMainWindow::applySettings(const Settings& s) {
     cfg().qrzUser = s.qrzUser;
     cfg().qrzPassword = s.qrzPassword;
 
+    cfg().myLocator = s.myLocator;
+
     cfg().keyerHost = s.keyerHost;
     cfg().keyerPort = s.keyerPort;
     cfg().keyerSpeed = s.keyerSpeed;
@@ -914,6 +955,8 @@ void QtMainWindow::applySettings(const Settings& s) {
     skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
     skimmer_.setBandwidthNorm(cfg().skimmerBwNormDb, cfg().skimmerBwNormRefHz,
                               cfg().skimmerBwOffsetDb);
+
+    mapPanel_->setFrom(cfg().myLocator);
 
     setStatus("Settings saved.");
 }
@@ -1029,6 +1072,22 @@ void QtMainWindow::loadSettings() {
                 a->setChecked(true);
                 break;
             }
+
+    // World-map panel: seed the "from" point and place/show the dock.
+    mapPanel_->setFrom(cfg().myLocator);
+    const Qt::DockWidgetArea mapArea = dockAreaFromString(cfg().mapDock);
+    addDockWidget(mapArea, mapDock_);
+    mapDock_->setVisible(cfg().mapVisible);
+    if (cfg().mapVisible && cfg().mapPanelPos > 0) {
+        pendingMapDockSize_   = cfg().mapPanelPos;
+        pendingMapDockOrient_ = isHorizontalArea(mapArea) ? Qt::Horizontal : Qt::Vertical;
+    }
+    if (mapDockGroup_)
+        for (QAction* a : mapDockGroup_->actions())
+            if (a->data().toString().toStdString() == cfg().mapDock) {
+                a->setChecked(true);
+                break;
+            }
 }
 
 void QtMainWindow::saveSettings() {
@@ -1066,6 +1125,17 @@ void QtMainWindow::saveSettings() {
         const int sz = isHorizontalArea(skArea) ? skimmerDock_->width() : skimmerDock_->height();
         if (sz > 0)
             cfg().skimmerPanelPos = sz;
+    }
+
+    // Same for the world-map dock.
+    const Qt::DockWidgetArea mapArea = dockWidgetArea(mapDock_);
+    if (mapArea != Qt::NoDockWidgetArea)
+        cfg().mapDock = stringFromDockArea(mapArea);
+    cfg().mapVisible = mapDock_->isVisible();
+    if (cfg().mapVisible) {
+        const int sz = isHorizontalArea(mapArea) ? mapDock_->width() : mapDock_->height();
+        if (sz > 0)
+            cfg().mapPanelPos = sz;
     }
     cfg().store(ini);
     if (auto* p = currentPage())
@@ -1122,7 +1192,8 @@ void QtMainWindow::restoreDockSize() {
     // dock params are known). resizeDocks only sticks once the window is laid
     // out, so neither can run pre-show.
     if (dockSizeRestored_ || !isVisible() ||
-        (pendingDockSize_ <= 0 && pendingRigDockSize_ <= 0 && pendingSkimmerDockSize_ <= 0))
+        (pendingDockSize_ <= 0 && pendingRigDockSize_ <= 0 &&
+         pendingSkimmerDockSize_ <= 0 && pendingMapDockSize_ <= 0))
         return;
     dockSizeRestored_ = true;
     if (pendingDockSize_ > 0)
@@ -1131,4 +1202,6 @@ void QtMainWindow::restoreDockSize() {
         resizeDocks({rigDock_}, {pendingRigDockSize_}, pendingRigDockOrient_);
     if (pendingSkimmerDockSize_ > 0)
         resizeDocks({skimmerDock_}, {pendingSkimmerDockSize_}, pendingSkimmerDockOrient_);
+    if (pendingMapDockSize_ > 0)
+        resizeDocks({mapDock_}, {pendingMapDockSize_}, pendingMapDockOrient_);
 }
