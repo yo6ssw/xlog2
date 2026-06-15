@@ -184,6 +184,14 @@ MainWindow::MainWindow()
     qrz_.onResult = [this](const QrzResult& result, const std::string& error) {
         presenter_.routeQrzResult(result, error);
     };
+    qrz_.onFillProgress = [this](int done, int total) {
+        setStatus("QRZ locator fill: " + std::to_string(done) + "/" +
+                  std::to_string(total) + "…");
+    };
+    qrz_.onFillResult = [this](const std::vector<std::pair<std::string, std::string>>& r,
+                               int fromCache, int fetched, const std::string& err) {
+        presenter_.routeQrzLocatorFill(r, fromCache, fetched, err);
+    };
     audio_.onStatus = [this](const std::string& s) { setStatus(s); };
     audio_.onStats  = [this](unsigned long frames) {
         audioIndicator_.set_text("♪ " + std::to_string(frames) + " frames");
@@ -230,6 +238,17 @@ MainWindow::MainWindow()
     hidPaddle_.onStatus = [this](const std::string& s) { setStatus(s); };
 
     loadSettings();
+    // Point the QRZ result cache at a file under the data dir (created if needed).
+    {
+        const std::string dir =
+            Glib::build_filename(Glib::get_user_data_dir(), "xlog2");
+        try {
+            Gio::File::create_for_path(dir)->make_directory_with_parents();
+        } catch (const Glib::Error&) {
+            // already exists (or cannot be created) — setCache then no-ops
+        }
+        qrz_.setCache(Glib::build_filename(dir, "qrz-cache.sqlite"), cfg().qrzCacheDays);
+    }
     if (notebook_.get_n_pages() == 0)
         openDefaultLog();
 
@@ -270,6 +289,7 @@ void MainWindow::buildActions() {
         if (auto* page = currentPage())
             page->backfillDxcc();
     });
+    add_action("filllocators", sigc::mem_fun(*this, &MainWindow::onFillLocators));
     add_action("about",  sigc::mem_fun(*this, &MainWindow::onAbout));
     add_action("quit",   sigc::mem_fun(*this, &MainWindow::close));
 
@@ -334,6 +354,7 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto logMenu = Gio::Menu::create();
     logMenu->append("_Find…", "win.find");
     logMenu->append("Fill _DXCC entities", "win.filldxcc");
+    logMenu->append("Fill missing _locators (QRZ)", "win.filllocators");
     logMenu->append("_Statistics…", "win.stats");
     menu->append_submenu("_Log", logMenu);
 
@@ -842,6 +863,29 @@ void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
     qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
 }
 
+void MainWindow::onFillLocators() {
+    auto* page = currentPage();
+    if (!page)
+        return;
+    if (cfg().qrzUser.empty() || cfg().qrzPassword.empty()) {
+        setStatus("Set your QRZ.com username and password in Edit ▸ Settings ▸ QRZ first.");
+        return;
+    }
+    if (qrz_.isBusy()) {
+        setStatus("A QRZ operation is already in progress.");
+        return;
+    }
+    const std::vector<std::string> calls = page->presenter().callsignsMissingLocator();
+    if (calls.empty()) {
+        setStatus("No QSOs are missing a locator.");
+        return;
+    }
+    presenter_.beginQrzLocatorFill(&page->presenter());
+    setStatus("Filling locators for " + std::to_string(calls.size()) +
+              " callsign(s) via QRZ…");
+    qrz_.fillLocators(cfg().qrzUser, cfg().qrzPassword, calls);
+}
+
 // --- consolidated settings (Edit ▸ Settings) ---------------------------------
 
 void MainWindow::onEditSettings() {
@@ -874,6 +918,7 @@ void MainWindow::applySettings(const Settings& s) {
 
     cfg().qrzUser = s.qrzUser;
     cfg().qrzPassword = s.qrzPassword;
+    cfg().qrzCacheDays = s.qrzCacheDays;
 
     cfg().myLocator = s.myLocator;
 
@@ -925,6 +970,9 @@ void MainWindow::applySettings(const Settings& s) {
                               cfg().skimmerBwOffsetDb);
 
     mapPanel_.setFrom(cfg().myLocator);
+    qrz_.setCache(Glib::build_filename(Glib::get_user_data_dir(), "xlog2",
+                                       "qrz-cache.sqlite"),
+                  cfg().qrzCacheDays);
 
     setStatus("Settings saved.");
 }
@@ -1328,8 +1376,15 @@ void MainWindow::onClusterConnect() {
 
 void MainWindow::onSpotActivated(const DxSpot& spot) {
     const double mhz = spot.freqKHz / 1000.0;
-    if (auto* page = currentPage())
+    if (auto* page = currentPage()) {
         page->applyDxSpot(spot.dxCall, mhz);
+        // Prefill name/QTH/locator for the spotted call: cache-first, fetching
+        // from QRZ (and caching) on a miss. Silent — no popup per double-click.
+        if (!spot.dxCall.empty() && !qrz_.isBusy()) {
+            presenter_.beginQrzLookup(&page->presenter(), /*silent=*/true);
+            qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, spot.dxCall);
+        }
+    }
     if (rig_.isRunning())
         rig_.setFrequency(mhz);  // tune the connected rig to the spot
 }

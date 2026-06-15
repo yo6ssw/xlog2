@@ -66,6 +66,7 @@ private:
     // --- qrz ---
     QLineEdit* qrzUser_ = nullptr;
     QLineEdit* qrzPass_ = nullptr;
+    QSpinBox*  qrzCacheDays_ = nullptr;
     // --- keyer ---
     QLineEdit* keyerHost_ = nullptr;
     QSpinBox*  keyerPort_ = nullptr;

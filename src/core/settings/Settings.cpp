@@ -22,6 +22,7 @@ Settings Settings::load(const IniFile& ini) {
 
     s.qrzUser     = ini.getString("qrz", "username", s.qrzUser);
     s.qrzPassword = ini.getString("qrz", "password", s.qrzPassword);
+    s.qrzCacheDays = ini.getInt("qrz", "cache_days", s.qrzCacheDays);
 
     s.myLocator   = ini.getString("station", "locator", s.myLocator);
     s.mapDock     = ini.getString("map", "dock", s.mapDock);
@@ -97,6 +98,7 @@ void Settings::store(IniFile& ini) const {
 
     ini.setString("qrz", "username", qrzUser);
     ini.setString("qrz", "password", qrzPassword);
+    ini.setInt("qrz", "cache_days", qrzCacheDays);
 
     ini.setString("station", "locator", myLocator);
     ini.setString("map", "dock", mapDock);

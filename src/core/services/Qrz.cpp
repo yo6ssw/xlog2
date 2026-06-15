@@ -129,89 +129,94 @@ bool QrzClient::lookup(const std::string& user, const std::string& password,
     return true;
 }
 
+bool QrzClient::doLogin(void* curlV, const std::string& user,
+                       const std::string& password, std::string& error) {
+    CURL* curl = static_cast<CURL*>(curlV);
+    const std::string url = std::string(kBase) + "?username=" +
+        urlEscape(curl, user) + "&password=" + urlEscape(curl, password) +
+        "&agent=xlog2-0.1";
+    std::string e;
+    const std::string body = httpGet(curl, url, e);
+    if (!e.empty()) { error = e; return false; }
+    const std::string key = xmlTag(body, "Key");
+    if (key.empty()) {
+        const std::string err = xmlTag(body, "Error");
+        error = err.empty() ? "QRZ login failed" : err;
+        return false;
+    }
+    sessionKey_ = key;
+    return true;
+}
+
+QrzResult QrzClient::fetchOne(void* curlV, const std::string& user,
+                              const std::string& password,
+                              const std::string& callsign, std::string& error) {
+    CURL* curl = static_cast<CURL*>(curlV);
+    QrzResult result;
+
+    auto query = [&](std::string& e) -> std::string {
+        const std::string url = std::string(kBase) + "?s=" +
+            urlEscape(curl, sessionKey_) + "&callsign=" + urlEscape(curl, callsign);
+        return httpGet(curl, url, e);
+    };
+
+    if (sessionKey_.empty() && !doLogin(curl, user, password, error))
+        return result;  // login failed (error set; sessionKey_ stays empty)
+
+    std::string e;
+    std::string body = query(e);
+    std::string err = e.empty() ? xmlTag(body, "Error") : e;
+
+    // A stale key needs a fresh login and one retry.
+    if (e.empty() && !err.empty() &&
+        (err.find("ession") != std::string::npos ||  // "Session Timeout"
+         err.find("nvalid") != std::string::npos)) {  // "Invalid session key"
+        sessionKey_.clear();
+        if (!doLogin(curl, user, password, error))
+            return result;  // login failed (error set)
+        body = query(e);
+        err  = e.empty() ? xmlTag(body, "Error") : e;
+    }
+
+    if (!err.empty()) {
+        error = err;
+        return result;
+    }
+    result.call = xmlTag(body, "call");
+    if (result.call.empty()) {
+        error = "No QRZ record for " + callsign;
+        return result;
+    }
+    const size_t cs = body.find("<Callsign>");
+    const size_t ce = body.find("</Callsign>");
+    if (cs != std::string::npos && ce != std::string::npos && ce > cs)
+        result.fields = parseElements(body.substr(cs + 10, ce - (cs + 10)));
+
+    const std::string fn = xmlTag(body, "fname");
+    const std::string ln = xmlTag(body, "name");
+    result.name = fn.empty() ? ln : ln.empty() ? fn : fn + " " + ln;
+    const std::string city  = xmlTag(body, "addr2");
+    const std::string state = xmlTag(body, "state");
+    result.qth = city.empty() ? state : state.empty() ? city : city + ", " + state;
+    result.locator = xmlTag(body, "grid");
+    result.country = xmlTag(body, "country");
+    return result;
+}
+
 void QrzClient::worker(std::string user, std::string password, std::string callsign) {
     QrzResult result;
     std::string error;
 
-    CURL* curl = curl_easy_init();
-    if (!curl) {
-        error = "failed to initialise libcurl";
-    } else {
-        // Log in (refresh the session key), returning false (and setting
-        // `error`) on failure.
-        auto login = [&]() -> bool {
-            const std::string url = std::string(kBase) + "?username=" +
-                urlEscape(curl, user) + "&password=" + urlEscape(curl, password) +
-                "&agent=xlog2-0.1";
-            std::string e;
-            const std::string body = httpGet(curl, url, e);
-            if (!e.empty()) { error = e; return false; }
-            const std::string key = xmlTag(body, "Key");
-            if (key.empty()) {
-                const std::string err = xmlTag(body, "Error");
-                error = err.empty() ? "QRZ login failed" : err;
-                return false;
-            }
-            sessionKey_ = key;
-            return true;
-        };
-
-        auto query = [&](std::string& e) -> std::string {
-            const std::string url = std::string(kBase) + "?s=" +
-                urlEscape(curl, sessionKey_) + "&callsign=" +
-                urlEscape(curl, callsign);
-            return httpGet(curl, url, e);
-        };
-
-        bool ok = true;
-        if (sessionKey_.empty())
-            ok = login();
-
-        if (ok) {
-            std::string e;
-            std::string body = query(e);
-            std::string err = e.empty() ? xmlTag(body, "Error") : e;
-
-            // A stale key needs a fresh login and one retry.
-            if (e.empty() && !err.empty() &&
-                (err.find("ession") != std::string::npos ||  // "Session Timeout"
-                 err.find("nvalid") != std::string::npos)) {  // "Invalid session key"
-                sessionKey_.clear();
-                if (login()) {
-                    body = query(e);
-                    err  = e.empty() ? xmlTag(body, "Error") : e;
-                }
-            }
-
-            if (!err.empty()) {
-                error = err;
-            } else {
-                result.call = xmlTag(body, "call");
-                if (result.call.empty()) {
-                    error = "No QRZ record for " + callsign;
-                } else {
-                    const size_t cs = body.find("<Callsign>");
-                    const size_t ce = body.find("</Callsign>");
-                    if (cs != std::string::npos && ce != std::string::npos && ce > cs)
-                        result.fields = parseElements(
-                            body.substr(cs + 10, ce - (cs + 10)));
-
-                    const std::string fn = xmlTag(body, "fname");
-                    const std::string ln = xmlTag(body, "name");
-                    result.name = fn.empty() ? ln
-                                 : ln.empty() ? fn
-                                              : fn + " " + ln;
-                    const std::string city  = xmlTag(body, "addr2");
-                    const std::string state = xmlTag(body, "state");
-                    result.qth = city.empty() ? state
-                                : state.empty() ? city
-                                                : city + ", " + state;
-                    result.locator = xmlTag(body, "grid");
-                    result.country = xmlTag(body, "country");
-                }
-            }
-        }
+    // Cache first: a fresh hit skips the network entirely.
+    if (auto cached = cache_.get(callsign, cacheDays_.load())) {
+        result = std::move(*cached);
+    } else if (CURL* curl = curl_easy_init()) {
+        result = fetchOne(curl, user, password, callsign, error);
         curl_easy_cleanup(curl);
+        if (error.empty() && !result.call.empty())
+            cache_.put(result);
+    } else {
+        error = "failed to initialise libcurl";
     }
 
     {
@@ -242,4 +247,104 @@ void QrzClient::deliverResult() {
     busy_.store(false);
     if (onResult)
         onResult(result, error);
+}
+
+void QrzClient::setCache(const std::string& path, int lifetimeDays) {
+    cacheDays_.store(lifetimeDays);
+    cache_.open(path);
+}
+
+bool QrzClient::fillLocators(const std::string& user, const std::string& password,
+                             const std::vector<std::string>& callsigns) {
+    if (busy_.load())
+        return false;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fillResults_.clear();
+        fillFromCache_ = 0;
+        fillFetched_   = 0;
+        fillError_.clear();
+        hasFill_ = false;
+    }
+    busy_.store(true);
+    if (thread_.joinable())
+        thread_.join();
+    thread_ = std::thread(&QrzClient::fillWorker, this, user, password, callsigns);
+    return true;
+}
+
+void QrzClient::fillWorker(std::string user, std::string password,
+                           std::vector<std::string> callsigns) {
+    std::vector<std::pair<std::string, std::string>> out;
+    int fromCache = 0, fetched = 0;
+    std::string error;
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        error = "failed to initialise libcurl";
+    } else {
+        const int total = static_cast<int>(callsigns.size());
+        int done = 0;
+        for (const auto& call : callsigns) {
+            QrzResult r;
+            if (auto cached = cache_.get(call, cacheDays_.load())) {
+                r = std::move(*cached);
+                ++fromCache;
+            } else {
+                std::string e;
+                r = fetchOne(curl, user, password, call, e);
+                if (r.call.empty()) {
+                    // A failed login (no valid session) is fatal for the whole
+                    // run; a per-call "no record" just means skip this one.
+                    if (sessionKey_.empty()) { error = e; break; }
+                } else {
+                    cache_.put(r);
+                    ++fetched;
+                }
+            }
+            if (!r.locator.empty())
+                out.emplace_back(call, r.locator);
+            ++done;
+            if (done % 5 == 0 || done == total)
+                ui_.post([this, w = std::weak_ptr<bool>(alive_), done, total]() {
+                    if (!w.expired() && onFillProgress)
+                        onFillProgress(done, total);
+                });
+        }
+        curl_easy_cleanup(curl);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        fillResults_   = std::move(out);
+        fillFromCache_ = fromCache;
+        fillFetched_   = fetched;
+        fillError_     = std::move(error);
+        hasFill_       = true;
+    }
+    ui_.post([this, w = std::weak_ptr<bool>(alive_)]() {
+        if (!w.expired())
+            deliverFill();
+    });
+}
+
+void QrzClient::deliverFill() {
+    std::vector<std::pair<std::string, std::string>> results;
+    int fromCache = 0, fetched = 0;
+    std::string error;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!hasFill_)
+            return;
+        results   = std::move(fillResults_);
+        fromCache = fillFromCache_;
+        fetched   = fillFetched_;
+        error     = std::move(fillError_);
+        hasFill_  = false;
+    }
+    if (thread_.joinable())
+        thread_.join();
+    busy_.store(false);
+    if (onFillResult)
+        onFillResult(results, fromCache, fetched, error);
 }

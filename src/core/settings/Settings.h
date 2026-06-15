@@ -30,6 +30,7 @@ struct Settings {
 
     // [qrz]
     std::string qrzUser, qrzPassword;
+    int         qrzCacheDays = 365;  // cache lifetime in days (<=0 disables it)
 
     // [station] — the operator's own location (Maidenhead grid), used as the
     // "from" point of the world-map panel.

@@ -104,8 +104,12 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
         auto* f = addPage("QRZ");
         qrzUser_ = new QLineEdit(qstr(s.qrzUser));
         qrzPass_ = new QLineEdit(qstr(s.qrzPassword)); qrzPass_->setEchoMode(QLineEdit::Password);
+        qrzCacheDays_ = new QSpinBox; qrzCacheDays_->setRange(0, 36500);
+        qrzCacheDays_->setSuffix(" days"); qrzCacheDays_->setValue(s.qrzCacheDays);
         f->addRow("QRZ.com username:", qrzUser_);
         f->addRow("QRZ.com password:", qrzPass_);
+        f->addRow("Cache lifetime:", qrzCacheDays_);
+        f->addRow(new QLabel("Cached lookups skip the network until this old (0 = no cache)."));
     }
 
     // --- CW Keyer ---
@@ -232,6 +236,7 @@ Settings QtSettingsDialog::result() const {
 
     s.qrzUser = sstr(qrzUser_);
     s.qrzPassword = sstr(qrzPass_);
+    s.qrzCacheDays = qrzCacheDays_->value();
 
     s.keyerHost = sstrOr(keyerHost_, "127.0.0.1");
     s.keyerPort = keyerPort_->value();

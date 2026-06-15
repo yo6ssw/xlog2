@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <set>
 #include <stdexcept>
 
 namespace {
@@ -318,6 +319,10 @@ void LogPagePresenter::applyQrzLookup(const QrzResult& r) {
     if (!r.locator.empty() && f.locator.empty())
         f.locator = r.locator;
     view_.setFormData(f);
+    // setFormData suppresses the locator field's change handler (loadingForm_),
+    // so push the (possibly QRZ-filled) grid to the map destination directly.
+    if (onLocator)
+        onLocator(f.locator);
 }
 
 void LogPagePresenter::setCwMessages(const std::array<std::string, 9>& msgs) {
@@ -354,6 +359,40 @@ void LogPagePresenter::backfillDxcc() {
     refreshList();
     changed();
     status("Filled DXCC for " + std::to_string(updates.size()) + " QSO(s).");
+}
+
+std::vector<std::string> LogPagePresenter::callsignsMissingLocator() const {
+    std::vector<std::string> calls;
+    std::set<std::string> seen;
+    for (const auto& q : logbook_.qsos()) {
+        if (q.call.empty() || !q.locator.empty())
+            continue;
+        const std::string up = strutil::toUpper(q.call);
+        if (seen.insert(up).second)
+            calls.push_back(up);
+    }
+    return calls;
+}
+
+int LogPagePresenter::applyLocatorFill(
+    const std::map<std::string, std::string>& callToLocator) {
+    std::vector<Qso> updates;
+    for (const auto& q : logbook_.qsos()) {
+        if (q.call.empty() || !q.locator.empty())
+            continue;
+        const auto it = callToLocator.find(strutil::toUpper(q.call));
+        if (it == callToLocator.end() || it->second.empty())
+            continue;
+        Qso u = q;
+        u.locator = it->second;
+        updates.push_back(std::move(u));
+    }
+    if (updates.empty())
+        return 0;
+    logbook_.updateBatch(updates);
+    refreshList();
+    changed();
+    return static_cast<int>(updates.size());
 }
 
 void LogPagePresenter::markLotwSent(const std::vector<long>& ids, const std::string& date) {

@@ -121,6 +121,14 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   are the main **POSIX-specific** code, relevant to any future Windows port.)
 - `LotwClient` — download via libcurl on a worker; upload spawns ARRL's `tqsl`
   via the neutral `ProcessRunner` (`posix_spawn` + `waitpid`).
+- `QrzClient` (`src/core/services/Qrz.*`) — QRZ.com XML lookups on a worker.
+  Backed by a persistent on-disk **`QrzCache`** (`QrzCache.*`, a tiny SQLite file
+  at `$XDG_DATA_HOME/xlog2/qrz-cache.sqlite`): every lookup checks the cache
+  before the network, and stores fresh results; lifetime is `[qrz] cache_days`
+  (default 365, `<=0` disables). Besides single `lookup()`, `fillLocators()` does
+  a cache-first **bulk** locator fetch over many callsigns (Log ▸ Fill missing
+  locators), writing grids back to QSOs that lack one. `QrzResult` lives in its
+  own header so `QrzCache` and `QrzClient` can share it without a cycle.
 - `AudioStreamClient` (`src/core/services/Audio.*`) — subscribes to a **cwsd**
   `audio_stream_server` Opus-over-UDP rig-audio stream and plays it back. A
   worker owns a connected UDP socket (woken for stop via a self-pipe), sends a

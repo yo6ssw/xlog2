@@ -100,6 +100,7 @@ private:
 
     // --- QRZ.com callsign lookup ---
     void onQrzLookup(LogPage* page, const std::string& callsign);
+    void onFillLocators();  // bulk-fill missing QSO locators via QRZ (+ cache)
 
     // --- network keyer (cwdaemon) ---
     void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages

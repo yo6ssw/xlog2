@@ -9,6 +9,7 @@
 #include <array>
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -54,6 +55,12 @@ public:
     void applyDxSpot(const std::string& call, double mhz);
     void backfillDxcc();
     void refresh();
+
+    // Bulk locator fill (driven by the shell's QRZ client). The first returns the
+    // distinct callsigns of QSOs that have a call but no locator; the second
+    // writes locators back from a call->grid map and returns the number filled.
+    std::vector<std::string> callsignsMissingLocator() const;
+    int applyLocatorFill(const std::map<std::string, std::string>& callToLocator);
 
     // LoTW helpers.
     std::vector<Qso> qsosNotLotwSent() const { return logbook_.qsosNotLotwSent(); }
