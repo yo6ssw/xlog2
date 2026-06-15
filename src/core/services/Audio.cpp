@@ -21,6 +21,13 @@ constexpr std::size_t kHeaderBytes  = 4;     // big-endian sequence number
 constexpr std::size_t kMaxPacket    = 1500;  // matches the server's datagram cap
 constexpr int         kMaxFrame     = 5760;  // 120 ms at 48 kHz, the largest opus frame
 constexpr int         kKeepaliveMs  = 2000;  // resubscribe well within cwsd's timeout
+constexpr int         kMaxConceal   = 10;    // cap concealed frames per gap; a larger
+                                             // jump is a restart/long dropout, not loss
+
+std::uint32_t readBe32(const std::uint8_t* p) {
+    return (static_cast<std::uint32_t>(p[0]) << 24) | (static_cast<std::uint32_t>(p[1]) << 16) |
+           (static_cast<std::uint32_t>(p[2]) << 8) | static_cast<std::uint32_t>(p[3]);
+}
 
 // Resolve + open a connected UDP socket to the server. connect() pins the peer so
 // recv() only yields its datagrams and send() needs no address (keepalives).
@@ -160,6 +167,35 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
     auto nextStats     = clock::now() + std::chrono::seconds(1);
     unsigned long framesDecoded = 0;
 
+    // Loss recovery: the server stamps each datagram with a monotonic sequence and
+    // emits Opus in-band FEC. A gap means lost packets — recover the one just before
+    // the new packet from its embedded FEC copy, and conceal any earlier losses with
+    // Opus PLC, so element timing stays intact instead of skipping.
+    bool          haveSeq     = false;
+    std::uint32_t expectedSeq = 0;
+    const int     defaultFrame = std::max(1, cfg.sampleRate / 50);  // 20 ms fallback
+
+    // Send one decoded/concealed frame to the skimmer tap and ALSA. Returns false if
+    // the playback device died (caller reopens it on the next datagram).
+    auto play = [&](int frames) -> bool {
+        if (frames <= 0)
+            return true;
+        if (onPcm && !muted_.load(std::memory_order_relaxed))
+            onPcm(pcmBuf.data(), frames, cfg.channels, cfg.sampleRate);
+        if (muted_.load(std::memory_order_relaxed))
+            std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});
+        const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
+        if (w == -EPIPE) {
+            snd_pcm_prepare(pcm);     // underrun: recover...
+            primePlayback(pcm, cfg);  // ...and re-cushion so it doesn't recur immediately
+        } else if (w < 0) {
+            snd_pcm_close(pcm);
+            pcm = nullptr;  // reopen on the next datagram
+            return false;
+        }
+        return true;
+    };
+
     postStatus("Audio: streaming from " + cfg.host + ":" + std::to_string(cfg.port) + ".");
 
     while (running_.load()) {
@@ -215,29 +251,49 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
                 break;  // EAGAIN: queue drained
             if (n <= static_cast<ssize_t>(kHeaderBytes))
                 continue;  // empty / header-only datagram
-            const int frames = opus_decode(dec, rx + kHeaderBytes,
-                                           static_cast<opus_int32>(n - kHeaderBytes),
-                                           pcmBuf.data(), kMaxFrame, 0);
-            if (frames < 0)
-                continue;  // corrupt packet
-            ++framesDecoded;
-            // Tap the clean decoded PCM for the skimmer before any mute fill, and
-            // only while unmuted (no point decoding our own keyed signal on TX).
-            if (onPcm && !muted_.load(std::memory_order_relaxed))
-                onPcm(pcmBuf.data(), frames, cfg.channels, cfg.sampleRate);
-            // Muted (e.g. transmitting): keep the decoder and ALSA fed but output
-            // silence, so unmuting resumes instantly with no underrun glitch.
-            if (muted_.load(std::memory_order_relaxed))
-                std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});
-            const snd_pcm_sframes_t w = snd_pcm_writei(pcm, pcmBuf.data(), frames);
-            if (w == -EPIPE) {
-                snd_pcm_prepare(pcm);     // underrun: recover...
-                primePlayback(pcm, cfg);  // ...and re-cushion so it doesn't recur immediately
-            } else if (w < 0) {
-                snd_pcm_close(pcm);
-                pcm = nullptr;  // reopen on the next datagram
-                break;
+            const std::uint32_t seq = readBe32(rx);
+            const std::uint8_t* pkt = rx + kHeaderBytes;
+            const auto          len = static_cast<opus_int32>(n - kHeaderBytes);
+
+            // Per-frame sample count of this packet; assume any lost frames matched it
+            // (the server uses a constant frame_ms).
+            int frameSamples = opus_decoder_get_nb_samples(dec, pkt, len);
+            if (frameSamples <= 0)
+                frameSamples = defaultFrame;
+
+            // Conceal the gap between the last decoded packet and this one.
+            bool deviceDead = false;
+            if (haveSeq) {
+                const std::int32_t diff = static_cast<std::int32_t>(seq - expectedSeq);
+                if (diff < 0)
+                    continue;  // late/reordered or duplicate: already past it, drop
+                int lost = diff;
+                if (lost > kMaxConceal)
+                    lost = 0;  // restart/long dropout: resync without flooding PLC
+                for (int i = 0; i < lost; ++i) {
+                    // The final missing frame (right before this packet) is recoverable
+                    // from this packet's in-band FEC; conceal earlier ones with PLC.
+                    const bool useFec = (i == lost - 1);
+                    const int g = useFec
+                        ? opus_decode(dec, pkt, len, pcmBuf.data(), frameSamples, 1)
+                        : opus_decode(dec, nullptr, 0, pcmBuf.data(), frameSamples, 0);
+                    if (g > 0 && !play(g)) {
+                        deviceDead = true;
+                        break;
+                    }
+                }
             }
+            if (deviceDead)
+                break;
+
+            const int frames = opus_decode(dec, pkt, len, pcmBuf.data(), kMaxFrame, 0);
+            if (frames < 0)
+                continue;  // corrupt packet (don't advance expectedSeq off a bad header)
+            expectedSeq = seq + 1;
+            haveSeq = true;
+            ++framesDecoded;
+            if (!play(frames))
+                break;
         }
     }
 
