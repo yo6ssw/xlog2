@@ -371,10 +371,13 @@ void AudioStreamClient::worker(AudioStreamConfig cfg) {
     double    avgBuffered      = -1.0;
 
     // Send one decoded/concealed frame to the skimmer tap and the playout ring.
+    // The skimmer tap always gets the real audio (even while muted, so the decoder
+    // keeps copying the band during transmit); muting only silences the *output*
+    // device, zeroing the buffer after the tap has seen it.
     auto play = [&](int frames) {
         if (frames <= 0)
             return;
-        if (onPcm && !muted_.load(std::memory_order_relaxed))
+        if (onPcm)
             onPcm(pcmBuf.data(), frames, cfg.channels, cfg.sampleRate);
         if (muted_.load(std::memory_order_relaxed))
             std::fill_n(pcmBuf.data(), static_cast<std::size_t>(frames) * cfg.channels, int16_t{0});

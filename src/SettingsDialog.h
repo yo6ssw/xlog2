@@ -64,6 +64,7 @@ private:
     Gtk::Entry* paddleLevel_ = nullptr;
     Gtk::Entry* paddleDevice_ = nullptr;
     Gtk::CheckButton* paddleMute_ = nullptr;
+    Gtk::Entry* paddleMuteTail_ = nullptr;
     // --- audio ---
     Gtk::Entry* audioHost_ = nullptr;
     Gtk::Entry* audioPort_ = nullptr;

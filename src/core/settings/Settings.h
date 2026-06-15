@@ -49,6 +49,7 @@ struct Settings {
     int         paddleLevel    = 50;       // local sidetone volume, 0..100
     std::string paddleSidetoneDevice = "default";  // ALSA playback device
     bool        paddleMuteAudio = true;    // mute the rig-audio stream while keying
+    int         paddleMuteTailMs = 500;    // mute hang after the last key-up, ms
 
     // [audio] — cwsd Opus-over-UDP rig audio stream
     bool        audioEnabled    = false;

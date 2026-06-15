@@ -131,7 +131,8 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   running decoded-frame count (`onStats`) ~once a second, shown as a live
   indicator in each shell's status bar. (Links `opus` + `asound`; the only audio
   code in xlog2.) It also exposes an `onPcm` tap (fired on the worker thread for
-  each unmuted datagram) that feeds the CW skimmer.
+  every datagram, muted or not) that feeds the CW skimmer — so the skimmer keeps
+  copying the band even while the output is muted during transmit.
 - `CwSkimmer` (`src/core/services/CwSkimmer.*`) — a pragmatic **multi-channel CW
   decoder** in the spirit of VE3NEA's CW Skimmer, scaled to a single audio
   passband (the rig-audio stream) rather than wideband IQ. Fed mono PCM via
@@ -187,19 +188,21 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   dit/dah (gtkmm: a CAPTURE-phase `EventControllerKey`; Qt: an app-wide
   `eventFilter`), intercepted only while the keyer is active so the brackets type
   normally otherwise. Config lives in the `[paddle]` settings block, is edited
-  from the **Keyer ▸ Remote paddle keying / Paddle settings…** menu, and
+  in the **Edit ▸ Settings ▸ Paddle** page, and
   auto-resumes at startup. A second thread renders a **click-free local sidetone**
   (ramped-envelope sine) to ALSA, gated by the same key transitions, so the
   operator gets instant feel while the on-air signal lags by cwsd's playout delay;
   it is independent, so a missing audio device never stalls keying. (Reuses the
   `asound` link already pulled in for the audio stream.) It also reports a
   **transmit on/off** state via `onTransmit` (latched on the first key-down,
-  released after a hang past the last key-up so it bridges character/word gaps);
+  released after a configurable hang — `[paddle] mute_tail_ms` — past the last
+  key-up so it bridges character/word gaps);
   the shell wires that to `AudioStreamClient::setMuted` (gated by the
   `[paddle] mute_audio` setting) so the rig-audio stream is silenced while keying
   — semi-break-in, since otherwise you'd hear your own delayed signal fighting the
-  local sidetone. `setMuted` keeps decoding/feeding ALSA with silence (no
-  unsubscribe, no unmute glitch). **Autospace** (`[paddle] autospace`, on by
+  local sidetone. `setMuted` keeps decoding and still feeds the `onPcm` skimmer
+  tap; only the output device gets silence (no unsubscribe, no unmute glitch).
+  **Autospace** (`[paddle] autospace`, on by
   default) holds a new character's first element to the 3-dit inter-character
   boundary when it's keyed too soon after the previous element, so quickly-tapped
   letters don't run together; it acts only across the idle gap between characters

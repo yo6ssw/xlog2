@@ -80,6 +80,7 @@ private:
     QSpinBox*  paddleLevel_ = nullptr;
     QLineEdit* paddleDevice_ = nullptr;
     QCheckBox* paddleMute_ = nullptr;
+    QSpinBox*  paddleMuteTail_ = nullptr;
     // --- audio ---
     QLineEdit* audioHost_ = nullptr;
     QSpinBox*  audioPort_ = nullptr;

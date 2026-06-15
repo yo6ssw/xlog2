@@ -43,6 +43,7 @@ struct RemotePaddleConfig {
     int         wpm     = 20;           // keying speed
     bool        iambicB = false;        // false = iambic A (reserved; see header note)
     bool        autospace = true;       // enforce a full 3-dit inter-character space
+    int         muteTailMs = 500;       // transmit/mute hang after the last key-up
 
     // local sidetone
     bool        sidetone = true;        // generate local audio feedback
