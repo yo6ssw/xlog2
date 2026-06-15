@@ -9,31 +9,31 @@
 #include <thread>
 
 // The cwsd audio stream a client subscribes to. sampleRate/channels must match
-// the server's `audio` config (they size the Opus decoder and the ALSA device);
-// device is the local ALSA *playback* device.
+// the server's `audio` config (they size the Opus decoder and the PipeWire stream);
+// device, when not "default", is a PipeWire target node (PW_KEY_TARGET_OBJECT).
 struct AudioStreamConfig {
     bool        enabled    = false;
     std::string host       = "127.0.0.1";  // cwsd audio_stream_server host
     int         port       = 7355;         // UDP port to subscribe to
     int         sampleRate = 8000;         // opus rate: 8000/12000/16000/24000/48000
     int         channels   = 1;
-    std::string device     = "default";    // ALSA playback device
+    std::string device     = "default";    // "default" sink, or a PipeWire node name
 };
 
-// Forward declarations so the alsa/opus headers stay confined to the .cpp.
-typedef struct _snd_pcm snd_pcm_t;
+// Forward declaration so the pipewire/opus headers stay confined to the .cpp.
 struct OpusDecoder;
 
 // Subscribes to a cwsd "audio_stream_server" Opus-over-UDP rig-audio stream and
-// plays it back through an ALSA device. cwsd has no configured target: a client
-// subscribes by sending any datagram to the port and stays subscribed by
+// plays it back through a native PipeWire stream. cwsd has no configured target: a
+// client subscribes by sending any datagram to the port and stays subscribed by
 // continuing to send (a periodic keepalive); silent clients are dropped. This
 // client mirrors that — its worker sends a small keepalive every ~2 s.
 //
-// A worker thread owns the blocking POSIX socket, the Opus decoder and the ALSA
-// playback handle; status changes are marshalled to the UI thread via the
-// injected dispatcher, so onStatus always fires on the UI thread. A self-pipe
-// wakes the worker promptly on stop().
+// A worker thread owns the blocking POSIX socket and the Opus decoder, and feeds a
+// lock-free ring drained by PipeWire's realtime callback (a drift-compensating
+// playout buffer absorbs jitter and clock skew). Status changes are marshalled to
+// the UI thread via the injected dispatcher, so onStatus always fires there. A
+// self-pipe wakes the worker promptly on stop().
 //
 // Wire format (server -> client): a 4-byte big-endian sequence number followed
 // by a raw Opus packet (the same as cwsd's audio_stream_server).
