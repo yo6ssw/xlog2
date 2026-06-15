@@ -2,6 +2,7 @@
 
 #include "Adif.h"
 #include "LogPage.h"
+#include "SettingsDialog.h"
 #include "Statistics.h"
 #include "UiUtil.h"
 
@@ -267,8 +268,9 @@ void MainWindow::buildActions() {
     add_action("about",  sigc::mem_fun(*this, &MainWindow::onAbout));
     add_action("quit",   sigc::mem_fun(*this, &MainWindow::close));
 
+    add_action("settings", sigc::mem_fun(*this, &MainWindow::onEditSettings));
+
     udpAction_ = add_action_bool("udp", sigc::mem_fun(*this, &MainWindow::onToggleUdp), false);
-    add_action("udpport", sigc::mem_fun(*this, &MainWindow::onUdpSettings));
 
     add_action("rigconnect",    sigc::mem_fun(*this, &MainWindow::onRigConnect));
     add_action("rigdisconnect", sigc::mem_fun(*this, &MainWindow::onRigDisconnect));
@@ -279,23 +281,15 @@ void MainWindow::buildActions() {
 
     add_action("lotwupload",   sigc::mem_fun(*this, &MainWindow::onLotwUpload));
     add_action("lotwdownload", sigc::mem_fun(*this, &MainWindow::onLotwDownload));
-    add_action("lotwsettings", sigc::mem_fun(*this, &MainWindow::onLotwSettings));
-
-    add_action("qrzsettings", sigc::mem_fun(*this, &MainWindow::onQrzSettings));
-
-    add_action("keyersettings", sigc::mem_fun(*this, &MainWindow::onKeyerSettings));
 
     paddleAction_ =
         add_action_bool("paddle", sigc::mem_fun(*this, &MainWindow::onTogglePaddle), false);
-    add_action("paddlesettings", sigc::mem_fun(*this, &MainWindow::onPaddleSettings));
 
     audioAction_ = add_action_bool("audio", sigc::mem_fun(*this, &MainWindow::onToggleAudio), false);
-    add_action("audiosettings", sigc::mem_fun(*this, &MainWindow::onAudioSettings));
 
     dxShowAction_ = add_action_bool(
         "dxshow", sigc::mem_fun(*this, &MainWindow::onClusterToggleShow), false);
     add_action("dxconnect",  sigc::mem_fun(*this, &MainWindow::onClusterConnect));
-    add_action("dxsettings", sigc::mem_fun(*this, &MainWindow::onClusterSettings));
     dxDockAction_ = add_action_radio_string(
         "dxdock", sigc::mem_fun(*this, &MainWindow::onDxDock), "bottom");
 
@@ -323,6 +317,10 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     fileMenu->append_section(quitSection);
     menu->append_submenu("_File", fileMenu);
 
+    auto editMenu = Gio::Menu::create();
+    editMenu->append("_Settings…", "win.settings");
+    menu->append_submenu("_Edit", editMenu);
+
     auto logMenu = Gio::Menu::create();
     logMenu->append("_Find…", "win.find");
     logMenu->append("Fill _DXCC entities", "win.filldxcc");
@@ -331,11 +329,10 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
 
     auto netMenu = Gio::Menu::create();
     netMenu->append("_Listen for QSOs (UDP)", "win.udp");
-    netMenu->append("UDP _port…", "win.udpport");
     menu->append_submenu("_Network", netMenu);
 
     auto rigMenu = Gio::Menu::create();
-    rigMenu->append("_Connect…", "win.rigconnect");
+    rigMenu->append("_Connect", "win.rigconnect");
     rigMenu->append("_Disconnect", "win.rigdisconnect");
     auto rigPanelSection = Gio::Menu::create();
     rigPanelSection->append("Show _panel", "win.rigshow");
@@ -351,24 +348,14 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto lotwMenu = Gio::Menu::create();
     lotwMenu->append("_Upload to LoTW…", "win.lotwupload");
     lotwMenu->append("_Download confirmations", "win.lotwdownload");
-    lotwMenu->append("_Settings…", "win.lotwsettings");
     menu->append_submenu("Lo_TW", lotwMenu);
 
-    auto qrzMenu = Gio::Menu::create();
-    qrzMenu->append("_Settings…", "win.qrzsettings");
-    menu->append_submenu("_QRZ", qrzMenu);
-
     auto keyerMenu = Gio::Menu::create();
-    keyerMenu->append("_Settings…", "win.keyersettings");
-    auto paddleSection = Gio::Menu::create();
-    paddleSection->append("Remote _paddle keying ([ / ])", "win.paddle");
-    paddleSection->append("Paddle se_ttings…", "win.paddlesettings");
-    keyerMenu->append_section(paddleSection);
+    keyerMenu->append("Remote _paddle keying ([ / ])", "win.paddle");
     menu->append_submenu("_Keyer", keyerMenu);
 
     auto audioMenu = Gio::Menu::create();
     audioMenu->append("_Play rig audio stream", "win.audio");
-    audioMenu->append("_Settings…", "win.audiosettings");
     menu->append_submenu("_Audio", audioMenu);
 
     auto skimmerMenu = Gio::Menu::create();
@@ -390,7 +377,6 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     dockMenu->append("_Left",   "win.dxdock::left");
     dockMenu->append("_Right",  "win.dxdock::right");
     clusterMenu->append_submenu("_Dock", dockMenu);
-    clusterMenu->append("S_ettings…", "win.dxsettings");
     menu->append_submenu("_Cluster", clusterMenu);
 
     auto helpMenu = Gio::Menu::create();
@@ -738,129 +724,13 @@ void MainWindow::stopUdpListening() {
     setStatus("Stopped UDP listener.");
 }
 
-void MainWindow::onUdpSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("UDP settings");
-    win->set_hide_on_close(true);
-
-    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
-    box->set_spacing(8);
-    ui::setMargin(*box, 12);
-
-    auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
-    row->set_spacing(8);
-    row->append(*Gtk::make_managed<Gtk::Label>("Listen port:"));
-    auto* entry = Gtk::make_managed<Gtk::Entry>();
-    entry->set_text(std::to_string(cfg().udpPort));
-    entry->set_hexpand(true);
-    row->append(*entry);
-    box->append(*row);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Receives WSJT-X \"Logged ADIF\" packets and raw ADIF datagrams.\n"
-        "WSJT-X default is 2237.");
-    hint->set_xalign(0.0);
-    box->append(*hint);
-
-    auto* apply = Gtk::make_managed<Gtk::Button>("Apply");
-    apply->set_halign(Gtk::Align::END);
-    box->append(*apply);
-
-    win->set_child(*box);
-    win->signal_hide().connect([win]() { delete win; });
-
-    apply->signal_clicked().connect([this, entry, win]() {
-        try {
-            const int p = std::stoi(entry->get_text().raw());
-            if (p > 0 && p < 65536) {
-                cfg().udpPort = p;
-                if (listener_.isListening()) {
-                    listener_.stop();
-                    startUdpListening();  // restart on the new port (updates state)
-                } else {
-                    setStatus("UDP port set to " + std::to_string(cfg().udpPort) + ".");
-                }
-            } else {
-                setStatus("Port must be between 1 and 65535.");
-            }
-        } catch (const std::exception&) {
-            setStatus("Invalid port number.");
-        }
-        win->set_visible(false);
-    });
-
-    win->present();
-}
-
 // --- Hamlib rig control ------------------------------------------------------
 
 void MainWindow::onRigConnect() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("Connect to rig");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* modelEntry = Gtk::make_managed<Gtk::Entry>();
-    modelEntry->set_text(std::to_string(cfg().rigModel));
-    auto* deviceEntry = Gtk::make_managed<Gtk::Entry>();
-    deviceEntry->set_text(cfg().rigDevice);
-    deviceEntry->set_placeholder_text("/dev/ttyUSB0");
-    auto* pollEntry = Gtk::make_managed<Gtk::Entry>();
-    pollEntry->set_text(std::to_string(cfg().rigPollMs));
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("Hamlib model:", *modelEntry, 0);
-    field("Device:",       *deviceEntry, 1);
-    field("Poll (ms):",    *pollEntry, 2);
-    auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
-    autoCheck->set_active(cfg().rigAutoConnect);
-    grid->attach(*autoCheck, 1, 3);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Model is a Hamlib rig id (e.g. 1 = dummy, 2 = NET rigctl).\n"
-        "Find yours with `rigctl --list`. Device is ignored for the dummy.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 4, 2, 1);
-
-    auto* connect = Gtk::make_managed<Gtk::Button>("Connect");
-    connect->set_halign(Gtk::Align::END);
-    grid->attach(*connect, 1, 5);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    connect->signal_clicked().connect(
-        [this, modelEntry, deviceEntry, pollEntry, autoCheck, win]() {
-            try {
-                cfg().rigModel  = std::stoi(modelEntry->get_text().raw());
-                cfg().rigDevice = deviceEntry->get_text().raw();
-                cfg().rigPollMs = std::max(50, std::stoi(pollEntry->get_text().raw()));
-            } catch (const std::exception&) {
-                setStatus("Invalid rig settings.");
-                return;
-            }
-            cfg().rigAutoConnect = autoCheck->get_active();
-            // Non-blocking; the outcome arrives via rig_.onConnectResult.
-            setStatus("Connecting to rig…");
-            rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
-            win->set_visible(false);
-        });
-
-    win->present();
+    // Rig parameters are configured in Edit ▸ Settings; this just connects.
+    // Non-blocking; the outcome arrives via rig_.onConnectResult.
+    setStatus("Connecting to rig…");
+    rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
 }
 
 void MainWindow::onRigDisconnect() {
@@ -932,70 +802,6 @@ void MainWindow::onLotwDownload() {
     lotw_.downloadConfirmations(cfg().lotwUser, cfg().lotwPassword, cfg().lotwLastDownload);
 }
 
-void MainWindow::onLotwSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("LoTW settings");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* userEntry = Gtk::make_managed<Gtk::Entry>();
-    userEntry->set_text(cfg().lotwUser);
-    auto* passEntry = Gtk::make_managed<Gtk::Entry>();
-    passEntry->set_text(cfg().lotwPassword);
-    passEntry->set_visibility(false);
-    auto* stationEntry = Gtk::make_managed<Gtk::Entry>();
-    stationEntry->set_text(cfg().lotwStation);
-    stationEntry->set_placeholder_text("tqsl station location (optional)");
-    auto* tqslEntry = Gtk::make_managed<Gtk::Entry>();
-    tqslEntry->set_text(cfg().tqslPath);
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("LoTW username:", *userEntry, 0);
-    field("LoTW password:", *passEntry, 1);
-    field("Station location:", *stationEntry, 2);
-    field("tqsl path:", *tqslEntry, 3);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Username/password are for downloading confirmations and are stored in\n"
-        "plain text in ~/.config/xlog2/layout.ini (mode 0600). Uploading uses\n"
-        "the tqsl tool and your certificate — install tqsl and configure it once.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 4, 2, 1);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 5);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect(
-        [this, userEntry, passEntry, stationEntry, tqslEntry, win]() {
-            cfg().lotwUser     = userEntry->get_text().raw();
-            cfg().lotwPassword = passEntry->get_text().raw();
-            cfg().lotwStation  = stationEntry->get_text().raw();
-            cfg().tqslPath     = tqslEntry->get_text().raw();
-            if (cfg().tqslPath.empty())
-                cfg().tqslPath = "tqsl";
-            setStatus("LoTW settings saved.");
-            win->set_visible(false);
-        });
-
-    win->present();
-}
-
 // --- QRZ.com callsign lookup -------------------------------------------------
 
 void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
@@ -1012,56 +818,86 @@ void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
     qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
 }
 
-void MainWindow::onQrzSettings() {
-    auto* win = new Gtk::Window();
+// --- consolidated settings (Edit ▸ Settings) ---------------------------------
+
+void MainWindow::onEditSettings() {
+    auto* win = new SettingsDialog(
+        cfg(), [this](const Settings& s) { applySettings(s); });
     win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("QRZ.com settings");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* userEntry = Gtk::make_managed<Gtk::Entry>();
-    userEntry->set_text(cfg().qrzUser);
-    auto* passEntry = Gtk::make_managed<Gtk::Entry>();
-    passEntry->set_text(cfg().qrzPassword);
-    passEntry->set_visibility(false);
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("QRZ username:", *userEntry, 0);
-    field("QRZ password:", *passEntry, 1);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Used to look up callsign details via QRZ.com's XML service. Credentials\n"
-        "are stored in plain text in ~/.config/xlog2/layout.ini (mode 0600).\n"
-        "Click the search icon in the Call field to look up a callsign.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 2, 2, 1);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 3);
-
-    win->set_child(*grid);
     win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect([this, userEntry, passEntry, win]() {
-        cfg().qrzUser     = userEntry->get_text().raw();
-        cfg().qrzPassword = passEntry->get_text().raw();
-        setStatus("QRZ.com settings saved.");
-        win->set_visible(false);
-    });
-
     win->present();
+}
+
+void MainWindow::applySettings(const Settings& s) {
+    // Copy only the config-field subset; runtime/view state (enable toggles,
+    // dock/visibility, lotwLastDownload) is owned by the menus and preserved.
+    cfg().udpPort = s.udpPort;
+
+    cfg().rigModel = s.rigModel;
+    cfg().rigDevice = s.rigDevice;
+    cfg().rigPollMs = s.rigPollMs;
+    cfg().rigAutoConnect = s.rigAutoConnect;
+
+    cfg().dxHost = s.dxHost;
+    cfg().dxPort = s.dxPort;
+    cfg().dxLogin = s.dxLogin;
+    cfg().dxAutoConnect = s.dxAutoConnect;
+
+    cfg().lotwUser = s.lotwUser;
+    cfg().lotwPassword = s.lotwPassword;
+    cfg().lotwStation = s.lotwStation;
+    cfg().tqslPath = s.tqslPath;
+
+    cfg().qrzUser = s.qrzUser;
+    cfg().qrzPassword = s.qrzPassword;
+
+    cfg().keyerHost = s.keyerHost;
+    cfg().keyerPort = s.keyerPort;
+    cfg().keyerSpeed = s.keyerSpeed;
+    cfg().keyerMessages = s.keyerMessages;
+
+    cfg().paddleHost = s.paddleHost;
+    cfg().paddlePort = s.paddlePort;
+    cfg().paddleWpm = s.paddleWpm;
+    cfg().paddleIambicB = s.paddleIambicB;
+    cfg().paddleAutospace = s.paddleAutospace;
+    cfg().paddleSidetone = s.paddleSidetone;
+    cfg().paddleToneHz = s.paddleToneHz;
+    cfg().paddleLevel = s.paddleLevel;
+    cfg().paddleSidetoneDevice = s.paddleSidetoneDevice;
+    cfg().paddleMuteAudio = s.paddleMuteAudio;
+
+    cfg().audioHost = s.audioHost;
+    cfg().audioPort = s.audioPort;
+    cfg().audioSampleRate = s.audioSampleRate;
+    cfg().audioChannels = s.audioChannels;
+    cfg().audioDevice = s.audioDevice;
+
+    cfg().skimmerGate = s.skimmerGate;
+    cfg().skimmerMinSnr = s.skimmerMinSnr;
+    cfg().skimmerKnownOnly = s.skimmerKnownOnly;
+    cfg().skimmerBwNormDb = s.skimmerBwNormDb;
+    cfg().skimmerBwNormRefHz = s.skimmerBwNormRefHz;
+    cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
+
+    // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).
+    applyKeyerConfig();
+    if (listener_.isListening()) { listener_.stop(); startUdpListening(); }
+    if (audio_.isStreaming()) startAudioStream();  // also re-syncs the skimmer rate
+    if (paddle_.isActive()) startPaddleKeyer();
+
+    // Skimmer detector params are live: push to both the service and the panel
+    // controls so the panel reflects the dialog (these setters don't re-emit).
+    skimmerPanel_.setGate(cfg().skimmerGate);
+    skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
+    skimmerPanel_.setMinSnr(cfg().skimmerMinSnr);
+    skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
+    skimmerPanel_.setKnownOnly(cfg().skimmerKnownOnly);
+    skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
+    skimmer_.setBandwidthNorm(cfg().skimmerBwNormDb, cfg().skimmerBwNormRefHz,
+                              cfg().skimmerBwOffsetDb);
+
+    setStatus("Settings saved.");
 }
 
 void MainWindow::showQrzResult(const QrzResult& result) {
@@ -1123,80 +959,6 @@ void MainWindow::applyKeyerConfig() {
             p->setCwMessages(cfg().keyerMessages);
 }
 
-void MainWindow::onKeyerSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("Network keyer (cwdaemon)");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(cfg().keyerHost);
-    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(cfg().keyerPort));
-    auto* speedEntry = Gtk::make_managed<Gtk::Entry>();
-    speedEntry->set_text(cfg().keyerSpeed > 0 ? std::to_string(cfg().keyerSpeed) : "");
-    speedEntry->set_placeholder_text("wpm (blank = leave cwdaemon default)");
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("Host:", *hostEntry, 0);
-    field("Port:", *portEntry, 1);
-    field("Speed:", *speedEntry, 2);
-
-    std::array<Gtk::Entry*, 9> msgEntries{};
-    for (int i = 0; i < 9; ++i) {
-        msgEntries[i] = Gtk::make_managed<Gtk::Entry>();
-        msgEntries[i]->set_text(cfg().keyerMessages[i]);
-        field(("F" + std::to_string(i + 1) + ":").c_str(), *msgEntries[i], 3 + i);
-    }
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Sends CW to a cwdaemon over UDP. Messages may contain the tokens\n"
-        "%CALL% %NAME% %QTH% %RST% (case-insensitive; %RST% = the RST rcvd\n"
-        "field), substituted from the QSO entry form. Trigger with the F1–F9\n"
-        "buttons or keys; Stop aborts the message being sent.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 12, 2, 1);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 13);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect(
-        [this, hostEntry, portEntry, speedEntry, msgEntries, win]() {
-            cfg().keyerHost = hostEntry->get_text().raw();
-            if (cfg().keyerHost.empty())
-                cfg().keyerHost = "127.0.0.1";
-            try { cfg().keyerPort = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().keyerPort = 6789; }
-            try {
-                const std::string s = speedEntry->get_text().raw();
-                cfg().keyerSpeed = s.empty() ? 0 : std::stoi(s);
-            } catch (const std::exception&) { cfg().keyerSpeed = 0; }
-            for (int i = 0; i < 9; ++i)
-                cfg().keyerMessages[i] = msgEntries[i]->get_text().raw();
-            applyKeyerConfig();
-            setStatus("Keyer settings saved.");
-            win->set_visible(false);
-        });
-
-    win->present();
-}
-
 // --- rig audio stream (cwsd) -------------------------------------------------
 
 void MainWindow::onToggleAudio() {
@@ -1227,82 +989,6 @@ void MainWindow::stopAudioStream() {
     cfg().audioEnabled = false;
     audioAction_->change_state(false);
     audioIndicator_.set_text("");
-}
-
-void MainWindow::onAudioSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("Rig audio stream (cwsd)");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(cfg().audioHost);
-    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(cfg().audioPort));
-    auto* rateEntry = Gtk::make_managed<Gtk::Entry>();
-    rateEntry->set_text(std::to_string(cfg().audioSampleRate));
-    auto* chanEntry = Gtk::make_managed<Gtk::Entry>();
-    chanEntry->set_text(std::to_string(cfg().audioChannels));
-    auto* deviceEntry = Gtk::make_managed<Gtk::Entry>();
-    deviceEntry->set_text(cfg().audioDevice);
-    deviceEntry->set_placeholder_text("ALSA playback device, e.g. default");
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("Host:", *hostEntry, 0);
-    field("Port:", *portEntry, 1);
-    field("Sample rate:", *rateEntry, 2);
-    field("Channels:", *chanEntry, 3);
-    field("Playback device:", *deviceEntry, 4);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Plays a cwsd Opus-over-UDP rig-audio stream. The sample rate (an Opus\n"
-        "rate: 8000/12000/16000/24000/48000) and channel count must match the\n"
-        "cwsd `audio` section. cwsd's default port is 7355.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 5, 2, 1);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 6);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect(
-        [this, hostEntry, portEntry, rateEntry, chanEntry, deviceEntry, win]() {
-            cfg().audioHost = hostEntry->get_text().raw();
-            if (cfg().audioHost.empty())
-                cfg().audioHost = "127.0.0.1";
-            try { cfg().audioPort = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().audioPort = 7355; }
-            try { cfg().audioSampleRate = std::stoi(rateEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().audioSampleRate = 48000; }
-            try { cfg().audioChannels = std::stoi(chanEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().audioChannels = 1; }
-            cfg().audioDevice = deviceEntry->get_text().raw();
-            if (cfg().audioDevice.empty())
-                cfg().audioDevice = "default";
-            // Restart on the new settings if currently playing.
-            if (audio_.isStreaming())
-                startAudioStream();
-            else
-                setStatus("Rig audio stream settings saved.");
-            win->set_visible(false);
-        });
-
-    win->present();
 }
 
 // --- remote paddle keyer (cwsd remote_key) -----------------------------------
@@ -1336,101 +1022,6 @@ void MainWindow::stopPaddleKeyer() {
     paddle_.stop();
     cfg().paddleEnabled = false;
     paddleAction_->change_state(false);
-}
-
-void MainWindow::onPaddleSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("Remote paddle keyer (cwsd)");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(cfg().paddleHost);
-    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(cfg().paddlePort));
-    auto* wpmEntry = Gtk::make_managed<Gtk::Entry>();
-    wpmEntry->set_text(std::to_string(cfg().paddleWpm));
-    auto* iambicBCheck = Gtk::make_managed<Gtk::CheckButton>("Iambic B (default: iambic A)");
-    iambicBCheck->set_active(cfg().paddleIambicB);
-    auto* autospaceCheck = Gtk::make_managed<Gtk::CheckButton>("Autospace (enforce inter-character spacing)");
-    autospaceCheck->set_active(cfg().paddleAutospace);
-    auto* sidetoneCheck = Gtk::make_managed<Gtk::CheckButton>("Local sidetone");
-    sidetoneCheck->set_active(cfg().paddleSidetone);
-    auto* toneEntry = Gtk::make_managed<Gtk::Entry>();
-    toneEntry->set_text(std::to_string(cfg().paddleToneHz));
-    auto* levelEntry = Gtk::make_managed<Gtk::Entry>();
-    levelEntry->set_text(std::to_string(cfg().paddleLevel));
-    auto* muteAudioCheck = Gtk::make_managed<Gtk::CheckButton>("Mute rig audio while keying");
-    muteAudioCheck->set_active(cfg().paddleMuteAudio);
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("Host:", *hostEntry, 0);
-    field("Port:", *portEntry, 1);
-    field("Speed (wpm):", *wpmEntry, 2);
-    grid->attach(*iambicBCheck, 1, 3);
-    grid->attach(*autospaceCheck, 1, 4);
-    grid->attach(*sidetoneCheck, 1, 5);
-    field("Tone (Hz):", *toneEntry, 6);
-    field("Volume (0–100):", *levelEntry, 7);
-    grid->attach(*muteAudioCheck, 1, 8);
-
-    auto* hint = Gtk::make_managed<Gtk::Label>(
-        "Streams timestamped key edges to cwsd's `remote_key` service for real\n"
-        "paddle keying, with an instant local sidetone for feel. Test with the\n"
-        "[ (dit) and ] (dah) keys while active. cwsd's default port is 6790.");
-    hint->set_xalign(0.0);
-    grid->attach(*hint, 0, 9, 2, 1);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 10);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect(
-        [this, hostEntry, portEntry, wpmEntry, iambicBCheck, autospaceCheck,
-         sidetoneCheck, toneEntry, levelEntry, muteAudioCheck, win]() {
-            cfg().paddleHost = hostEntry->get_text().raw();
-            if (cfg().paddleHost.empty())
-                cfg().paddleHost = "127.0.0.1";
-            try { cfg().paddlePort = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().paddlePort = 6790; }
-            try { cfg().paddleWpm = std::stoi(wpmEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().paddleWpm = 20; }
-            if (cfg().paddleWpm <= 0)
-                cfg().paddleWpm = 20;
-            cfg().paddleIambicB = iambicBCheck->get_active();
-            cfg().paddleAutospace = autospaceCheck->get_active();
-            cfg().paddleSidetone = sidetoneCheck->get_active();
-            try { cfg().paddleToneHz = std::stoi(toneEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().paddleToneHz = 600; }
-            if (cfg().paddleToneHz <= 0)
-                cfg().paddleToneHz = 600;
-            try { cfg().paddleLevel = std::stoi(levelEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().paddleLevel = 50; }
-            cfg().paddleMuteAudio = muteAudioCheck->get_active();
-            // Restart on the new settings if currently active.
-            if (paddle_.isActive())
-                startPaddleKeyer();
-            else
-                setStatus("Remote paddle keyer settings saved.");
-            win->set_visible(false);
-        });
-
-    win->present();
 }
 
 // --- DX cluster --------------------------------------------------------------
@@ -1655,62 +1246,6 @@ void MainWindow::onSpotActivated(const DxSpot& spot) {
         page->applyDxSpot(spot.dxCall, mhz);
     if (rig_.isRunning())
         rig_.setFrequency(mhz);  // tune the connected rig to the spot
-}
-
-void MainWindow::onClusterSettings() {
-    auto* win = new Gtk::Window();
-    win->set_transient_for(*this);
-    win->set_modal(true);
-    win->set_title("DX cluster settings");
-    win->set_hide_on_close(true);
-
-    auto* grid = Gtk::make_managed<Gtk::Grid>();
-    grid->set_row_spacing(6);
-    grid->set_column_spacing(8);
-    ui::setMargin(*grid, 12);
-
-    auto* hostEntry = Gtk::make_managed<Gtk::Entry>();
-    hostEntry->set_text(cfg().dxHost);
-    hostEntry->set_placeholder_text("cluster.example.net");
-    auto* portEntry = Gtk::make_managed<Gtk::Entry>();
-    portEntry->set_text(std::to_string(cfg().dxPort));
-    auto* loginEntry = Gtk::make_managed<Gtk::Entry>();
-    loginEntry->set_text(cfg().dxLogin);
-    loginEntry->set_placeholder_text("your callsign (sent at the login prompt)");
-    auto* autoCheck = Gtk::make_managed<Gtk::CheckButton>("Connect automatically on startup");
-    autoCheck->set_active(cfg().dxAutoConnect);
-
-    auto field = [&](const char* text, Gtk::Widget& w, int row) {
-        auto* l = Gtk::make_managed<Gtk::Label>(text);
-        l->set_xalign(1.0);
-        grid->attach(*l, 0, row);
-        w.set_hexpand(true);
-        grid->attach(w, 1, row);
-    };
-    field("Host:", *hostEntry, 0);
-    field("Port:", *portEntry, 1);
-    field("Login call:", *loginEntry, 2);
-    grid->attach(*autoCheck, 1, 3);
-
-    auto* save = Gtk::make_managed<Gtk::Button>("Save");
-    save->set_halign(Gtk::Align::END);
-    grid->attach(*save, 1, 4);
-
-    win->set_child(*grid);
-    win->signal_hide().connect([win]() { delete win; });
-
-    save->signal_clicked().connect(
-        [this, hostEntry, portEntry, loginEntry, autoCheck, win]() {
-            cfg().dxHost = hostEntry->get_text().raw();
-            try { cfg().dxPort = std::stoi(portEntry->get_text().raw()); }
-            catch (const std::exception&) { cfg().dxPort = 7300; }
-            cfg().dxLogin = loginEntry->get_text().raw();
-            cfg().dxAutoConnect = autoCheck->get_active();
-            setStatus("DX cluster settings saved.");
-            win->set_visible(false);
-        });
-
-    win->present();
 }
 
 // --- settings persistence ----------------------------------------------------

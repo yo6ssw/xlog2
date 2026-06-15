@@ -6,6 +6,7 @@
 #include "QtDxClusterPanel.h"
 #include "QtRigPanel.h"
 #include "QtCwSkimmerPanel.h"
+#include "QtSettingsDialog.h"
 #include "QtLogPage.h"
 #include "Statistics.h"
 #include "StrUtil.h"
@@ -416,6 +417,10 @@ void QtMainWindow::buildMenus() {
     file->addSeparator();
     file->addAction("Quit", this, &QWidget::close);
 
+    auto* edit = menuBar()->addMenu("&Edit");
+    auto* prefs = edit->addAction("Settings…", this, &QtMainWindow::onEditSettings);
+    prefs->setShortcut(QKeySequence::Preferences);  // Ctrl+,
+
     auto* log = menuBar()->addMenu("&Log");
     auto* find = log->addAction("Find…", this, &QtMainWindow::onFind);
     find->setShortcut(QKeySequence::Find);
@@ -426,10 +431,9 @@ void QtMainWindow::buildMenus() {
     udpAction_ = net->addAction("Listen for QSOs (UDP)");
     udpAction_->setCheckable(true);
     connect(udpAction_, &QAction::toggled, this, &QtMainWindow::onToggleUdp);
-    net->addAction("UDP port…", this, &QtMainWindow::onUdpSettings);
 
     auto* rig = menuBar()->addMenu("&Rig");
-    rig->addAction("Connect…", this, &QtMainWindow::onRigConnect);
+    rig->addAction("Connect", this, &QtMainWindow::onRigConnect);
     rig->addAction("Disconnect", this, &QtMainWindow::onRigDisconnect);
     rig->addSeparator();
     auto* rigShow = rigDock_->toggleViewAction();
@@ -451,24 +455,16 @@ void QtMainWindow::buildMenus() {
     auto* lotw = menuBar()->addMenu("Lo&TW");
     lotw->addAction("Upload to LoTW…", this, &QtMainWindow::onLotwUpload);
     lotw->addAction("Download confirmations", this, &QtMainWindow::onLotwDownload);
-    lotw->addAction("Settings…", this, &QtMainWindow::onLotwSettings);
-
-    auto* qrz = menuBar()->addMenu("&QRZ");
-    qrz->addAction("Settings…", this, &QtMainWindow::onQrzSettings);
 
     auto* keyer = menuBar()->addMenu("&Keyer");
-    keyer->addAction("Settings…", this, &QtMainWindow::onKeyerSettings);
-    keyer->addSeparator();
     paddleAction_ = keyer->addAction("Remote paddle keying ([ / ])");
     paddleAction_->setCheckable(true);
     connect(paddleAction_, &QAction::toggled, this, &QtMainWindow::onTogglePaddle);
-    keyer->addAction("Paddle settings…", this, &QtMainWindow::onPaddleSettings);
 
     auto* audio = menuBar()->addMenu("&Audio");
     audioAction_ = audio->addAction("Play rig audio stream");
     audioAction_->setCheckable(true);
     connect(audioAction_, &QAction::toggled, this, &QtMainWindow::onToggleAudio);
-    audio->addAction("Settings…", this, &QtMainWindow::onAudioSettings);
 
     auto* skimmer = menuBar()->addMenu("S&kimmer");
     auto* skShow = skimmerDock_->toggleViewAction();
@@ -519,7 +515,6 @@ void QtMainWindow::buildMenus() {
             dxDock_->show();                                // picking a dock implies showing it
         });
     }
-    cluster->addAction("Settings…", this, &QtMainWindow::onClusterSettings);
 
     menuBar()->addMenu("&Help")->addAction("About xlog2", this, &QtMainWindow::onAbout);
 }
@@ -669,51 +664,12 @@ void QtMainWindow::startUdpListening() {
                   : "Could not start UDP listener: " + error);
 }
 
-void QtMainWindow::onUdpSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("UDP settings");
-    auto* form = new QFormLayout(&dlg);
-    auto* port = new QSpinBox;
-    port->setRange(1, 65535);
-    port->setValue(cfg().udpPort);
-    form->addRow("Listen port:", port);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().udpPort = port->value();
-        if (listener_.isListening()) { listener_.stop(); startUdpListening(); }
-        else setStatus("UDP port set to " + std::to_string(cfg().udpPort) + ".");
-    }
-}
-
 // --- rig ---------------------------------------------------------------------
 
 void QtMainWindow::onRigConnect() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("Connect to rig");
-    auto* form = new QFormLayout(&dlg);
-    auto* model = new QSpinBox; model->setRange(1, 99999); model->setValue(cfg().rigModel);
-    auto* device = new QLineEdit(QString::fromStdString(cfg().rigDevice));
-    auto* poll = new QSpinBox; poll->setRange(50, 60000); poll->setValue(cfg().rigPollMs);
-    auto* autoc = new QCheckBox("Connect at startup"); autoc->setChecked(cfg().rigAutoConnect);
-    form->addRow("Hamlib model id:", model);
-    form->addRow("Device / host:", device);
-    form->addRow("Poll interval (ms):", poll);
-    form->addRow(autoc);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().rigModel = model->value();
-        cfg().rigDevice = device->text().toStdString();
-        cfg().rigPollMs = poll->value();
-        cfg().rigAutoConnect = autoc->isChecked();
-        setStatus("Connecting to rig…");
-        rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
-    }
+    // Rig parameters are configured in Edit ▸ Settings; this just connects.
+    setStatus("Connecting to rig…");
+    rig_.start(cfg().rigModel, cfg().rigDevice, cfg().rigPollMs);
 }
 
 void QtMainWindow::onRigDisconnect() {
@@ -779,54 +735,6 @@ void QtMainWindow::onLotwDownload() {
     lotw_.downloadConfirmations(cfg().lotwUser, cfg().lotwPassword, cfg().lotwLastDownload);
 }
 
-void QtMainWindow::onLotwSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("LoTW settings");
-    auto* form = new QFormLayout(&dlg);
-    auto* user = new QLineEdit(QString::fromStdString(cfg().lotwUser));
-    auto* pass = new QLineEdit(QString::fromStdString(cfg().lotwPassword));
-    pass->setEchoMode(QLineEdit::Password);
-    auto* station = new QLineEdit(QString::fromStdString(cfg().lotwStation));
-    auto* tqsl = new QLineEdit(QString::fromStdString(cfg().tqslPath));
-    form->addRow("LoTW username:", user);
-    form->addRow("LoTW password:", pass);
-    form->addRow("Station location:", station);
-    form->addRow("tqsl path:", tqsl);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().lotwUser = user->text().toStdString();
-        cfg().lotwPassword = pass->text().toStdString();
-        cfg().lotwStation = station->text().toStdString();
-        cfg().tqslPath = tqsl->text().isEmpty() ? "tqsl" : tqsl->text().toStdString();
-        setStatus("LoTW settings saved.");
-    }
-}
-
-// --- QRZ ---------------------------------------------------------------------
-
-void QtMainWindow::onQrzSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("QRZ.com settings");
-    auto* form = new QFormLayout(&dlg);
-    auto* user = new QLineEdit(QString::fromStdString(cfg().qrzUser));
-    auto* pass = new QLineEdit(QString::fromStdString(cfg().qrzPassword));
-    pass->setEchoMode(QLineEdit::Password);
-    form->addRow("QRZ.com username:", user);
-    form->addRow("QRZ.com password:", pass);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().qrzUser = user->text().toStdString();
-        cfg().qrzPassword = pass->text().toStdString();
-        setStatus("QRZ settings saved.");
-    }
-}
-
 // --- keyer -------------------------------------------------------------------
 
 void QtMainWindow::applyKeyerConfig() {
@@ -836,36 +744,6 @@ void QtMainWindow::applyKeyerConfig() {
     for (int i = 0; i < tabs_->count(); ++i)
         if (auto* p = qobject_cast<QtLogPage*>(tabs_->widget(i)))
             p->setCwMessages(cfg().keyerMessages);
-}
-
-void QtMainWindow::onKeyerSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("Keyer settings");
-    auto* form = new QFormLayout(&dlg);
-    auto* host = new QLineEdit(QString::fromStdString(cfg().keyerHost));
-    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().keyerPort);
-    auto* speed = new QSpinBox; speed->setRange(0, 60); speed->setValue(cfg().keyerSpeed);
-    form->addRow("cwdaemon host:", host);
-    form->addRow("Port:", port);
-    form->addRow("Speed (wpm, 0=default):", speed);
-    std::array<QLineEdit*, 9> msgs{};
-    for (int i = 0; i < 9; ++i) {
-        msgs[i] = new QLineEdit(QString::fromStdString(cfg().keyerMessages[i]));
-        form->addRow(QString("F%1 message:").arg(i + 1), msgs[i]);
-    }
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().keyerHost = host->text().toStdString();
-        cfg().keyerPort = port->value();
-        cfg().keyerSpeed = speed->value();
-        for (int i = 0; i < 9; ++i)
-            cfg().keyerMessages[i] = msgs[i]->text().toStdString();
-        applyKeyerConfig();
-        setStatus("Keyer settings saved.");
-    }
 }
 
 // --- rig audio stream (cwsd) -------------------------------------------------
@@ -895,47 +773,6 @@ void QtMainWindow::startAudioStream() {
     }
     if (skimmer_.isRunning())  // re-sync the skimmer to the (possibly new) rate
         startSkimmer();
-}
-
-void QtMainWindow::onAudioSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("Rig audio stream (cwsd)");
-    auto* form = new QFormLayout(&dlg);
-    auto* host = new QLineEdit(QString::fromStdString(cfg().audioHost));
-    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().audioPort);
-    auto* rate = new QComboBox;
-    for (int r : {8000, 12000, 16000, 24000, 48000})
-        rate->addItem(QString::number(r), r);
-    rate->setCurrentIndex(std::max(0, rate->findData(cfg().audioSampleRate)));
-    auto* chan = new QSpinBox; chan->setRange(1, 2); chan->setValue(cfg().audioChannels);
-    auto* device = new QLineEdit(QString::fromStdString(cfg().audioDevice));
-    device->setPlaceholderText("ALSA playback device, e.g. default");
-    form->addRow("Host:", host);
-    form->addRow("Port:", port);
-    form->addRow("Sample rate:", rate);
-    form->addRow("Channels:", chan);
-    form->addRow("Playback device:", device);
-    auto* hint = new QLabel(
-        "Sample rate and channels must match the cwsd `audio` section.\n"
-        "cwsd's default port is 7355.");
-    form->addRow(hint);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().audioHost = host->text().toStdString();
-        if (cfg().audioHost.empty()) cfg().audioHost = "127.0.0.1";
-        cfg().audioPort = port->value();
-        cfg().audioSampleRate = rate->currentData().toInt();
-        cfg().audioChannels = chan->value();
-        cfg().audioDevice = device->text().toStdString();
-        if (cfg().audioDevice.empty()) cfg().audioDevice = "default";
-        if (audio_.isStreaming())
-            startAudioStream();  // restart on the new settings
-        else
-            setStatus("Rig audio stream settings saved.");
-    }
 }
 
 // --- remote paddle keyer (cwsd remote_key) -----------------------------------
@@ -970,60 +807,6 @@ void QtMainWindow::startPaddleKeyer() {
     }
 }
 
-void QtMainWindow::onPaddleSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("Remote paddle keyer (cwsd)");
-    auto* form = new QFormLayout(&dlg);
-    auto* host = new QLineEdit(QString::fromStdString(cfg().paddleHost));
-    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().paddlePort);
-    auto* wpm  = new QSpinBox; wpm->setRange(1, 99); wpm->setValue(cfg().paddleWpm);
-    auto* iambicB = new QCheckBox("Iambic B (default: iambic A)");
-    iambicB->setChecked(cfg().paddleIambicB);
-    auto* autospace = new QCheckBox("Autospace (enforce inter-character spacing)");
-    autospace->setChecked(cfg().paddleAutospace);
-    auto* sidetone = new QCheckBox("Local sidetone");
-    sidetone->setChecked(cfg().paddleSidetone);
-    auto* tone = new QSpinBox; tone->setRange(100, 2000); tone->setSuffix(" Hz");
-    tone->setValue(cfg().paddleToneHz);
-    auto* level = new QSpinBox; level->setRange(0, 100); level->setValue(cfg().paddleLevel);
-    auto* muteAudio = new QCheckBox("Mute rig audio while keying");
-    muteAudio->setChecked(cfg().paddleMuteAudio);
-    form->addRow("Host:", host);
-    form->addRow("Port:", port);
-    form->addRow("Speed (wpm):", wpm);
-    form->addRow(iambicB);
-    form->addRow(autospace);
-    form->addRow(sidetone);
-    form->addRow("Tone:", tone);
-    form->addRow("Volume (0–100):", level);
-    form->addRow(muteAudio);
-    auto* hint = new QLabel(
-        "Streams timestamped key edges to cwsd's `remote_key` service, with an\n"
-        "instant local sidetone for feel. Test with the [ (dit) and ] (dah)\n"
-        "keys while active. cwsd's default remote_key port is 6790.");
-    form->addRow(hint);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().paddleHost = host->text().toStdString();
-        if (cfg().paddleHost.empty()) cfg().paddleHost = "127.0.0.1";
-        cfg().paddlePort = port->value();
-        cfg().paddleWpm = wpm->value();
-        cfg().paddleIambicB = iambicB->isChecked();
-        cfg().paddleAutospace = autospace->isChecked();
-        cfg().paddleSidetone = sidetone->isChecked();
-        cfg().paddleToneHz = tone->value();
-        cfg().paddleLevel = level->value();
-        cfg().paddleMuteAudio = muteAudio->isChecked();
-        if (paddle_.isActive())
-            startPaddleKeyer();  // restart on the new settings
-        else
-            setStatus("Remote paddle keyer settings saved.");
-    }
-}
-
 bool QtMainWindow::eventFilter(QObject* obj, QEvent* ev) {
     if (paddle_.isActive() &&
         (ev->type() == QEvent::KeyPress || ev->type() == QEvent::KeyRelease)) {
@@ -1053,29 +836,87 @@ void QtMainWindow::onClusterConnectToggle() {
     cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
 }
 
-void QtMainWindow::onClusterSettings() {
-    QDialog dlg(this);
-    dlg.setWindowTitle("DX cluster settings");
-    auto* form = new QFormLayout(&dlg);
-    auto* host = new QLineEdit(QString::fromStdString(cfg().dxHost));
-    auto* port = new QSpinBox; port->setRange(1, 65535); port->setValue(cfg().dxPort);
-    auto* login = new QLineEdit(QString::fromStdString(cfg().dxLogin));
-    form->addRow("Host:", host);
-    form->addRow("Port:", port);
-    form->addRow("Login callsign:", login);
-    auto* bb = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel);
-    form->addRow(bb);
-    QObject::connect(bb, &QDialogButtonBox::accepted, &dlg, &QDialog::accept);
-    QObject::connect(bb, &QDialogButtonBox::rejected, &dlg, &QDialog::reject);
-    if (dlg.exec() == QDialog::Accepted) {
-        cfg().dxHost = host->text().toStdString();
-        cfg().dxPort = port->value();
-        cfg().dxLogin = login->text().toStdString();
-        setStatus("DX cluster settings saved.");
-    }
+// --- settings ----------------------------------------------------------------
+
+void QtMainWindow::onEditSettings() {
+    QtSettingsDialog dlg(cfg(), this);
+    connect(&dlg, &QtSettingsDialog::applied, this, &QtMainWindow::applySettings);
+    dlg.exec();
 }
 
-// --- settings ----------------------------------------------------------------
+void QtMainWindow::applySettings(const Settings& s) {
+    // Copy only the config-field subset; runtime/view state (enable toggles,
+    // dock/visibility, lotwLastDownload) is owned by the menus and preserved.
+    cfg().udpPort = s.udpPort;
+
+    cfg().rigModel = s.rigModel;
+    cfg().rigDevice = s.rigDevice;
+    cfg().rigPollMs = s.rigPollMs;
+    cfg().rigAutoConnect = s.rigAutoConnect;
+
+    cfg().dxHost = s.dxHost;
+    cfg().dxPort = s.dxPort;
+    cfg().dxLogin = s.dxLogin;
+    cfg().dxAutoConnect = s.dxAutoConnect;
+
+    cfg().lotwUser = s.lotwUser;
+    cfg().lotwPassword = s.lotwPassword;
+    cfg().lotwStation = s.lotwStation;
+    cfg().tqslPath = s.tqslPath;
+
+    cfg().qrzUser = s.qrzUser;
+    cfg().qrzPassword = s.qrzPassword;
+
+    cfg().keyerHost = s.keyerHost;
+    cfg().keyerPort = s.keyerPort;
+    cfg().keyerSpeed = s.keyerSpeed;
+    cfg().keyerMessages = s.keyerMessages;
+
+    cfg().paddleHost = s.paddleHost;
+    cfg().paddlePort = s.paddlePort;
+    cfg().paddleWpm = s.paddleWpm;
+    cfg().paddleIambicB = s.paddleIambicB;
+    cfg().paddleAutospace = s.paddleAutospace;
+    cfg().paddleSidetone = s.paddleSidetone;
+    cfg().paddleToneHz = s.paddleToneHz;
+    cfg().paddleLevel = s.paddleLevel;
+    cfg().paddleSidetoneDevice = s.paddleSidetoneDevice;
+    cfg().paddleMuteAudio = s.paddleMuteAudio;
+
+    cfg().audioHost = s.audioHost;
+    cfg().audioPort = s.audioPort;
+    cfg().audioSampleRate = s.audioSampleRate;
+    cfg().audioChannels = s.audioChannels;
+    cfg().audioDevice = s.audioDevice;
+
+    cfg().skimmerGate = s.skimmerGate;
+    cfg().skimmerMinSnr = s.skimmerMinSnr;
+    cfg().skimmerKnownOnly = s.skimmerKnownOnly;
+    cfg().skimmerBwNormDb = s.skimmerBwNormDb;
+    cfg().skimmerBwNormRefHz = s.skimmerBwNormRefHz;
+    cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
+
+    // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).
+    applyKeyerConfig();
+    if (listener_.isListening()) { listener_.stop(); startUdpListening(); }
+    if (audio_.isStreaming()) startAudioStream();  // also re-syncs the skimmer rate
+    if (paddle_.isActive()) startPaddleKeyer();
+
+    // Skimmer detector params are live: push to both the service and the panel
+    // controls so the panel reflects the dialog (these setters don't re-emit).
+    skimmerPanel_->setGate(cfg().skimmerGate);
+    skimmer_.setGate(static_cast<float>(cfg().skimmerGate));
+    skimmerPanel_->setMinSnr(cfg().skimmerMinSnr);
+    skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
+    skimmerPanel_->setKnownOnly(cfg().skimmerKnownOnly);
+    skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
+    skimmer_.setBandwidthNorm(cfg().skimmerBwNormDb, cfg().skimmerBwNormRefHz,
+                              cfg().skimmerBwOffsetDb);
+
+    setStatus("Settings saved.");
+}
+
+// --- paths -------------------------------------------------------------------
 
 std::string QtMainWindow::defaultLogPath() const {
     return envPath("XDG_DATA_HOME", ".local/share") + "/default.xlog";

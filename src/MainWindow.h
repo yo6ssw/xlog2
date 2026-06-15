@@ -72,14 +72,19 @@ private:
     void onFind();
     void onAbout();
 
+    // --- consolidated settings (Edit ▸ Settings) ---
+    // Open the preferences window; applySettings copies the config-field subset
+    // of `edited` into cfg() and re-applies it to any running service.
+    void onEditSettings();
+    void applySettings(const Settings& edited);
+
     // --- UDP network logging ---
     void onToggleUdp();
     void startUdpListening();
     void stopUdpListening();
-    void onUdpSettings();
 
     // --- Hamlib rig control ---
-    void onRigConnect();
+    void onRigConnect();  // connect using the stored rig settings (no dialog)
     void onRigDisconnect();
 
     // --- rig control panel ---
@@ -91,27 +96,22 @@ private:
     // --- LoTW ---
     void onLotwUpload();
     void onLotwDownload();
-    void onLotwSettings();
 
     // --- QRZ.com callsign lookup ---
     void onQrzLookup(LogPage* page, const std::string& callsign);
-    void onQrzSettings();
 
     // --- network keyer (cwdaemon) ---
-    void onKeyerSettings();
     void applyKeyerConfig();   // push endpoint/speed to keyer_ + messages to pages
 
     // --- remote paddle keyer (cwsd remote_key) ---
     void onTogglePaddle();     // start/stop toggle
     void startPaddleKeyer();
     void stopPaddleKeyer();
-    void onPaddleSettings();
 
     // --- rig audio stream (cwsd) ---
     void onToggleAudio();      // start/stop toggle
     void startAudioStream();
     void stopAudioStream();
-    void onAudioSettings();
 
     // --- CW skimmer ---
     void onSkimmerToggleShow();                     // show/hide the panel
@@ -123,7 +123,6 @@ private:
 
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
-    void onClusterSettings();
     void onClusterToggleShow();       // show/hide the panel
     void onDxDock(const Glib::ustring& side);  // dock-side radio action
     void onSpotActivated(const DxSpot& spot);  // fill form + tune rig
