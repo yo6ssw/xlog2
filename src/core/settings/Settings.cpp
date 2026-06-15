@@ -55,6 +55,9 @@ Settings Settings::load(const IniFile& ini) {
     s.skimmerGate     = ini.getInt("skimmer", "gate", s.skimmerGate);
     s.skimmerMinSnr   = ini.getInt("skimmer", "min_snr", s.skimmerMinSnr);
     s.skimmerKnownOnly = ini.getBool("skimmer", "known_only", s.skimmerKnownOnly);
+    s.skimmerBwNormDb    = ini.getInt("skimmer", "bw_norm_db", s.skimmerBwNormDb);
+    s.skimmerBwNormRefHz = ini.getInt("skimmer", "bw_norm_ref_hz", s.skimmerBwNormRefHz);
+    s.skimmerBwOffsetDb  = ini.getInt("skimmer", "bw_offset_db", s.skimmerBwOffsetDb);
 
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
     s.dxPort        = ini.getInt("dxcluster", "port", s.dxPort);
@@ -121,6 +124,9 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("skimmer", "gate", skimmerGate);
     ini.setInt("skimmer", "min_snr", skimmerMinSnr);
     ini.setBool("skimmer", "known_only", skimmerKnownOnly);
+    ini.setInt("skimmer", "bw_norm_db", skimmerBwNormDb);
+    ini.setInt("skimmer", "bw_norm_ref_hz", skimmerBwNormRefHz);
+    ini.setInt("skimmer", "bw_offset_db", skimmerBwOffsetDb);
 
     ini.setString("dxcluster", "host", dxHost);
     ini.setInt("dxcluster", "port", dxPort);

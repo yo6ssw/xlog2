@@ -84,6 +84,32 @@ public:
     // (no effect when no DB is loaded). Thread-safe; live; persisted by the shell.
     void setKnownCallsOnly(bool on) { knownOnly_.store(on, std::memory_order_relaxed); }
 
+    // Waterfall level compensation for the rig's IF filter. Narrowing the filter
+    // brightens the waterfall even though the signal is unchanged: the AGC lifts the
+    // surviving passband, and the percentile noise floor — taken across the whole
+    // [minHz, maxHz] analysis band — collapses into the now-silent, filtered-out
+    // region, so the displayed (signal - floor) widens. With dbPerOctave > 0 the
+    // waterfall is dimmed by dbPerOctave dB for every octave the live passband is
+    // narrower than refHz, holding the floor roughly put across filter changes.
+    // dbPerOctave is empirical (it folds in both the AGC rise and the floor
+    // collapse) — tune it to taste. Display only: detection/decode are untouched.
+    // Thread-safe; live; survives stop()/start(). 0 disables.
+    //
+    // offsetDb is a constant trim applied to the whole waterfall *before* the
+    // per-bandwidth dimming above (it is subtracted, so positive dims and negative
+    // brightens) — a fixed baseline independent of the filter width. 0 = unchanged.
+    void setBandwidthNorm(int dbPerOctave, int refHz, int offsetDb) {
+        bwNormDb_.store(dbPerOctave, std::memory_order_relaxed);
+        bwNormRefHz_.store(refHz, std::memory_order_relaxed);
+        bwOffsetDb_.store(offsetDb, std::memory_order_relaxed);
+    }
+
+    // The rig's current receive passband width (Hz), fed from RigController's
+    // onFilter; 0 = unknown (no compensation applied). Thread-safe; live.
+    void setFilterBandwidthHz(int hz) {
+        filterBwHz_.store(hz, std::memory_order_relaxed);
+    }
+
     // Feed decoded PCM (int16, interleaved). Called from the audio worker thread;
     // downmixes to mono and queues it. No-op when not running or when the rate
     // does not match the configured one.
@@ -100,6 +126,10 @@ private:
     std::atomic<float> gateDb_{0.0f};    // detection gating offset (dB); see setGate
     std::atomic<float> minSnrDb_{0.0f};  // minimum per-channel SNR (dB); see setMinSnr
     std::atomic<bool>  knownOnly_{false};// Paranoid: surface only DB-confirmed calls
+    std::atomic<int>   bwNormDb_{0};     // waterfall dim per octave of narrowing (dB)
+    std::atomic<int>   bwNormRefHz_{2800};// passband width treated as 0 dB
+    std::atomic<int>   bwOffsetDb_{0};   // constant waterfall level trim (dB)
+    std::atomic<int>   filterBwHz_{0};   // live rig passband width, Hz (0 = unknown)
     std::thread        thread_;
 
     std::mutex              mu_;

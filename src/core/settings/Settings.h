@@ -65,6 +65,14 @@ struct Settings {
     int         skimmerGate     = 0;         // detection gating level, dB (see CwSkimmer)
     int         skimmerMinSnr   = 0;         // minimum per-channel SNR, dB (see CwSkimmer)
     bool        skimmerKnownOnly = false;    // Paranoid: only surface DB-confirmed calls
+    // Waterfall level compensation for the rig's IF filter: narrowing the filter
+    // makes the AGC lift the passband and the percentile floor collapse, brightening
+    // the display. Dim it by this many dB per octave the live passband is narrower
+    // than the reference width (0 = off). See CwSkimmer::setBandwidthNorm.
+    int         skimmerBwNormDb    = 6;      // dB per octave of narrowing (0 = off)
+    int         skimmerBwNormRefHz = 2800;   // passband width treated as 0 dB
+    int         skimmerBwOffsetDb  = 0;      // constant waterfall trim applied first,
+                                             // dB (positive dims, negative brightens)
 
     // [dxcluster]
     std::string dxHost;

@@ -109,7 +109,8 @@ From each FFT frame:
 
 - **Waterfall row.** The passband bins are max-pooled into `kDisplayCols`
   columns, converted to dB above the floor, normalised to [0,1], and accumulated;
-  a row is posted every `waterfallDecim` frames (~38/s).
+  a row is posted every `waterfallDecim` frames (~38/s). An optional
+  **bandwidth-normalisation offset** `bwOffDb` is subtracted here first — see §6.1.
 - **Noise floor.** The 30th-percentile bin magnitude across the passband — a
   robust estimate that ignores the strong-signal tail.
 - **Channel detection (spawn).** A new channel is created at a bin that is:
@@ -358,6 +359,40 @@ read as clear colour steps. The decode table is kept ordered by frequency with
 in-place field updates (a channel's frequency is fixed, so rows move only on
 insert/remove).
 
+### 6.1 Bandwidth normalisation (waterfall brightness vs. rig filter)
+
+Narrowing the rig's IF/DSP filter makes the waterfall **brighter** even though no
+signal changed, for two reinforcing reasons: the rig's **AGC** lifts the surviving
+passband as there is less noise power to ride, and the skimmer's **noise floor**
+(the 30th-percentile across the *whole* 250–4000 Hz analysis band, §3.2)
+**collapses** — most of the band is now filtered-out near-silence, so the
+percentile lands there. Both widen the displayed `(signal − floor)`.
+
+The optional compensation dims the waterfall by `bwOffDb` dB as the live passband
+narrows below a reference width, holding the floor roughly put across filter
+changes:
+
+```
+bwOffDb = bw_offset_db  +  clamp( bw_norm_db · log2(bw_norm_ref_hz / passbandHz),  0, 45 )   // dim term only when passbandHz < ref
+```
+
+`bw_offset_db` is a constant baseline applied first (it is *subtracted* from the
+displayed level, so a positive value dims the whole waterfall and a negative value
+brightens it; default 0); the second, bandwidth-dependent term dims further as the
+filter narrows.
+
+It is **display only** — channel detection, the per-channel SNR and the decode are
+untouched. The passband width arrives from `RigController::onFilter` (so it needs
+a Hamlib-connected rig that reports per-mode widths; otherwise it is 0 and no
+compensation is applied) and the worker recomputes the offset every frame, so a
+filter change takes effect at once. `bw_norm_db` is **empirical** — it folds in
+both the AGC rise and the percentile-floor collapse, so tune it to taste. Both
+knobs live in `[skimmer]` and are ini-only (no slider): `bw_norm_db` (dB per
+octave, default 6; 0 disables), `bw_norm_ref_hz` (the width treated as 0 dB,
+default 2800 — set it to the widest filter you use so narrower ones only dim), and
+`bw_offset_db` (constant baseline trim subtracted first, default 0; positive dims,
+negative brightens the whole waterfall regardless of filter width).
+
 ---
 
 ## 7. Tuning constants (quick reference)
@@ -381,6 +416,9 @@ All in `CwSkimmer::worker()` unless noted. Values are at the ~12 kHz working rat
 | ghost Jaccard | 65% | keying overlap to merge a ghost |
 | `newStationHops` | ~3 s | carrier-absence before re-learning a new op |
 | `removeAfterHops` | ~30 s | idle time before a channel is dropped |
+| `bw_norm_db` | 6 dB/oct (0 = off) | waterfall dim per octave of filter narrowing (§6.1, `[skimmer]` ini) |
+| `bw_norm_ref_hz` | 2800 Hz | passband width treated as 0 dB (§6.1, `[skimmer]` ini) |
+| `bw_offset_db` | 0 dB | constant waterfall trim applied first; +dims/−brightens (§6.1, `[skimmer]` ini) |
 
 ---
 

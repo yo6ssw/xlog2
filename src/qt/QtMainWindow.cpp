@@ -205,6 +205,9 @@ QtMainWindow::QtMainWindow()
     // frequency/mode are current — render the whole panel state here.
     rig_.onFilter = [this](int pbwidthHz, int filter) {
         rigPanel_->setState(lastMhz_, lastMode_, pbwidthHz, filter);
+        // Feed the live passband to the skimmer so its waterfall can normalize the
+        // brightness rise that narrowing the filter otherwise causes.
+        skimmer_.setFilterBandwidthHz(pbwidthHz);
     };
     rig_.onPower = [this](bool supported, bool on) {
         rigPanel_->setPowerState(supported, on);
@@ -1139,6 +1142,8 @@ void QtMainWindow::loadSettings() {
     skimmer_.setMinSnr(static_cast<float>(cfg().skimmerMinSnr));
     skimmerPanel_->setKnownOnly(cfg().skimmerKnownOnly);
     skimmer_.setKnownCallsOnly(cfg().skimmerKnownOnly);
+    skimmer_.setBandwidthNorm(cfg().skimmerBwNormDb, cfg().skimmerBwNormRefHz,
+                              cfg().skimmerBwOffsetDb);
 
     // CW-skimmer dock placement + visibility.
     const Qt::DockWidgetArea skArea = dockAreaFromString(cfg().skimmerDock);
