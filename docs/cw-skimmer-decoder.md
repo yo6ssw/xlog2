@@ -250,8 +250,24 @@ Three guards keep it honest:
 
 ### 3.7 Callsign extraction + master-callsign validation
 
-`callsignIn()` first pattern-matches the last whitespace-delimited token of the
-decoded text: 3–10 chars of `[A-Z0-9/]` with at least one letter and one digit.
+`callsignIn()` takes the last whitespace-delimited token of the decoded text and
+**validates its syntax** (`isCallsign()`) before treating it as a call at all,
+so noise words and prosigns (`TEST`, `CQ`, `QSO`, `599`) are never surfaced or
+fed to the master-list correction. The regex is
+
+```
+^(?:[A-Z0-9]{1,4}/)?(?:[A-Z][A-Z0-9]?|[0-9][A-Z])\d[A-Z]{1,4}(?:/[A-Z0-9]{1,4})?$
+```
+
+— an ITU-style structural core (a prefix of *letter + optional letter/digit* or
+*digit + letter*, then a single digit, then a 1–4 letter suffix) that accepts
+every real call: 2-letter prefixes (`RI0SP`, `KH6AA`), digit-first prefixes
+(`9A1A`, `2E0ABC`) and `E7`/`H4`-style letter+digit prefixes. It is wrapped to
+also accept an optional **portable prefix** (`DL/…`) and **portable suffix**
+(`…/P`, `…/MM`, `…/QRP`). It is matched whole (`std::regex_match`, compiled once)
+against a token first length-bounded to 3–16 chars. (A strict per-first-letter
+ITU allocation table was considered but rejected — it dropped valid calls such
+as `RI0SP`/`KH6`/`9A1A`; `master.scp` provides the finer filtering instead.)
 
 If a **master-callsign list** (Super-Check-Partial, e.g. `MASTER.SCP`) has been
 loaded — `CwSkimmer::loadCallsignDb()`, from `$XDG_DATA_HOME/xlog2/master.scp` —
@@ -264,6 +280,20 @@ is the single biggest accuracy lever in the real CW Skimmer:
   matches, the call is corrected to it (also known) — this fixes the common
   single-character decode errors (`K3L`→`K3LR`, `W1AX`→`W1AW`) directly;
 - if neither, the call stays an **unvalidated guess** (not known).
+
+**Confidence-gated substitution.** A *substitution* edit can turn one valid call
+into a *different* valid call (`RI0SP`→`RA0SP`: `I`/`..` → `A`/`.-`), silently
+rewriting a cleanly-copied special-event call that simply isn't in the list. So
+a substitution is only attempted at character positions the decoder was *unsure*
+about. `decodeChar()` reports a `confident` flag per character — set for a
+committed SOM fit or an exact hard-classified lookup, cleared only for an
+edit-distance length-error recovery (a malformed symbol) — and `appendChar()`
+records it into a `Channel::conf` string kept aligned 1:1 with the rolling text.
+`lookupCall()` skips substitutions where the matching `conf` char is "clean", so
+a cleanly-decoded call is never overwritten, while a call with a recovered
+(uncertain) element can still be corrected. Deletions and insertions are *not*
+gated: they repair a token that came out the wrong length (a merged/split
+element), which is inherently a decode error rather than a competing valid call.
 
 The list is an immutable `unordered_set` behind a `shared_ptr`, swapped under a
 mutex so a reload never disturbs an in-flight decode; the worker grabs a
@@ -426,9 +456,10 @@ All in `CwSkimmer::worker()` unless noted. Values are at the ~12 kHz working rat
 
 - **Cold start.** The first character or two of a transmission is often wrong —
   the unit length isn't yet learned. Inherent to streaming Morse decoders.
-- **Dictionary is optional.** Callsign validation/correction (§3.7) only kicks in
-  when a `master.scp` is present. Without it, callsigns are heuristic-matched
-  only, and the accuracy ceiling is lower — in heavy QRN that forms fake Morse
+- **Dictionary is optional.** The *master-list* validation/correction (§3.7) only
+  kicks in when a `master.scp` is present; the syntax gate (`isCallsign()`) always
+  applies. Without a list, callsigns are syntax-checked but never DB-confirmed,
+  and the accuracy ceiling is lower — in heavy QRN that forms fake Morse
   *as strong as* the signal, per-channel SNR can't separate them and only the
   dictionary check rejects the junk. With a list loaded, Paranoid mode closes
   most of that gap.
