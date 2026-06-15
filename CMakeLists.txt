@@ -81,6 +81,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ---------------------------------------------------------------------------
+# xlog2-audioplay: headless tool that reads the xlog2 config and plays the cwsd
+# rig-audio stream. Toolkit-neutral: links only xlog_core (no GTK/Qt).
+# ---------------------------------------------------------------------------
+add_executable(xlog2-audioplay src/tools/AudioPlay.cpp)
+target_link_libraries(xlog2-audioplay PRIVATE xlog_core)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xlog2-audioplay PRIVATE -Wall -Wextra)
+endif()
+
+# ---------------------------------------------------------------------------
 # gtkmm backend
 # ---------------------------------------------------------------------------
 if(XLOG_BUILD_GTK)
