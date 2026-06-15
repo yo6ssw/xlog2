@@ -76,6 +76,7 @@ public:
     sigc::signal<void(const std::string&)>& signalLookupCall() { return signalLookupCall_; }
     sigc::signal<void(const std::string&)>& signalSendCw() { return signalSendCw_; }
     sigc::signal<void()>& signalAbortCw() { return signalAbortCw_; }
+    sigc::signal<void(const std::string&)>& signalLocator() { return signalLocator_; }
 
     // --- ILogPageView ---
     FormData formData() const override;
@@ -158,4 +159,5 @@ private:
     sigc::signal<void(const std::string&)>   signalLookupCall_;
     sigc::signal<void(const std::string&)>   signalSendCw_;
     sigc::signal<void()>                     signalAbortCw_;
+    sigc::signal<void(const std::string&)>   signalLocator_;
 };

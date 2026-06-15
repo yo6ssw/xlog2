@@ -44,6 +44,8 @@ private:
     QListWidget*    list_  = nullptr;
     QStackedWidget* stack_ = nullptr;
 
+    // --- station ---
+    QLineEdit* myLocator_ = nullptr;
     // --- network ---
     QSpinBox* udpPort_ = nullptr;
     // --- rig ---

@@ -30,6 +30,7 @@ public:
     std::function<void(const std::string&)>  onLookupCall;  // QRZ lookup requested
     std::function<void(const std::string&)>  onSendCw;      // expanded CW text to key
     std::function<void()>                    onAbortCw;     // abort keying
+    std::function<void(const std::string&)>  onLocator;     // current locator (map "to")
 
     // --- logbook operations (each refreshes the view + emits onChanged) ---
     void newInMemory();
@@ -61,6 +62,8 @@ public:
 
     // --- user events raised by the view ---
     void onCallChanged();           // refresh dupe + DXCC indicators
+    void onLocatorChanged();        // locator typed -> push to the map panel
+    std::string currentLocator() const;  // the form's current locator (for the map)
     void onDupeKeyChanged();        // date/band/mode changed -> refresh dupe
     void onFreqChanged();           // freq typed -> auto-detect band
     void onAddOrUpdate();

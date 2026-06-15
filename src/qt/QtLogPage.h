@@ -83,6 +83,7 @@ signals:
     void lookupCall(const QString&);
     void sendCw(const QString&);
     void abortCw();
+    void locatorChanged(const QString&);  // current locator (for the map panel)
 
 private:
     void buildUi();

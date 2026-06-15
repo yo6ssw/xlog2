@@ -211,6 +211,18 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.
 
+**World map.** A dockable panel (gtkmm `MapPanel`, Qt `QtMapPanel`) draws an
+equirectangular world map with a great-circle line from the operator's QTH
+(`[station] locator` setting) to the locator of the selected QSO / entry form
+(fed via `LogPagePresenter::onLocator`). All geography is toolkit-neutral in
+`src/core/logic/Geo.{h,cpp}` (Maidenhead↔lat/lon, distance/bearing, great-circle
+interpolation, equirectangular projection, coastline loader). The coastline is a
+bundled compact text file (Natural Earth 1:110m, public domain) shipped in the
+`xlog2-data` package and loaded from `$XDG_DATA_HOME/xlog2/coastline.txt` →
+`/usr/share/xlog2/coastline.txt` → `./data/coastline.txt`; a missing file
+degrades to a bare graticule. The two panels mirror the `CwSkimmerPanel` drawing
+idiom (Cairo `set_draw_func` / `QPainter` `paintEvent`).
+
 **Settings.** A neutral `IniFile` (`src/core/settings/`) reads/writes
 `$XDG_CONFIG_HOME/xlog2/layout.ini`; the scalar config maps to the `Settings`
 struct (`Settings::load/store`). Window geometry, the shared column layout

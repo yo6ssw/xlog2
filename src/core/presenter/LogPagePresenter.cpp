@@ -101,6 +101,15 @@ void LogPagePresenter::onCallChanged() {
     updateIndicators();
 }
 
+void LogPagePresenter::onLocatorChanged() {
+    if (onLocator)
+        onLocator(view_.formData().locator);
+}
+
+std::string LogPagePresenter::currentLocator() const {
+    return view_.formData().locator;
+}
+
 void LogPagePresenter::onDupeKeyChanged() {
     updateIndicators();
 }
@@ -162,6 +171,8 @@ void LogPagePresenter::onRowSelected(long id) {
         editingId_ = q.id;
         view_.setEditing(true);
         updateIndicators();
+        if (onLocator)
+            onLocator(q.locator);  // move the map "to" point to the selected QSO
         return;
     }
 }

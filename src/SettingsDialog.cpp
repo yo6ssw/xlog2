@@ -64,6 +64,18 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         return e;
     };
 
+    // --- Station ---
+    {
+        auto& g = addPage(*stack, "station", "Station");
+        myLocator_ = entry(s.myLocator);
+        myLocator_->set_placeholder_text("e.g. JN58td");
+        field(g, "My locator:", *myLocator_, 0);
+        auto* hint = Gtk::make_managed<Gtk::Label>(
+            "Your Maidenhead grid — the world map's home point.");
+        hint->set_xalign(0.0);
+        g.attach(*hint, 0, 1, 2, 1);
+    }
+
     // --- Network ---
     {
         auto& g = addPage(*stack, "network", "Network");
@@ -253,6 +265,8 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
 
 Settings SettingsDialog::collect() const {
     Settings s = seed_;  // preserve the fields not edited here
+
+    s.myLocator = myLocator_->get_text().raw();
 
     s.udpPort = toInt(udpPort_, s.udpPort);
 

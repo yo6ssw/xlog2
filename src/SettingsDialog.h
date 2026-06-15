@@ -28,6 +28,8 @@ private:
     Settings seed_;  // preserves the fields the dialog does not edit
     std::function<void(const Settings&)> onApply_;
 
+    // --- station ---
+    Gtk::Entry* myLocator_ = nullptr;
     // --- network ---
     Gtk::Entry* udpPort_ = nullptr;
     // --- rig ---

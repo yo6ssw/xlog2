@@ -31,6 +31,15 @@ struct Settings {
     // [qrz]
     std::string qrzUser, qrzPassword;
 
+    // [station] — the operator's own location (Maidenhead grid), used as the
+    // "from" point of the world-map panel.
+    std::string myLocator;
+
+    // [map] — world-map panel (dockable: great-circle path between two locators).
+    std::string mapDock     = "right";   // top|bottom|left|right
+    bool        mapVisible  = false;
+    int         mapPanelPos = 0;          // saved dock/divider size (0 = unset)
+
     // [keyer]
     std::string keyerHost = "127.0.0.1";
     int         keyerPort = 6789;

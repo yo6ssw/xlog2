@@ -43,6 +43,15 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
     stack_ = new QStackedWidget;
     connect(list_, &QListWidget::currentRowChanged, stack_, &QStackedWidget::setCurrentIndex);
 
+    // --- Station ---
+    {
+        auto* f = addPage("Station");
+        myLocator_ = new QLineEdit(qstr(s.myLocator));
+        myLocator_->setPlaceholderText("e.g. JN58td");
+        f->addRow("My locator:", myLocator_);
+        f->addRow(new QLabel("Your Maidenhead grid — the world map's home point."));
+    }
+
     // --- Network ---
     {
         auto* f = addPage("Network");
@@ -201,6 +210,8 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
 
 Settings QtSettingsDialog::result() const {
     Settings s = seed_;  // preserve the fields not edited here
+
+    s.myLocator = sstr(myLocator_);
 
     s.udpPort = udpPort_->value();
 

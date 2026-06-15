@@ -19,7 +19,7 @@ Rules-Requires-Root: no
 Package: xlog2-gtk
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: tqsl
+Recommends: tqsl, xlog2-data
 Description: amateur-radio logging program (GTK 4 frontend)
  xlog2 is an amateur-radio logger: it logs QSOs to SQLite, exchanges ADIF,
  receives logged QSOs over UDP (WSJT-X / fldigi / JTAlert), controls a radio
@@ -31,7 +31,7 @@ Description: amateur-radio logging program (GTK 4 frontend)
 Package: xlog2-qt
 Architecture: any
 Depends: ${shlibs:Depends}, ${misc:Depends}
-Recommends: tqsl
+Recommends: tqsl, xlog2-data
 Description: amateur-radio logging program (Qt frontend)
  xlog2 is an amateur-radio logger: it logs QSOs to SQLite, exchanges ADIF,
  receives logged QSOs over UDP (WSJT-X / fldigi / JTAlert), controls a radio
@@ -40,3 +40,12 @@ Description: amateur-radio logging program (Qt frontend)
  .
  This package provides the Qt Widgets frontend, xlog2-qt. It reads and writes
  the same logbooks and settings as xlog2-gtk.
+
+Package: xlog2-data
+Architecture: all
+Depends: ${misc:Depends}
+Description: amateur-radio logging program (shared data)
+ xlog2 is an amateur-radio logger with GTK 4 and Qt frontends.
+ .
+ This package provides architecture-independent runtime data shared by both
+ frontends — currently the world-map coastline used by the map panel.
