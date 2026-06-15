@@ -67,26 +67,25 @@ private:
     void onFillDxcc();
     void onAbout();
 
+    // The consolidated Edit ▸ Settings dialog and the routine that applies its
+    // result: copies the config-field subset into cfg() and re-applies it to any
+    // running service (leaving runtime/view state untouched).
+    void onEditSettings();
+    void applySettings(const Settings& edited);
+
     void onToggleUdp(bool on);
     void startUdpListening();
-    void onUdpSettings();
-    void onRigConnect();
+    void onRigConnect();  // connect using the stored rig settings (no dialog)
     void onRigDisconnect();
     void onRigDock(const std::string& side);  // move the rig dock to a side
     void onLotwUpload();
     void onLotwDownload();
-    void onLotwSettings();
-    void onQrzSettings();
-    void onKeyerSettings();
     void applyKeyerConfig();
     void onToggleAudio(bool on);
     void startAudioStream();
-    void onAudioSettings();
     void onTogglePaddle(bool on);
     void startPaddleKeyer();
-    void onPaddleSettings();
     void onClusterConnectToggle();
-    void onClusterSettings();
     void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
     void startSkimmer();
     void stopSkimmer();

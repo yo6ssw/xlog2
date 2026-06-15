@@ -98,6 +98,7 @@ if(XLOG_BUILD_GTK)
         src/main.cpp
         src/XlogApplication.cpp
         src/MainWindow.cpp
+        src/SettingsDialog.cpp
         src/LogPage.cpp
         src/DxClusterPanel.cpp
         src/RigPanel.cpp
@@ -130,6 +131,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtDxClusterPanel.cpp
         src/qt/QtRigPanel.cpp
         src/qt/QtCwSkimmerPanel.cpp
+        src/qt/QtSettingsDialog.cpp
         src/qt/FlowLayout.cpp
         src/qt/QtDispatcher.h     # header-only Q_OBJECT types, listed for AUTOMOC
         src/qt/QsoTableModel.h
@@ -138,6 +140,7 @@ if(XLOG_BUILD_QT)
         src/qt/QtDxClusterPanel.h
         src/qt/QtRigPanel.h
         src/qt/QtCwSkimmerPanel.h
+        src/qt/QtSettingsDialog.h
     )
     set_target_properties(xlog2-qt PROPERTIES AUTOMOC ON)
     target_include_directories(xlog2-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)
