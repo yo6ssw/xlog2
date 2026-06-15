@@ -21,8 +21,7 @@ pkg_check_modules(SQLITE REQUIRED IMPORTED_TARGET sqlite3)
 pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
 pkg_check_modules(CURL   REQUIRED IMPORTED_TARGET libcurl)
 pkg_check_modules(OPUS   REQUIRED IMPORTED_TARGET opus)   # rig audio stream client (decode)
-pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)  # rig audio stream playback
-pkg_check_modules(ALSA   REQUIRED IMPORTED_TARGET alsa)   # paddle keyer sidetone (low-latency)
+pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)  # rig audio playback + sidetone
 
 # ---------------------------------------------------------------------------
 # xlog_core: the toolkit-neutral core. Deliberately NOT linked against gtkmm or
@@ -73,7 +72,6 @@ target_link_libraries(xlog_core PUBLIC
     PkgConfig::CURL
     PkgConfig::OPUS
     PkgConfig::PIPEWIRE
-    PkgConfig::ALSA
     Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")

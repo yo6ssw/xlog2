@@ -23,12 +23,11 @@
 // from the element *schedule*, not the poll clock, so the keying stays exact — the
 // poll interval bounds only how fast we react to a fresh paddle close.
 //
-// Local sidetone gives the operator instant feel: a second thread renders a
-// click-free (ramped-envelope) sine to ALSA, gated by the same key-down/up
-// transitions as the streamed edges. It is local, so it sounds the moment the
-// paddle closes — the on-air signal lags by cwsd's playout delay, but the feel
-// does not. The sidetone thread is independent: if its device is missing, keying
-// still streams.
+// Local sidetone gives the operator instant feel: a native PipeWire stream renders
+// a click-free (ramped-envelope) sine, gated by the same key-down/up transitions
+// as the streamed edges. It is local, so it sounds the moment the paddle closes —
+// the on-air signal lags by cwsd's playout delay, but the feel does not. The
+// sidetone is independent: if its sink is missing, keying still streams.
 //
 // Autospace (on by default): when a new character's first element is keyed within
 // 3 dits of the previous element ending, its start is held to the 3-dit boundary so
@@ -49,7 +48,7 @@ struct RemotePaddleConfig {
     bool        sidetone = true;        // generate local audio feedback
     int         toneHz   = 600;         // sidetone frequency
     int         level    = 50;          // sidetone volume, 0..100
-    std::string device   = "default";   // ALSA playback device for the sidetone
+    std::string device   = "default";   // "default" sink, or a PipeWire node name
 };
 
 class RemotePaddleKeyer {
