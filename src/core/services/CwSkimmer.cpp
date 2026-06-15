@@ -885,6 +885,26 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                 channels.erase(it);
             }
 
+            // Waterfall level trim (dB) subtracted from the whole display. It folds
+            // two pieces, both per-frame so a live filter or settings change takes
+            // effect at once (a few cheap atomic reads + a log2):
+            //   - a constant baseline offset (bwOffsetDb_), applied first — a positive
+            //     value dims and a negative value brightens the whole waterfall;
+            //   - then a per-bandwidth dimming that grows as the rig filter narrows
+            //     below the reference, holding the floor put across filter changes
+            //     (see setBandwidthNorm).
+            float bwOffDb = static_cast<float>(bwOffsetDb_.load(std::memory_order_relaxed));
+            {
+                const int bwDb  = bwNormDb_.load(std::memory_order_relaxed);
+                const int bwRef = bwNormRefHz_.load(std::memory_order_relaxed);
+                const int bwHz  = filterBwHz_.load(std::memory_order_relaxed);
+                if (bwDb > 0 && bwRef > 0 && bwHz > 0 && bwHz < bwRef)
+                    bwOffDb += std::clamp(
+                        static_cast<float>(bwDb) *
+                            static_cast<float>(std::log2(static_cast<double>(bwRef) / bwHz)),
+                        0.0f, 45.0f);
+            }
+
             // 3) Fold this frame into the pending waterfall row (max-pooled).
             for (int c = 0; c < kDisplayCols; ++c) {
                 const int k0 = kMin + (kMax - kMin) * c / kDisplayCols;
@@ -894,7 +914,8 @@ void CwSkimmer::worker(SkimmerConfig cfg) {
                     m = std::max(m, mag[k]);
                 const float db = 20.0f * std::log10(m + 1e-6f);
                 const float fl = 20.0f * std::log10(floor + 1e-6f);
-                rowMax[c] = std::max(rowMax[c], std::clamp((db - fl) / 45.0f, 0.0f, 1.0f));
+                rowMax[c] = std::max(rowMax[c],
+                                     std::clamp((db - fl - bwOffDb) / 45.0f, 0.0f, 1.0f));
             }
             if (++sinceEmit >= waterfallDecim) {
                 postWaterfall(rowMax, dispMinHz, dispMaxHz);
