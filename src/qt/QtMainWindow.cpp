@@ -345,6 +345,12 @@ void QtMainWindow::showQrzResult(const QrzResult& result) {
     dlg->show();
 }
 
+bool QtMainWindow::startQrzLookup(const std::string& callsign) {
+    if (cfg().qrzUser.empty() || cfg().qrzPassword.empty() || qrz_.isBusy())
+        return false;
+    return qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
+}
+
 // --- tabs --------------------------------------------------------------------
 
 QtLogPage* QtMainWindow::currentPage() const {

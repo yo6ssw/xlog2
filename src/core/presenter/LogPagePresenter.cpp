@@ -275,10 +275,34 @@ std::string LogPagePresenter::exportAdif() const {
     return logbook_.exportAdif();
 }
 
-void LogPagePresenter::addExternalQso(const Qso& q) {
-    logbook_.add(q);
+long LogPagePresenter::addExternalQso(const Qso& q) {
+    const long id = logbook_.add(q);
     refreshList();
     changed();
+    return id;
+}
+
+bool LogPagePresenter::enrichFromQrz(long id, const QrzResult& r) {
+    const Qso* found = findQso(id);
+    if (!found)
+        return false;  // the QSO was deleted before the lookup returned
+    // Fill only the fields the record left empty, so a value the sender already
+    // supplied over UDP is never clobbered by QRZ.
+    Qso u = *found;
+    bool changedAny = false;
+    auto fill = [&](std::string& dst, const std::string& src) {
+        if (dst.empty() && !src.empty()) { dst = src; changedAny = true; }
+    };
+    fill(u.name, r.name);
+    fill(u.qth, r.qth);
+    fill(u.locator, r.locator);
+    fill(u.country, r.country);
+    if (!changedAny)
+        return false;
+    logbook_.update(u);
+    refreshList();
+    changed();
+    return true;
 }
 
 void LogPagePresenter::setRigFrequency(double mhz) {

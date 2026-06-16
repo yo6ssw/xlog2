@@ -5,6 +5,7 @@
 #include "Qso.h"
 #include "Settings.h"
 
+#include <deque>
 #include <string>
 #include <utility>
 #include <vector>
@@ -53,12 +54,29 @@ public:
 private:
     void status(const std::string& s) { view_.setStatus(s); }
 
+    // Drives the QRZ-enrichment queue for UDP-received QSOs: starts the next
+    // lookup if the QRZ client is free, otherwise leaves it queued for later.
+    void pumpQrzEnrich();
+
     IMainView&        view_;
     LogPagePresenter* pendingUpload_ = nullptr;
     std::vector<long> pendingUploadIds_;
     LogPagePresenter* pendingLookup_ = nullptr;
     bool              pendingLookupSilent_ = false;
     LogPagePresenter* pendingFill_ = nullptr;
+
+    // Pending QRZ enrichment of QSOs received over UDP: each job names the tab,
+    // the stored QSO id and the callsign to look up. Jobs run one at a time
+    // (the QRZ client is single-flight); `qrzEnrichActive_` is true while the
+    // head job's lookup is in flight, so routeQrzResult can tell an enrichment
+    // result from a form-prefill / popup lookup.
+    struct QrzEnrichJob {
+        LogPagePresenter* log;
+        long              id;
+        std::string       call;
+    };
+    std::deque<QrzEnrichJob> qrzEnrichQueue_;
+    bool                     qrzEnrichActive_ = false;
 
     // Last rig reading shown in the status bar; the rig polls every ~500 ms but we
     // only refresh the status line when the frequency or mode actually changes, so

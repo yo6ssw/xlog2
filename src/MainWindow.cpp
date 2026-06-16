@@ -863,6 +863,12 @@ void MainWindow::onQrzLookup(LogPage* page, const std::string& callsign) {
     qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
 }
 
+bool MainWindow::startQrzLookup(const std::string& callsign) {
+    if (cfg().qrzUser.empty() || cfg().qrzPassword.empty() || qrz_.isBusy())
+        return false;
+    return qrz_.lookup(cfg().qrzUser, cfg().qrzPassword, callsign);
+}
+
 void MainWindow::onFillLocators() {
     auto* page = currentPage();
     if (!page)
