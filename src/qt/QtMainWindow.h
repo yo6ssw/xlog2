@@ -43,6 +43,7 @@ public:
     LogPagePresenter* currentLog() override;
     bool isLogLive(LogPagePresenter* log) override;
     void showQrzResult(const QrzResult& result) override;
+    bool startQrzLookup(const std::string& callsign) override;
 
 private:
     void buildMenus();

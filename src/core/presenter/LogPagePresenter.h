@@ -47,7 +47,10 @@ public:
     std::size_t qsoCount() const { return logbook_.qsos().size(); }
     std::string title() const;  // file basename or "Untitled"
 
-    void addExternalQso(const Qso& q);
+    long addExternalQso(const Qso& q);  // returns the new QSO's stored id
+    // Fill a stored QSO's empty name/QTH/locator/country from a QRZ record
+    // (used to enrich QSOs received over UDP). Returns true if anything changed.
+    bool enrichFromQrz(long id, const QrzResult& r);
     void setRigFrequency(double mhz);
     void setRigMode(const std::string& mode);
     void applyQrzLookup(const QrzResult& r);
