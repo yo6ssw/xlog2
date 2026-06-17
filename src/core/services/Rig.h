@@ -57,6 +57,12 @@ public:
     // its next tick. No-op if the rig isn't running or n is out of range.
     void setFilter(int n);
 
+    // Queue an operating-mode change (a Hamlib mode name as reported by
+    // onUpdate, e.g. "USB", "CW", "RTTY"); the worker parses it and calls
+    // rig_set_mode with the mode's normal passband on its next tick. No-op if
+    // the rig isn't running or the name is empty/unparseable.
+    void setMode(const std::string& mode);
+
     // Queue a rig power on/off; the worker applies it (rig_set_powerstat) on its
     // next tick. No-op if the rig isn't running.
     void setPower(bool on);
@@ -105,6 +111,7 @@ private:
     bool        hasPendingFreq_ = false;
     double      pendingStepHz_  = 0.0;   // accumulated relative nudge, applied by worker
     int         pendingFilter_  = 0;     // requested IF-filter slot (0 = none queued)
+    std::string pendingMode_;            // requested mode name (empty = none queued)
     int         pendingPower_   = -1;    // requested power state (1 on, 0 off, -1 none)
     int         pendingAgc_     = -1;    // requested AGC state (1 on, 0 off, -1 none)
     bool        powerSupported_ = false; // backend reports a power status

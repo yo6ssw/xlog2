@@ -126,6 +126,13 @@ void RigController::setFilter(int n) {
     pendingFilter_ = n;
 }
 
+void RigController::setMode(const std::string& mode) {
+    if (!running_.load() || mode.empty())
+        return;
+    std::lock_guard<std::mutex> lock(mutex_);
+    pendingMode_ = mode;
+}
+
 void RigController::setPower(bool on) {
     if (!running_.load())
         return;
@@ -201,11 +208,12 @@ void RigController::worker(std::shared_ptr<Run> run) {
 
     while (running_.load()) {
         // Apply any queued tune/step/filter requests before reading back state.
-        double pending  = 0.0;
-        double stepHz   = 0.0;
-        int    setFilt  = 0;
-        int    setPow   = -1;
-        int    setAgcTo = -1;
+        double      pending  = 0.0;
+        double      stepHz   = 0.0;
+        int         setFilt  = 0;
+        int         setPow   = -1;
+        int         setAgcTo = -1;
+        std::string setModeName;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (hasPendingFreq_) {
@@ -220,6 +228,7 @@ void RigController::worker(std::shared_ptr<Run> run) {
             pendingPower_  = -1;
             setAgcTo       = pendingAgc_;
             pendingAgc_    = -1;
+            setModeName.swap(pendingMode_);
         }
         if (setAgcTo >= 0) {
             // Off = RIG_AGC_OFF; on = a normal AGC (MEDIUM is the IC-7300 default).
@@ -245,6 +254,17 @@ void RigController::worker(std::shared_ptr<Run> run) {
                 const double next = static_cast<double>(cur) + stepHz;
                 if (next > 0.0)
                     rig_set_freq(asRig(rig_), RIG_VFO_CURR, static_cast<freq_t>(next));
+            }
+        }
+        if (!setModeName.empty()) {
+            const rmode_t nm = rig_parse_mode(setModeName.c_str());
+            if (nm != RIG_MODE_NONE) {
+                // Pin the VFO first for the same reason as the filter switch
+                // below: via netrigctl RIG_VFO_CURR maps to VFOA while the remote
+                // reports "Main", so a targetable set is needed for the command
+                // to actually reach the rig. Passband 0 = the mode's normal width.
+                rig_set_vfo(asRig(rig_), RIG_VFO_A);
+                rig_set_mode(asRig(rig_), RIG_VFO_CURR, nm, RIG_PASSBAND_NORMAL);
             }
         }
         if (setFilt >= 1 && setFilt <= 3) {

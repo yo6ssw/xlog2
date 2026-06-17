@@ -8,6 +8,7 @@
 class QLabel;
 class QPushButton;
 class QButtonGroup;
+class QComboBox;
 
 // Qt equivalent of the gtkmm RigPanel: the current VFO frequency in a large
 // font, four tune buttons (<< / < / > / >> for -500 / -100 / +100 / +500 Hz),
@@ -30,12 +31,15 @@ signals:
     void setFilter(int n);          // IF-filter slot 1..3
     void setPower(bool on);         // power on/off request
     void setAgc(bool on);           // AGC enable/disable request
+    void setMode(const QString& mode);  // operating-mode change request
 
 private:
     void updateFilterButtons(int filter);
+    void updateModeCombo(const std::string& mode);
 
     QLabel* freqLabel_ = nullptr;
     QLabel* modeLabel_ = nullptr;
+    QComboBox* modeCombo_ = nullptr;
     QPushButton* powerButton_ = nullptr;
     QPushButton* agcButton_ = nullptr;
     QButtonGroup* filterGroup_ = nullptr;
@@ -43,5 +47,6 @@ private:
 
     bool updatingFilter_ = false;  // suppress emission during programmatic toggles
     bool updatingPower_  = false;  // suppress emission during programmatic toggles
+    bool updatingMode_   = false;  // suppress emission during programmatic selects
     int  filter_         = 0;
 };

@@ -116,6 +116,8 @@ MainWindow::MainWindow()
         [this](bool on) { if (rig_.isRunning()) rig_.setPower(on); });
     rigPanel_.signalSetAgc().connect(
         [this](bool on) { if (rig_.isRunning()) rig_.setAgc(on); });
+    rigPanel_.signalSetMode().connect(
+        [this](std::string mode) { if (rig_.isRunning()) rig_.setMode(mode); });
     rigPaned_.set_vexpand(true);
     // The skimmer panel docks around the rig/DX/notebook area via a third paned.
     skimmerPaned_.set_vexpand(true);

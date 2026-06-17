@@ -1,6 +1,7 @@
 #include "QtRigPanel.h"
 
 #include <QButtonGroup>
+#include <QComboBox>
 #include <QFont>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -8,8 +9,15 @@
 #include <QVBoxLayout>
 
 #include <cmath>
+#include <iterator>
 
 namespace {
+// Operating modes offered in the panel's selector, by their Hamlib mode names
+// (rig_parse_mode parses these back on the worker). A pragmatic subset covering
+// the common amateur modes; a rig may not support every one.
+const char* const kModes[] = {"LSB", "USB",    "CW",     "CWR", "RTTY", "RTTYR",
+                              "AM",  "FM",     "FMN",    "PKTLSB", "PKTUSB"};
+
 // Classic transceiver readout: MHz.kHz.tens-of-Hz, e.g. 14074000 Hz -> "14.074.00".
 QString formatFreq(double mhz) {
     if (mhz <= 0.0)
@@ -50,10 +58,23 @@ QtRigPanel::QtRigPanel(QWidget* parent) : QWidget(parent) {
     freqLabel_->setFont(f);
     layout->addWidget(freqLabel_);
 
+    // Mode selector + passband readout, centred on one row.
+    auto* modeRow = new QHBoxLayout;
+    modeRow->addStretch();
+    modeCombo_ = new QComboBox;
+    modeCombo_->setToolTip("Set the operating mode");
+    for (const char* m : kModes)
+        modeCombo_->addItem(QString::fromUtf8(m));
+    connect(modeCombo_, qOverload<int>(&QComboBox::activated), this, [this](int idx) {
+        if (!updatingMode_ && idx >= 0 && idx < static_cast<int>(std::size(kModes)))
+            emit setMode(QString::fromUtf8(kModes[idx]));
+    });
+    modeRow->addWidget(modeCombo_);
     modeLabel_ = new QLabel;
-    modeLabel_->setAlignment(Qt::AlignCenter);
     modeLabel_->setEnabled(false);  // dim look
-    layout->addWidget(modeLabel_);
+    modeRow->addWidget(modeLabel_);
+    modeRow->addStretch();
+    layout->addLayout(modeRow);
 
     // Tune buttons: << < > >>  (-500 / -100 / +100 / +500 Hz).
     auto* tuneRow = new QHBoxLayout;
@@ -130,16 +151,24 @@ void QtRigPanel::updateFilterButtons(int filter) {
 void QtRigPanel::setState(double mhz, const std::string& mode, int pbwidthHz, int filter) {
     freqLabel_->setText(formatFreq(mhz));
 
-    QString info = QString::fromStdString(mode);
-    if (pbwidthHz > 0) {
-        if (!info.isEmpty())
-            info += "  •  ";
-        info += QString::number(pbwidthHz) + " Hz";
-    }
-    modeLabel_->setText(info);
+    updateModeCombo(mode);
+    modeLabel_->setText(pbwidthHz > 0 ? QString::number(pbwidthHz) + " Hz" : QString());
 
     filter_ = filter;
     updateFilterButtons(filter);
+}
+
+void QtRigPanel::updateModeCombo(const std::string& mode) {
+    if (!modeCombo_)
+        return;
+    updatingMode_ = true;
+    for (std::size_t i = 0; i < std::size(kModes); ++i) {
+        if (mode == kModes[i]) {
+            modeCombo_->setCurrentIndex(static_cast<int>(i));
+            break;
+        }
+    }
+    updatingMode_ = false;
 }
 
 void QtRigPanel::setPowerState(bool supported, bool on) {
