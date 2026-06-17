@@ -29,13 +29,16 @@ public:
     sigc::signal<void(int)>&    signalSetFilter() { return signalSetFilter_; }
     sigc::signal<void(bool)>&   signalSetPower()  { return signalSetPower_; }
     sigc::signal<void(bool)>&   signalSetAgc()    { return signalSetAgc_; }  // true = AGC on
+    sigc::signal<void(std::string)>& signalSetMode() { return signalSetMode_; }
 
 private:
     void buildUi();
     void updateFilterButtons(int filter);
+    void updateModeDropdown(const std::string& mode);
 
     Gtk::Label freqLabel_;
     Gtk::Label modeLabel_;
+    Gtk::DropDown* modeDropdown_ = nullptr;
     Gtk::ToggleButton* powerButton_ = nullptr;
     Gtk::ToggleButton* agcButton_   = nullptr;
     std::array<Gtk::ToggleButton*, 3> filterButtons_{nullptr, nullptr, nullptr};
@@ -43,10 +46,12 @@ private:
     bool connected_      = false;
     bool updatingFilter_ = false;  // suppress emission during programmatic toggles
     bool updatingPower_  = false;  // suppress emission during programmatic toggles
+    bool updatingMode_   = false;  // suppress emission during programmatic selects
     int  filter_         = 0;
 
     sigc::signal<void(double)> signalStep_;
     sigc::signal<void(int)>    signalSetFilter_;
     sigc::signal<void(bool)>   signalSetPower_;
     sigc::signal<void(bool)>   signalSetAgc_;
+    sigc::signal<void(std::string)> signalSetMode_;
 };

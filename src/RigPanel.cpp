@@ -4,8 +4,15 @@
 
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 
 namespace {
+// Operating modes offered in the panel's selector, by their Hamlib mode names
+// (rig_parse_mode parses these back on the worker). A pragmatic subset covering
+// the common amateur modes; a rig may not support every one.
+const char* const kModes[] = {"LSB", "USB",    "CW",     "CWR", "RTTY", "RTTYR",
+                              "AM",  "FM",     "FMN",    "PKTLSB", "PKTUSB"};
+
 // Classic transceiver readout: MHz.kHz.tens-of-Hz, e.g. 14074000 Hz -> "14.074.00".
 std::string formatFreq(double mhz) {
     if (mhz <= 0.0)
@@ -50,9 +57,27 @@ void RigPanel::buildUi() {
     freqLabel_.set_hexpand(true);
     append(freqLabel_);
 
-    modeLabel_.set_halign(Gtk::Align::CENTER);
+    // Mode selector + passband readout, centred on one row.
+    auto* modeBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    modeBox->set_halign(Gtk::Align::CENTER);
+    modeBox->set_spacing(6);
+    auto modeList = Gtk::StringList::create({});
+    for (const char* m : kModes)
+        modeList->append(m);
+    modeDropdown_ = Gtk::make_managed<Gtk::DropDown>();
+    modeDropdown_->set_model(modeList);
+    modeDropdown_->set_tooltip_text("Set the operating mode");
+    modeDropdown_->property_selected().signal_changed().connect([this]() {
+        if (updatingMode_)
+            return;
+        const guint sel = modeDropdown_->get_selected();
+        if (sel != GTK_INVALID_LIST_POSITION && sel < std::size(kModes))
+            signalSetMode_.emit(kModes[sel]);
+    });
+    modeBox->append(*modeDropdown_);
     modeLabel_.add_css_class("dim-label");
-    append(modeLabel_);
+    modeBox->append(modeLabel_);
+    append(*modeBox);
 
     // Tune buttons: << < > >>  (-500 / -100 / +100 / +500 Hz).
     auto* tuneBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
@@ -127,16 +152,24 @@ void RigPanel::updateFilterButtons(int filter) {
 void RigPanel::setState(double mhz, const std::string& mode, int pbwidthHz, int filter) {
     freqLabel_.set_markup("<span size='28000' weight='bold'>" + formatFreq(mhz) + "</span>");
 
-    std::string info = mode;
-    if (pbwidthHz > 0) {
-        if (!info.empty())
-            info += "  •  ";
-        info += std::to_string(pbwidthHz) + " Hz";
-    }
-    modeLabel_.set_text(info);
+    updateModeDropdown(mode);
+    modeLabel_.set_text(pbwidthHz > 0 ? std::to_string(pbwidthHz) + " Hz" : "");
 
     filter_ = filter;
     updateFilterButtons(filter);
+}
+
+void RigPanel::updateModeDropdown(const std::string& mode) {
+    if (!modeDropdown_)
+        return;
+    updatingMode_ = true;
+    for (std::size_t i = 0; i < std::size(kModes); ++i) {
+        if (mode == kModes[i]) {
+            modeDropdown_->set_selected(static_cast<guint>(i));
+            break;
+        }
+    }
+    updatingMode_ = false;
 }
 
 void RigPanel::setPowerState(bool supported, bool on) {
