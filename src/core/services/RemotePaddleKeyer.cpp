@@ -6,6 +6,8 @@
 #include <spa/param/audio/format-utils.h>
 
 #include <netdb.h>
+#include <pthread.h>
+#include <sched.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -23,6 +25,23 @@
 namespace {
 
 constexpr int kKeepaliveMs = 100;  // must stay well under cwsd's silence_ms (default 250)
+
+// Raise the calling thread to real-time (SCHED_FIFO) so its tight poll cadence is
+// honored even under system load — this bounds the worst-case latency between a
+// paddle close and the first key edge (element *timing* is already schedule-locked,
+// so this only affects initial reaction). Best-effort: without CAP_SYS_NICE /
+// RLIMIT_RTPRIO it stays at normal priority and keying still works, just with more
+// wakeup jitter. A modest priority preempts ordinary tasks while staying below the
+// audio/kernel critical RT threads. Returns true if the bump was applied.
+bool raiseToRealtime() {
+    sched_param sp{};
+    int prio = sched_get_priority_min(SCHED_FIFO) + 5;
+    const int maxPrio = sched_get_priority_max(SCHED_FIFO);
+    if (prio > maxPrio)
+        prio = maxPrio;
+    sp.sched_priority = prio;
+    return pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;  // failure non-fatal
+}
 
 // Resolve + open a connected UDP socket. connect() pins the peer so send() needs
 // no address; sending is fire-and-forget (no recv path).
@@ -75,7 +94,7 @@ struct PwSidetone {
     double gainStep = 0.0;
     double amp      = 0.0;
 
-    bool init(int toneHz, int levelPct, const std::string& target,
+    bool init(int toneHz, int levelPct, int latencyFrames, const std::string& target,
               std::atomic<bool>* tone, std::string& err);
     void shutdown();
 
@@ -117,7 +136,7 @@ void PwSidetone::onProcess(void* data) {
     pw_stream_queue_buffer(st->stream, pb);
 }
 
-bool PwSidetone::init(int toneHz, int levelPct, const std::string& target,
+bool PwSidetone::init(int toneHz, int levelPct, int latencyFrames, const std::string& target,
                       std::atomic<bool>* tone, std::string& err) {
     static std::once_flag pwInitOnce;
     std::call_once(pwInitOnce, [] { pw_init(nullptr, nullptr); });
@@ -144,6 +163,11 @@ bool PwSidetone::init(int toneHz, int levelPct, const std::string& target,
         return false;
     }
 
+    // Requested node quantum. Default (512 ≈ 10.7 ms) is graph-friendly; the
+    // standalone tool lowers it for tighter feel since it owns the graph alone.
+    if (latencyFrames < 16)
+        latencyFrames = 16;
+    const std::string latency = std::to_string(latencyFrames) + "/" + std::to_string(kRate);
     pw_properties* props = pw_properties_new(
         PW_KEY_MEDIA_TYPE,       "Audio",
         PW_KEY_MEDIA_CATEGORY,   "Playback",
@@ -151,7 +175,7 @@ bool PwSidetone::init(int toneHz, int levelPct, const std::string& target,
         PW_KEY_APP_NAME,         "xlog2",
         PW_KEY_NODE_NAME,        "xlog2-sidetone",
         PW_KEY_NODE_DESCRIPTION, "xlog2 CW sidetone",
-        PW_KEY_NODE_LATENCY,     "512/48000",  // ~10.7 ms: tight feel, graph-friendly quantum
+        PW_KEY_NODE_LATENCY,     latency.c_str(),
         nullptr);
     if (!target.empty() && target != "default")
         pw_properties_set(props, PW_KEY_TARGET_OBJECT, target.c_str());
@@ -241,14 +265,20 @@ void RemotePaddleKeyer::stop() {
 }
 
 void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
-    postStatus("Paddle keyer: connecting to " + cfg.host + ":" + std::to_string(cfg.port) + "…");
+    const bool realtime = raiseToRealtime();  // best-effort; keeps the poll cadence reliable
 
-    std::string err;
-    const int fd = connectUdp(cfg.host, cfg.port, err);
-    if (fd < 0) {
-        postStatus("Paddle keyer: connect failed — " + err);
-        running_.store(false);
-        return;
+    // Local-only mode (the xlog2-paddle practice tool) runs the element generator and
+    // sidetone but opens no socket and sends nothing — no remote keying.
+    int fd = -1;
+    if (!cfg.localOnly) {
+        postStatus("Paddle keyer: connecting to " + cfg.host + ":" + std::to_string(cfg.port) + "…");
+        std::string err;
+        fd = connectUdp(cfg.host, cfg.port, err);
+        if (fd < 0) {
+            postStatus("Paddle keyer: connect failed — " + err);
+            running_.store(false);
+            return;
+        }
     }
 
     using clock = std::chrono::steady_clock;
@@ -281,6 +311,10 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     auto nextKeepalive = clock::now();  // first packet (a session-reset keepalive) goes out at once
     bool firstPacket = true;
     auto sendPacket = [&]() {
+        if (cfg.localOnly) {  // no networking: just hold off the keepalive timer
+            nextKeepalive = clock::now() + std::chrono::milliseconds(kKeepaliveMs);
+            return;
+        }
         const std::uint8_t flags = firstPacket ? remotekey::kFlagSessionReset : 0;
         firstPacket = false;
         const std::vector<remotekey::Edge> edges(history.begin(), history.end());
@@ -315,6 +349,13 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     bool  pendDah = false;         // element latched during an autospace Wait
     std::uint64_t phaseEndUs = 0;
 
+    // Ultimatic "last-pressed memory": tracked from paddle press *edges* so that when
+    // both paddles are held the most-recently-pressed element wins (see the Idle/Gap
+    // decisions below). prevD/prevH hold the previous poll's contact state for edge
+    // detection; lastDah is the side of the latest press.
+    bool  prevD = false, prevH = false;
+    bool  lastDah = false;
+
     // `at` is the *scheduled* start instant, not the polled clock: from Idle it is
     // the moment the paddle close was detected; mid-train it is the previous gap's
     // exact end. Emitting on the schedule (rather than on `now`) keeps the whole
@@ -329,13 +370,30 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
         phaseEndUs = at + (dah ? dahUs : ditUs);
     };
 
-    postStatus("Paddle keyer: ready — streaming to " + cfg.host + ":" +
-               std::to_string(cfg.port) + " at " + std::to_string(cfg.wpm) + " wpm.");
+    // Note the scheduling outcome so the operator can see whether the latency-
+    // reducing real-time bump actually took effect (it needs rtprio privileges).
+    const std::string prio = realtime ? "" : " (normal priority — grant rtprio for lower latency)";
+    if (cfg.localOnly)
+        postStatus("Paddle keyer: ready — local sidetone at " + std::to_string(cfg.wpm) + " wpm." + prio);
+    else
+        postStatus("Paddle keyer: ready — streaming to " + cfg.host + ":" +
+                   std::to_string(cfg.port) + " at " + std::to_string(cfg.wpm) + " wpm." + prio);
 
     while (running_.load()) {
         const std::uint64_t now = nowUs();
         const bool d = dit_.load(std::memory_order_relaxed);
         const bool h = dah_.load(std::memory_order_relaxed);
+
+        // Detect fresh paddle presses. In ultimatic mode the latest press both wins
+        // (lastDah) and is remembered (memDit/memDah) so a tap released before the
+        // next decision is never dropped. Tracking is gated to ultimatic so iambic
+        // timing is unchanged.
+        if (cfg.ultimatic) {
+            if (d && !prevD) { lastDah = false; memDit = true; }
+            if (h && !prevH) { lastDah = true;  memDah = true; }
+        }
+        prevD = d;
+        prevH = h;
 
         switch (phase) {
             case Phase::Idle:
@@ -346,7 +404,8 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
                 // run together. The element is latched in Wait and emitted exactly on
                 // the boundary, keeping the sidetone aligned with the on-air edge.
                 if (d || h) {
-                    const bool dah = h && !d;
+                    // Ultimatic: lead with the last-pressed paddle. Iambic: dit-priority.
+                    const bool dah = cfg.ultimatic ? lastDah : (h && !d);
                     const std::uint64_t charBoundary = lastKeyUpUs + 3 * ditUs;
                     if (cfg.autospace && lastKeyUpUs != 0 && now < charBoundary) {
                         pendDah = dah;
@@ -380,7 +439,16 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
                 if (now >= phaseEndUs) {
                     const std::uint64_t gapEnd = phaseEndUs;   // exact, not polled
                     bool haveNext = true, nextDah = false;
-                    if (curDah) {
+                    if (cfg.ultimatic) {
+                        // Last-pressed wins: with both requested, repeat the latest
+                        // press; otherwise follow whichever is still requested.
+                        const bool ditReq = d || memDit;
+                        const bool dahReq = h || memDah;
+                        if (ditReq && dahReq) nextDah = lastDah;
+                        else if (dahReq)      nextDah = true;
+                        else if (ditReq)      nextDah = false;
+                        else                  haveNext = false;
+                    } else if (curDah) {
                         if (d || memDit)       nextDah = false;
                         else if (h)            nextDah = true;
                         else                   haveNext = false;
@@ -413,8 +481,10 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
         // Poll fast so a fresh paddle close (and a brief iambic squeeze) is caught
         // with minimal latency. Element *timing* no longer depends on this interval
         // — edges are emitted on the schedule above — so this only bounds how
-        // quickly we react to the operator, not how clean the keying is.
-        std::this_thread::sleep_for(std::chrono::microseconds(250));
+        // quickly we react to the operator, not how clean the keying is. With the
+        // SCHED_FIFO bump above this short sleep stays accurate without starving the
+        // system (a busy-spin would needlessly peg a core for no timing benefit).
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
     }
 
     // Leave cwsd in a safe state: a final key-up if we stopped mid-element.
@@ -424,7 +494,8 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
     if (transmitting)
         postTransmit(false);
 
-    ::close(fd);
+    if (fd >= 0)
+        ::close(fd);
 }
 
 // Renders a click-free sidetone via a native PipeWire stream, gated by toneOn_
@@ -438,7 +509,7 @@ void RemotePaddleKeyer::sidetoneWorker(RemotePaddleConfig cfg) {
 
     PwSidetone tone;
     std::string err;
-    if (!tone.init(toneHz, levelPct, cfg.device, &toneOn_, err)) {
+    if (!tone.init(toneHz, levelPct, cfg.sidetoneLatencyFrames, cfg.device, &toneOn_, err)) {
         postStatus("Paddle keyer: sidetone unavailable — " + err);
         return;  // keying continues without local audio feedback
     }

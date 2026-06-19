@@ -158,4 +158,20 @@ if(XLOG_BUILD_QT)
     endif()
     install(TARGETS xlog2-qt RUNTIME DESTINATION bin)
     install(FILES packaging/xlog2-qt.desktop DESTINATION share/applications)
+
+    # -----------------------------------------------------------------------
+    # xlog2-paddle: standalone iambic-paddle practice keyer. Reuses the core
+    # RemotePaddleKeyer in local-only mode (sidetone, no remote keying).
+    # -----------------------------------------------------------------------
+    add_executable(xlog2-paddle
+        src/tools/PaddleKeyer.cpp
+        src/qt/QtDispatcher.h     # header-only Q_OBJECT type, listed for AUTOMOC
+    )
+    set_target_properties(xlog2-paddle PROPERTIES AUTOMOC ON)
+    target_include_directories(xlog2-paddle PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/qt)
+    target_link_libraries(xlog2-paddle PRIVATE xlog_core Qt6::Widgets)
+    if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(xlog2-paddle PRIVATE -Wall -Wextra)
+    endif()
+    install(TARGETS xlog2-paddle RUNTIME DESTINATION bin)
 endif()

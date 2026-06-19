@@ -36,20 +36,38 @@
 // continuing iambic squeeze.
 //
 // NOTE (scaffold): iambic memory gives iambic-A behaviour; full iambic-B is a TODO.
+//
+// Ultimatic ("last-pressed memory", `ultimatic` below): an alternative to iambic
+// alternation. While both paddles are held, the keyer sends the element of whichever
+// paddle was *pressed most recently* and repeats it until the other is pressed
+// again — last press wins. A press of either paddle during an element is remembered
+// so a quick tap is never dropped. When set, it overrides the iambic A/B behaviour.
 struct RemotePaddleConfig {
     bool        enabled = false;
     std::string host    = "127.0.0.1";  // cwsd remote_key_server host
     int         port    = 6790;         // cwsd remote_key UDP port
     int         wpm     = 20;           // keying speed
     bool        iambicB = false;        // false = iambic A (reserved; see header note)
+    bool        ultimatic = false;      // last-pressed-wins memory (overrides iambic)
     bool        autospace = true;       // enforce a full 3-dit inter-character space
     int         muteTailMs = 500;       // transmit/mute hang after the last key-up
+
+    // Local-only mode: run the iambic element generator and the local sidetone but
+    // skip all cwsd networking (no socket, no edge/keepalive datagrams). Used by the
+    // standalone xlog2-paddle practice tool — sidetone feel without remote keying.
+    bool        localOnly = false;
 
     // local sidetone
     bool        sidetone = true;        // generate local audio feedback
     int         toneHz   = 600;         // sidetone frequency
     int         level    = 50;          // sidetone volume, 0..100
     std::string device   = "default";   // "default" sink, or a PipeWire node name
+    // Sidetone PipeWire node quantum, in frames @48 kHz: this is the dominant feel
+    // latency (512 ≈ 10.7 ms). A smaller value tightens the feel but pulls the whole
+    // PipeWire graph to a smaller quantum, which can xrun other streams (e.g. the
+    // rig-audio stream) — so the main app keeps 512. The standalone xlog2-paddle tool
+    // has no other streams and lowers it (≈128 ≈ 2.7 ms).
+    int         sidetoneLatencyFrames = 512;
 };
 
 class RemotePaddleKeyer {
