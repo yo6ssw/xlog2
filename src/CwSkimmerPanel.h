@@ -40,6 +40,9 @@ private:
     Glib::RefPtr<Gtk::ColumnViewColumn> makeColumn(
         const Glib::ustring& title,
         std::function<Glib::ustring(const SkimmerItem&)> getter, bool expand = false);
+    // Open a popup showing the channel's complete decoded text (more than the
+    // list's rolling window), or present its already-open window.
+    void showChannelText(int id);
     void onDrawWaterfall(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
     void scrollOneRow(const std::vector<float>& mags);  // advance the image one row
     bool drainWaterfall();                              // steady-cadence playout tick
@@ -57,6 +60,13 @@ private:
     Glib::RefPtr<Gio::ListStore<SkimmerItem>> store_;
     Glib::RefPtr<Gtk::SingleSelection>        selection_;
     std::map<int, Glib::RefPtr<SkimmerItem>>  items_;  // id -> live row
+    // id -> the channel's full decoded text, reconstructed from the rolling
+    // windows (the skimmer only keeps the last ~100 chars; we accumulate beyond).
+    std::map<int, std::string>  fullText_;
+    // id -> an open decode popup and its text view, refreshed in place as more
+    // characters arrive. The window is heap-owned (deleted on close, GTK4 idiom).
+    std::map<int, Gtk::Window*>   textWindows_;
+    std::map<int, Gtk::TextView*> textViews_;
     sigc::signal<void(int)>  signalGate_;
     sigc::signal<void(int)>  signalMinSnr_;
     sigc::signal<void(bool)> signalKnownOnly_;

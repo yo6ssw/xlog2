@@ -40,6 +40,26 @@ uint32_t heat(float v) {
     return (r << 16) | (g << 8) | b;
 }
 
+// Reconstruct a channel's full decoded text from the rolling ≤100-char windows
+// the skimmer emits. The decode is append-only at the back (chars are only
+// dropped off the front of the window), so each window is a suffix of the true
+// text; merge a new window onto what we have by the largest overlap between the
+// tail of the accumulated text and the head of the window, appending only the
+// genuinely-new characters. Capped so a long-lived channel can't grow unbounded.
+void appendWindow(std::string& full, const std::string& window) {
+    const std::size_t maxK = std::min(full.size(), window.size());
+    std::size_t k = 0;
+    for (std::size_t cand = maxK; cand > 0; --cand)
+        if (full.compare(full.size() - cand, cand, window, 0, cand) == 0) {
+            k = cand;
+            break;
+        }
+    full.append(window, k, std::string::npos);
+    constexpr std::size_t kCap = 100000;
+    if (full.size() > kCap)
+        full.erase(0, full.size() - kCap);
+}
+
 }  // namespace
 
 CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
@@ -123,6 +143,12 @@ CwSkimmerPanel::CwSkimmerPanel() : Gtk::Box(Gtk::Orientation::VERTICAL) {
     columnView_.append_column(makeColumn("Text", [](const SkimmerItem& i) { return i.text.get_value(); }, true));
     columnView_.append_column(makeColumn("Call", [](const SkimmerItem& i) { return i.call.get_value(); }));
 
+    // Double-click (or Enter) on a row pops up the channel's complete decode.
+    columnView_.signal_activate().connect([this](guint pos) {
+        if (auto item = store_->get_item(pos))
+            showChannelText(item->id);
+    });
+
     auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
     scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
     scroller->set_child(columnView_);
@@ -171,6 +197,53 @@ Glib::RefPtr<Gtk::ColumnViewColumn> CwSkimmerPanel::makeColumn(
     column->set_resizable(true);
     column->set_expand(expand);
     return column;
+}
+
+void CwSkimmerPanel::showChannelText(int id) {
+    // Already open for this channel? Just bring it forward.
+    if (auto it = textWindows_.find(id); it != textWindows_.end()) {
+        it->second->present();
+        return;
+    }
+
+    // Title from the live row (frequency + callsign) for context.
+    std::string title = "CW decode";
+    if (auto iit = items_.find(id); iit != items_.end()) {
+        title = iit->second->freq.get_value().raw();
+        const std::string call = iit->second->call.get_value().raw();
+        if (!call.empty())
+            title += "  —  " + call;
+    }
+
+    auto* win = new Gtk::Window();   // heap top-level (deleted on close, below)
+    win->set_title(title);
+    win->set_default_size(480, 320);
+    win->set_hide_on_close(true);
+
+    auto* scroller = Gtk::make_managed<Gtk::ScrolledWindow>();
+    scroller->set_policy(Gtk::PolicyType::AUTOMATIC, Gtk::PolicyType::AUTOMATIC);
+    auto* view = Gtk::make_managed<Gtk::TextView>();
+    view->set_editable(false);
+    view->set_cursor_visible(false);
+    view->set_monospace(true);
+    view->set_wrap_mode(Gtk::WrapMode::WORD_CHAR);
+    ui::setMargin(*view, 6);
+    view->get_buffer()->set_text(fullText_[id]);
+    scroller->set_child(*view);
+    win->set_child(*scroller);
+
+    textWindows_[id] = win;
+    textViews_[id]   = view;
+    win->signal_hide().connect([this, id, win]() {
+        // Forget this popup only if it's still the one we recorded (the id may
+        // have been reused by a later channel with its own popup).
+        if (auto it = textWindows_.find(id); it != textWindows_.end() && it->second == win) {
+            textWindows_.erase(it);
+            textViews_.erase(id);
+        }
+        delete win;
+    });
+    win->present();
 }
 
 void CwSkimmerPanel::addWaterfall(const std::vector<float>& mags, double minHz,
@@ -287,6 +360,16 @@ void CwSkimmerPanel::updateChannel(int id, double hz, int wpm, const std::string
         it->second->call.set_value(call);
     }
 
+    // Accumulate the channel's full decode, and live-refresh an open popup.
+    std::string& full = fullText_[id];
+    appendWindow(full, text);
+    if (auto vit = textViews_.find(id); vit != textViews_.end()) {
+        auto buf = vit->second->get_buffer();
+        buf->set_text(full);
+        buf->place_cursor(buf->end());
+        vit->second->scroll_to(buf->get_insert());  // keep the newest text in view
+    }
+
     // Refresh the waterfall callsign tags from the live channel set.
     labels_.clear();
     for (const auto& [cid, item] : items_) {
@@ -309,11 +392,19 @@ void CwSkimmerPanel::removeChannel(int id) {
             break;
         }
     items_.erase(it);
+    // Detach any open popup so a later channel reusing this id can't write its
+    // text into the old window; the window itself stays (frozen) until closed.
+    fullText_.erase(id);
+    textWindows_.erase(id);
+    textViews_.erase(id);
 }
 
 void CwSkimmerPanel::clear() {
     store_->remove_all();
     items_.clear();
+    fullText_.clear();
+    textWindows_.clear();
+    textViews_.clear();
     labels_.clear();
     pending_.clear();
     std::fill(pixels_.begin(), pixels_.end(), 0);

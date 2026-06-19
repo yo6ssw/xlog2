@@ -1,15 +1,18 @@
 #include "QtCwSkimmerPanel.h"
 
 #include <QCheckBox>
+#include <QDialog>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QImage>
 #include <QLabel>
 #include <QPainter>
+#include <QPlainTextEdit>
 #include <QSignalBlocker>
 #include <QSlider>
 #include <QStandardItemModel>
 #include <QTableView>
+#include <QTextCursor>
 #include <QTimer>
 #include <QVBoxLayout>
 
@@ -48,6 +51,26 @@ QRgb heat(float v) {
     const float g = col[i][1] + t * (col[i + 1][1] - col[i][1]);
     const float b = col[i][2] + t * (col[i + 1][2] - col[i][2]);
     return qRgb(int(r), int(g), int(b));
+}
+
+// Reconstruct a channel's full decoded text from the rolling ≤100-char windows
+// the skimmer emits. The decode is append-only at the back (chars are only
+// dropped off the front of the window), so each window is a suffix of the true
+// text; merge a new window onto what we have by the largest overlap between the
+// tail of the accumulated text and the head of the window, appending only the
+// genuinely-new characters. Capped so a long-lived channel can't grow unbounded.
+void appendWindow(std::string& full, const std::string& window) {
+    const std::size_t maxK = std::min(full.size(), window.size());
+    std::size_t k = 0;
+    for (std::size_t cand = maxK; cand > 0; --cand)
+        if (full.compare(full.size() - cand, cand, window, 0, cand) == 0) {
+            k = cand;
+            break;
+        }
+    full.append(window, k, std::string::npos);
+    constexpr std::size_t kCap = 100000;
+    if (full.size() > kCap)
+        full.erase(0, full.size() - kCap);
 }
 
 }  // namespace
@@ -227,9 +250,62 @@ QtCwSkimmerPanel::QtCwSkimmerPanel(QWidget* parent) : QWidget(parent) {
     table_->setColumnWidth(0, 70);
     table_->setColumnWidth(1, 50);
     table_->horizontalHeader()->setSectionResizeMode(2, QHeaderView::Stretch);
+    // Double-click a row to pop up the channel's complete decoded text.
+    connect(table_, &QAbstractItemView::doubleClicked, this,
+            [this](const QModelIndex& idx) {
+                for (const auto& [id, item] : rows_)
+                    if (item->row() == idx.row()) { showChannelText(id); break; }
+            });
     layout->addWidget(table_, 2);
 
     setMinimumWidth(260);
+}
+
+void QtCwSkimmerPanel::showChannelText(int id) {
+    // Already open for this channel? Just raise it.
+    if (auto it = textViews_.find(id); it != textViews_.end() && it->second) {
+        QWidget* win = it->second->window();
+        win->show();
+        win->raise();
+        win->activateWindow();
+        return;
+    }
+
+    // Title from the row (frequency + callsign) for context.
+    QString title = "CW decode";
+    if (auto rit = rows_.find(id); rit != rows_.end()) {
+        const int row = rit->second->row();
+        const QString f = model_->item(row, 0)->text();
+        const QString c = model_->item(row, 3)->text();
+        title = c.isEmpty() ? f : f + "  —  " + c;
+    }
+
+    auto* dlg = new QDialog(this);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    dlg->setWindowTitle(title);
+    dlg->resize(480, 320);
+    auto* lay = new QVBoxLayout(dlg);
+    lay->setContentsMargins(0, 0, 0, 0);
+    auto* edit = new QPlainTextEdit(dlg);
+    edit->setReadOnly(true);
+    edit->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    {
+        QFont mono("monospace");
+        mono.setStyleHint(QFont::Monospace);
+        edit->setFont(mono);
+    }
+    edit->setPlainText(QString::fromStdString(fullText_[id]));
+    edit->moveCursor(QTextCursor::End);
+    lay->addWidget(edit);
+
+    textViews_[id] = edit;
+    connect(dlg, &QObject::destroyed, this, [this, id, edit] {
+        // Only forget this view if it's still the one we recorded (the id may
+        // have been reused by a later channel with its own popup).
+        if (auto it = textViews_.find(id); it != textViews_.end() && it->second == edit)
+            textViews_.erase(it);
+    });
+    dlg->show();
 }
 
 void QtCwSkimmerPanel::setGate(int db) {
@@ -287,6 +363,14 @@ void QtCwSkimmerPanel::updateChannel(int id, double hz, int wpm,
         model_->item(row, 3)->setText(QString::fromStdString(call));
     }
 
+    // Accumulate the channel's full decode, and live-refresh an open popup.
+    std::string& full = fullText_[id];
+    appendWindow(full, text);
+    if (auto vit = textViews_.find(id); vit != textViews_.end() && vit->second) {
+        vit->second->setPlainText(QString::fromStdString(full));
+        vit->second->moveCursor(QTextCursor::End);  // keep the newest text in view
+    }
+
     // Refresh the waterfall callsign tags from the current channel set.
     std::map<double, QString> labels;
     for (int r = 0; r < model_->rowCount(); ++r) {
@@ -305,10 +389,16 @@ void QtCwSkimmerPanel::removeChannel(int id) {
         return;
     model_->removeRow(it->second->row());
     rows_.erase(it);
+    // Detach any open popup so a later channel reusing this id can't write its
+    // text into the old window; the window itself stays (frozen) until closed.
+    fullText_.erase(id);
+    textViews_.erase(id);
 }
 
 void QtCwSkimmerPanel::clear() {
     model_->removeRows(0, model_->rowCount());
     rows_.clear();
+    fullText_.clear();
+    textViews_.clear();
     waterfall_->setLabels({});
 }
