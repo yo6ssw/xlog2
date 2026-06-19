@@ -1,6 +1,7 @@
 #include "RemotePaddleKeyer.h"
 
 #include "RemoteKeyProtocol.h"
+#include "Rtkit.h"
 
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
@@ -33,6 +34,11 @@ constexpr int kKeepaliveMs = 100;  // must stay well under cwsd's silence_ms (de
 // RLIMIT_RTPRIO it stays at normal priority and keying still works, just with more
 // wakeup jitter. A modest priority preempts ordinary tasks while staying below the
 // audio/kernel critical RT threads. Returns true if the bump was applied.
+//
+// Two paths: first a direct SCHED_FIFO request (works when the process has an
+// rtprio limit, e.g. via limits.conf or CAP_SYS_NICE); if that is denied — the
+// common desktop case — fall back to the rtkit D-Bus broker, which grants RT
+// per-thread without any limits.conf change (the same route PipeWire takes).
 bool raiseToRealtime() {
     sched_param sp{};
     int prio = sched_get_priority_min(SCHED_FIFO) + 5;
@@ -40,7 +46,9 @@ bool raiseToRealtime() {
     if (prio > maxPrio)
         prio = maxPrio;
     sp.sched_priority = prio;
-    return pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0;  // failure non-fatal
+    if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0)
+        return true;
+    return platform::makeThreadRealtime(prio);  // desktop fallback via RealtimeKit
 }
 
 // Resolve + open a connected UDP socket. connect() pins the peer so send() needs
