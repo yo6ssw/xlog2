@@ -30,7 +30,7 @@ GDK_BACKEND=wayland ./build/xlog2-gtk
 sudo apt install build-essential cmake pkg-config \
                  libgtkmm-4.0-dev qt6-base-dev \
                  libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
-                 libopus-dev libasound2-dev
+                 libopus-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev
 # tqsl (LoTW upload, runtime only): sudo apt install tqsl
 ```
 

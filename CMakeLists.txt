@@ -22,6 +22,7 @@ pkg_check_modules(HAMLIB REQUIRED IMPORTED_TARGET hamlib)
 pkg_check_modules(CURL   REQUIRED IMPORTED_TARGET libcurl)
 pkg_check_modules(OPUS   REQUIRED IMPORTED_TARGET opus)   # rig audio stream client (decode)
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)  # rig audio playback + sidetone
+pkg_check_modules(DBUS   REQUIRED IMPORTED_TARGET dbus-1) # RealtimeKit RT scheduling for the keyer
 
 # ---------------------------------------------------------------------------
 # xlog_core: the toolkit-neutral core. Deliberately NOT linked against gtkmm or
@@ -45,6 +46,7 @@ add_library(xlog_core STATIC
     src/core/presenter/LogPagePresenter.cpp
     src/core/presenter/MainPresenter.cpp
     src/core/platform/ProcessRunner.cpp
+    src/core/platform/Rtkit.cpp
     src/core/services/Rig.cpp
     src/core/services/Udp.cpp
     src/core/services/Lotw.cpp
@@ -74,6 +76,7 @@ target_link_libraries(xlog_core PUBLIC
     PkgConfig::CURL
     PkgConfig::OPUS
     PkgConfig::PIPEWIRE
+    PkgConfig::DBUS
     Threads::Threads)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
