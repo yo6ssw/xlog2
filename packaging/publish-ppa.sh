@@ -79,6 +79,18 @@ for series in "${SERIES[@]}"; do
     # Clean, deterministic export of the committed tree (no build/, .git, …).
     git archive --format=tar HEAD | tar -x -C "$work"
 
+    # git archive skips submodule contents (they are gitlinks), so vendor each
+    # submodule's source into the export at the commit recorded in HEAD — the
+    # PPA builder has no network and no .gitmodules to fetch from. Without this
+    # the multimaster source would be missing and the build would fail.
+    git submodule status | while read -r _ subpath _; do
+        subcommit="$(git rev-parse "HEAD:$subpath")"
+        git -C "$subpath" cat-file -e "${subcommit}^{commit}" 2>/dev/null \
+            || git submodule update --init "$subpath" >/dev/null
+        mkdir -p "$work/$subpath"
+        git -C "$subpath" archive --format=tar "$subcommit" | tar -x -C "$work/$subpath"
+    done
+
     # Per-series changelog (version + target distribution).
     cat > "$work/debian/changelog" <<EOF
 xlog2 ($ver) $series; urgency=medium
