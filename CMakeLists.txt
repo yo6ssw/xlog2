@@ -24,6 +24,13 @@ pkg_check_modules(OPUS   REQUIRED IMPORTED_TARGET opus)   # rig audio stream cli
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)  # rig audio playback + sidetone
 pkg_check_modules(DBUS   REQUIRED IMPORTED_TARGET dbus-1) # RealtimeKit RT scheduling for the keyer
 
+# multimaster: zero-dependency LAN gossip mesh (git submodule). Powers the
+# symmetric, auto-discovering logbook-sync transport. Static lib, links only
+# pthreads; we don't want its tests/examples in our build.
+set(MULTIMASTER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
+set(MULTIMASTER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+add_subdirectory(third_party/multimaster EXCLUDE_FROM_ALL)
+
 # ---------------------------------------------------------------------------
 # xlog_core: the toolkit-neutral core. Deliberately NOT linked against gtkmm or
 # Qt, so any accidental toolkit include in a core source fails to compile — the
@@ -82,6 +89,9 @@ target_link_libraries(xlog_core PUBLIC
     PkgConfig::PIPEWIRE
     PkgConfig::DBUS
     Threads::Threads)
+# mesh transport used only inside LogbookSync.cpp (private); a static lib still
+# propagates this to the linked frontends.
+target_link_libraries(xlog_core PRIVATE multimaster::multimaster)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(xlog_core PRIVATE -Wall -Wextra)

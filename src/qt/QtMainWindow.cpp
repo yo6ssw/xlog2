@@ -9,7 +9,6 @@
 #include "QtMapPanel.h"
 #include "QtSettingsDialog.h"
 #include "QtLogPage.h"
-#include "Uuid.h"
 #include "Statistics.h"
 #include "StrUtil.h"
 #include "TimeUtil.h"
@@ -293,17 +292,19 @@ QtMainWindow::QtMainWindow()
     hidPaddle_.onDah    = [this](bool p) { paddle_.setDah(p); };
     hidPaddle_.onStatus = [this](const std::string& s) { setStatus(s); };
 
-    // Logbook sync: the transport moves bytes; the coordinator owns the protocol
-    // and is the only thing that touches the synced logbook (on the UI thread).
-    sync_.onConnected = [this] {
-        coordinator_.onConnected();
-        syncIndicator_->setText("⇄ peer");
+    // Logbook sync: the mesh transport moves bytes; the coordinator owns the
+    // protocol and is the only thing that touches the synced logbook (UI thread).
+    sync_.onPeerUp = [this](const LogbookSync::PeerKey& p) {
+        coordinator_.onPeerUp(p);
+        updateSyncIndicator();
     };
-    sync_.onDisconnected = [this] {
-        coordinator_.onDisconnected();
-        syncIndicator_->setText(cfg().syncEnabled ? "⇄ waiting" : QString());
+    sync_.onPeerDown = [this](const LogbookSync::PeerKey& p) {
+        coordinator_.onPeerDown(p);
+        updateSyncIndicator();
     };
-    sync_.onMessage = [this](const syncproto::Message& m) { coordinator_.onMessage(m); };
+    sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
+        coordinator_.onMessage(p, m);
+    };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
 
@@ -965,31 +966,44 @@ void QtMainWindow::attachSyncedLog(QtLogPage* page) {
         coordinator_.detach();
         return;
     }
-    // Mint a stable node id once (persisted on close); breaks LWW ties.
-    if (cfg().syncNodeId.empty())
-        cfg().syncNodeId = uuidutil::newUuid();
-    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
     coordinator_.attach(&page->presenter());
-    // Propagate local edits/deletes to the peer in real time.
+    // Propagate local edits/deletes to authenticated peers in real time.
     page->presenter().onLocalUpsert = [this](const Qso& q) { coordinator_.onLocalUpsert(q); };
     page->presenter().onLocalDelete = [this](const std::string& u, const std::string& d) {
         coordinator_.onLocalDelete(u, d);
     };
 }
 
-void QtMainWindow::startSync() {
-    if (!cfg().syncEnabled) {
-        sync_.stop();
+void QtMainWindow::updateSyncIndicator() {
+    if (!cfg().syncEnabled || !sync_.isRunning()) {
         syncIndicator_->clear();
         return;
     }
-    const auto role = cfg().syncRole == "connect" ? LogbookSync::Role::Connect
-                                                  : LogbookSync::Role::Listen;
-    std::string host = cfg().syncPeerHost;
-    if (host.empty() && !cfg().syncPeerHostAlt.empty())
-        host = cfg().syncPeerHostAlt;
-    syncIndicator_->setText("⇄ waiting");
-    sync_.start(role, host, cfg().syncPort, cfg().syncReconnectMs);
+    const int n = sync_.memberCount();
+    syncIndicator_->setText(n > 0 ? QString("⇄ %1").arg(n) : "⇄ …");
+}
+
+void QtMainWindow::startSync() {
+    if (!cfg().syncEnabled) {
+        sync_.stop();
+        updateSyncIndicator();
+        return;
+    }
+    LogbookSync::Config c;
+    c.nodeId = cfg().syncNodeId;  // empty => the mesh mints one (persisted below)
+    c.group  = syncproto::meshGroup(cfg().syncSecret);
+    c.port   = cfg().syncPort;
+    // Optional WAN peers (the internet); "host" or "host:port".
+    for (const std::string& h : {cfg().syncPeerHost, cfg().syncPeerHostAlt})
+        if (auto p = LogbookSync::parsePeer(h, cfg().syncPort); !p.first.empty())
+            c.staticPeers.push_back(p);
+    sync_.start(c);
+    // Persist the resolved mesh id so the LWW tiebreak is stable across restarts,
+    // and key the coordinator off the same id. (Empty if the mesh failed to start.)
+    if (!sync_.localId().empty())
+        cfg().syncNodeId = sync_.localId();
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    updateSyncIndicator();
 }
 
 void QtMainWindow::onSyncNow() {
@@ -1061,13 +1075,12 @@ void QtMainWindow::applySettings(const Settings& s) {
     cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
 
     cfg().syncEnabled = s.syncEnabled;
-    cfg().syncRole = s.syncRole;
     cfg().syncPeerHost = s.syncPeerHost;
     cfg().syncPeerHostAlt = s.syncPeerHostAlt;
     cfg().syncPort = s.syncPort;
     cfg().syncSecret = s.syncSecret;
-    // Re-apply the secret to the live coordinator and (re)start the transport.
-    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    // (Re)start the mesh transport; startSync re-keys the coordinator from the
+    // resolved mesh id.
     startSync();
 
     // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).

@@ -76,11 +76,10 @@ private:
     Gtk::Entry* audioDevice_ = nullptr;
     // --- sync ---
     Gtk::CheckButton* syncEnabled_ = nullptr;
-    Gtk::CheckButton* syncConnectRole_ = nullptr;  // checked = connect, else listen
+    Gtk::Entry* syncSecret_ = nullptr;
+    Gtk::Entry* syncPort_ = nullptr;
     Gtk::Entry* syncPeerHost_ = nullptr;
     Gtk::Entry* syncPeerHostAlt_ = nullptr;
-    Gtk::Entry* syncPort_ = nullptr;
-    Gtk::Entry* syncSecret_ = nullptr;
     // --- skimmer ---
     Gtk::Entry* skGate_ = nullptr;
     Gtk::Entry* skMinSnr_ = nullptr;

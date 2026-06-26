@@ -67,12 +67,10 @@ Settings Settings::load(const IniFile& ini) {
     s.skimmerBwOffsetDb  = ini.getInt("skimmer", "bw_offset_db", s.skimmerBwOffsetDb);
 
     s.syncEnabled     = ini.getBool("sync", "enabled", s.syncEnabled);
-    s.syncRole        = ini.getString("sync", "role", s.syncRole);
-    s.syncPeerHost    = ini.getString("sync", "peer_host", s.syncPeerHost);
-    s.syncPeerHostAlt = ini.getString("sync", "peer_host_alt", s.syncPeerHostAlt);
     s.syncPort        = ini.getInt("sync", "port", s.syncPort);
     s.syncSecret      = ini.getString("sync", "secret", s.syncSecret);
-    s.syncReconnectMs = ini.getInt("sync", "reconnect_ms", s.syncReconnectMs);
+    s.syncPeerHost    = ini.getString("sync", "peer_host", s.syncPeerHost);
+    s.syncPeerHostAlt = ini.getString("sync", "peer_host_alt", s.syncPeerHostAlt);
     s.syncNodeId      = ini.getString("sync", "node_id", s.syncNodeId);
 
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
@@ -152,12 +150,10 @@ void Settings::store(IniFile& ini) const {
     ini.setInt("skimmer", "bw_offset_db", skimmerBwOffsetDb);
 
     ini.setBool("sync", "enabled", syncEnabled);
-    ini.setString("sync", "role", syncRole);
-    ini.setString("sync", "peer_host", syncPeerHost);
-    ini.setString("sync", "peer_host_alt", syncPeerHostAlt);
     ini.setInt("sync", "port", syncPort);
     ini.setString("sync", "secret", syncSecret);
-    ini.setInt("sync", "reconnect_ms", syncReconnectMs);
+    ini.setString("sync", "peer_host", syncPeerHost);
+    ini.setString("sync", "peer_host_alt", syncPeerHostAlt);
     ini.setString("sync", "node_id", syncNodeId);
 
     ini.setString("dxcluster", "host", dxHost);

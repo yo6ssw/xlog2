@@ -2,7 +2,6 @@
 
 #include "Adif.h"
 #include "LogPage.h"
-#include "Uuid.h"
 #include "SettingsDialog.h"
 #include "Statistics.h"
 #include "UiUtil.h"
@@ -142,15 +141,17 @@ MainWindow::MainWindow()
 
     // Logbook sync: the transport moves bytes; the coordinator owns the protocol
     // and is the only thing that touches the synced logbook (on the UI thread).
-    sync_.onConnected = [this] {
-        coordinator_.onConnected();
-        syncIndicator_.set_text("⇄ peer");
+    sync_.onPeerUp = [this](const LogbookSync::PeerKey& p) {
+        coordinator_.onPeerUp(p);
+        updateSyncIndicator();
     };
-    sync_.onDisconnected = [this] {
-        coordinator_.onDisconnected();
-        syncIndicator_.set_text(cfg().syncEnabled ? "⇄ waiting" : "");
+    sync_.onPeerDown = [this](const LogbookSync::PeerKey& p) {
+        coordinator_.onPeerDown(p);
+        updateSyncIndicator();
     };
-    sync_.onMessage = [this](const syncproto::Message& m) { coordinator_.onMessage(m); };
+    sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
+        coordinator_.onMessage(p, m);
+    };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
 
@@ -999,13 +1000,11 @@ void MainWindow::applySettings(const Settings& s) {
     cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
 
     cfg().syncEnabled = s.syncEnabled;
-    cfg().syncRole = s.syncRole;
     cfg().syncPeerHost = s.syncPeerHost;
     cfg().syncPeerHostAlt = s.syncPeerHostAlt;
     cfg().syncPort = s.syncPort;
     cfg().syncSecret = s.syncSecret;
-    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
-    startSync();
+    startSync();  // re-keys the coordinator from the resolved mesh id
 
     // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).
     applyKeyerConfig();
@@ -1437,9 +1436,6 @@ void MainWindow::attachSyncedLog(LogPage* page) {
         coordinator_.detach();
         return;
     }
-    if (cfg().syncNodeId.empty())
-        cfg().syncNodeId = uuidutil::newUuid();
-    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
     coordinator_.attach(&page->presenter());
     page->presenter().onLocalUpsert = [this](const Qso& q) { coordinator_.onLocalUpsert(q); };
     page->presenter().onLocalDelete = [this](const std::string& u, const std::string& d) {
@@ -1447,21 +1443,35 @@ void MainWindow::attachSyncedLog(LogPage* page) {
     };
 }
 
+void MainWindow::updateSyncIndicator() {
+    if (!cfg().syncEnabled || !sync_.isRunning()) {
+        syncIndicator_.set_text("");
+        return;
+    }
+    const int n = sync_.memberCount();
+    syncIndicator_.set_text(n > 0 ? "⇄ " + std::to_string(n) : "⇄ …");
+}
+
 void MainWindow::startSync() {
     if (syncEnableAction_)
         syncEnableAction_->set_state(Glib::Variant<bool>::create(cfg().syncEnabled));
     if (!cfg().syncEnabled) {
         sync_.stop();
-        syncIndicator_.set_text("");
+        updateSyncIndicator();
         return;
     }
-    const auto role = cfg().syncRole == "connect" ? LogbookSync::Role::Connect
-                                                  : LogbookSync::Role::Listen;
-    std::string host = cfg().syncPeerHost;
-    if (host.empty() && !cfg().syncPeerHostAlt.empty())
-        host = cfg().syncPeerHostAlt;
-    syncIndicator_.set_text("⇄ waiting");
-    sync_.start(role, host, cfg().syncPort, cfg().syncReconnectMs);
+    LogbookSync::Config c;
+    c.nodeId = cfg().syncNodeId;  // empty => the mesh mints one (persisted below)
+    c.group  = syncproto::meshGroup(cfg().syncSecret);
+    c.port   = cfg().syncPort;
+    for (const std::string& h : {cfg().syncPeerHost, cfg().syncPeerHostAlt})
+        if (auto p = LogbookSync::parsePeer(h, cfg().syncPort); !p.first.empty())
+            c.staticPeers.push_back(p);
+    sync_.start(c);
+    if (!sync_.localId().empty())
+        cfg().syncNodeId = sync_.localId();
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    updateSyncIndicator();
 }
 
 void MainWindow::onSyncNow() {

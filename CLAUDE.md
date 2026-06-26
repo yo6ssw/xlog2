@@ -218,24 +218,33 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   iambic memory gives iambic-A; full iambic-B is a TODO.
 - `LogbookSync` (`src/core/services/LogbookSync.*`, wire format in
   `SyncProtocol.*`) — peer-to-peer **multi-master sync of the default logbook**
-  across two machines (add/edit/delete on either). A worker owns a TCP socket
-  (listen or connect role, self-pipe for stop, auto-reconnect, Ping/Pong
-  keepalive) and does *only* byte I/O + framing; the protocol state machine runs
-  on the UI thread in `SyncCoordinator` (`src/core/presenter/`), the only thing
-  that touches the logbook. Identity/change-tracking lives in `LogBook`: a stable
-  per-QSO `uuid` (random v4 for new rows, deterministic content-hash v5 for
-  back-filled pre-sync rows so two copies of a file agree), an `updated_at`
-  millisecond timestamp bumped on every write, a `tombstones` table for
-  deletions, and a `meta.sync_id` agreed at first pairing. `LogBook::applyRemote`
-  merges a remote delta **last-write-wins** in one transaction + one reload
-  (node-id breaks ties; delete-wins-ties; a newer edit resurrects a delete;
-  idempotent). Handshake authenticates via an HMAC keyed by a pre-shared secret.
-  After connect/`Sync now`, the higher-node-id peer drives an anti-entropy pass
-  (DIGEST → MANIFEST → REQUEST/RECORDS, tombstones from the manifest); steady
-  state pushes each local change immediately, so push + anti-entropy compose
-  safely. Config is the `[sync]` block, edited in Edit ▸ Settings ▸ Sync; there's
-  a Sync menu (Enabled / Sync now) and a status-bar indicator. Clocks are assumed
-  NTP-synced (wall-clock + node-id, not a logical clock). **Full reference:
+  (add/edit/delete on any machine). It wraps a **multimaster** LAN gossip mesh
+  (`third_party/multimaster`, a git submodule exposing `mm::mesh` /
+  `multimaster::multimaster`): instances are **symmetric** — every node both
+  listens and dials and **auto-discovers peers via UDP multicast**, so there is
+  no listener/connector role. The mesh owns its IO thread; `LogbookSync` only
+  marshals events to the UI thread (`IUiDispatcher` + `weak_ptr` token) and maps
+  mesh messages ↔ `SyncProtocol` frames. The mesh group is derived from the
+  shared secret (`syncproto::meshGroup`) so only same-secret instances connect;
+  optional **static peers** (`[sync] peer_host`/`peer_host_alt`) cover the WAN.
+  The protocol state machine runs on the UI thread in `SyncCoordinator`
+  (`src/core/presenter/`), **per peer** (an `unordered_map<PeerKey,PeerState>`),
+  the only thing that touches the logbook. Identity/change-tracking lives in
+  `LogBook`: a stable per-QSO `uuid` (random v4 for new rows, deterministic
+  content-hash v5 for back-filled pre-sync rows so two copies of a file agree),
+  an `updated_at` millisecond timestamp bumped on every write, a `tombstones`
+  table for deletions, and a `meta.sync_id` agreed at first pairing.
+  `LogBook::applyRemote` merges a remote delta **last-write-wins** in one
+  transaction + one reload (node-id breaks ties; delete-wins-ties; a newer edit
+  resurrects a delete; idempotent). Per peer: `HELLO`/`HELLO_ACK` authenticate
+  via an HMAC keyed by the pre-shared secret and agree the `sync_id`; the
+  higher-node-id side drives an anti-entropy pass (DIGEST → MANIFEST →
+  REQUEST/RECORDS, tombstones from the manifest); steady state pushes each local
+  change to every authenticated peer, so push + anti-entropy compose safely.
+  Config is the `[sync]` block, edited in Edit ▸ Settings ▸ Sync; there's a Sync
+  menu (Enabled / Sync now) and a status-bar peer-count indicator. The node id is
+  the mesh peer id (minted once, persisted); clocks are assumed NTP-synced
+  (wall-clock + node-id, not a logical clock). **Full reference:
   `docs/logbook-sync.md`.**
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.

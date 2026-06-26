@@ -211,6 +211,12 @@ Qso getQso(Reader& r) {
 
 }  // namespace
 
+std::string meshGroup(const std::string& secret) {
+    if (secret.empty())
+        return "xlog2";
+    return "xlog2-" + sha256Hex(secret).substr(0, 16);
+}
+
 // --- framing ---------------------------------------------------------------
 
 std::string encodeFrame(const Message& m) {

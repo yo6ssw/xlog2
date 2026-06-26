@@ -133,9 +133,10 @@ private:
     void applyMapConfig();                      // after load: dock + seed locator
 
     // --- logbook sync ---
-    void onSyncNow();                  // force an anti-entropy pass with the peer
-    void startSync();                  // start the transport for the configured role
+    void onSyncNow();                  // force an anti-entropy pass with all peers
+    void startSync();                  // (re)start the mesh transport
     void attachSyncedLog(LogPage* page);  // bind the coordinator to the default log
+    void updateSyncIndicator();           // status-bar peer count
 
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
