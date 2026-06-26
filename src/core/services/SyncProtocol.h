@@ -55,6 +55,12 @@ private:
     bool        failed_ = false;
 };
 
+// The mesh group name for a given shared secret: "xlog2" when empty, else
+// "xlog2-" + a short hash of the secret. Same-secret instances share a mesh;
+// different-secret instances never even connect (segregation in addition to the
+// HELLO authentication gate).
+std::string meshGroup(const std::string& secret);
+
 // --- payload builders / parsers (return false on a malformed payload) ---
 
 // HELLO carries identity plus an HMAC over (nodeId|syncId|nonce) keyed by the

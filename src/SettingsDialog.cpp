@@ -250,27 +250,26 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
     // --- Sync ---
     {
         auto& g = addPage(*stack, "sync", "Sync");
-        syncEnabled_ = Gtk::make_managed<Gtk::CheckButton>("Synchronise the default logbook with a peer");
+        syncEnabled_ = Gtk::make_managed<Gtk::CheckButton>("Synchronise the default logbook with LAN peers");
         syncEnabled_->set_active(s.syncEnabled);
-        syncConnectRole_ = Gtk::make_managed<Gtk::CheckButton>("Connect to peer (unchecked = listen)");
-        syncConnectRole_->set_active(s.syncRole == "connect");
-        syncPeerHost_ = entry(s.syncPeerHost);
-        syncPeerHost_->set_placeholder_text("peer host/IP (Connect role)");
-        syncPeerHostAlt_ = entry(s.syncPeerHostAlt);
-        syncPeerHostAlt_->set_placeholder_text("fallback host, e.g. internet (optional)");
-        syncPort_ = entry(std::to_string(s.syncPort));
         syncSecret_ = entry(s.syncSecret); syncSecret_->set_visibility(false);
+        syncPort_ = entry(std::to_string(s.syncPort));
+        syncPeerHost_ = entry(s.syncPeerHost);
+        syncPeerHost_->set_placeholder_text("optional WAN peer host (internet)");
+        syncPeerHostAlt_ = entry(s.syncPeerHostAlt);
+        syncPeerHostAlt_->set_placeholder_text("optional second WAN peer host");
         g.attach(*syncEnabled_, 1, 0);
-        g.attach(*syncConnectRole_, 1, 1);
-        field(g, "Peer host:", *syncPeerHost_, 2);
-        field(g, "Fallback host:", *syncPeerHostAlt_, 3);
-        field(g, "Port:", *syncPort_, 4);
-        field(g, "Shared secret:", *syncSecret_, 5);
+        field(g, "Shared secret:", *syncSecret_, 1);
+        field(g, "Listen port:", *syncPort_, 2);
+        field(g, "WAN peer:", *syncPeerHost_, 3);
+        field(g, "WAN peer 2:", *syncPeerHostAlt_, 4);
         auto* hint = Gtk::make_managed<Gtk::Label>(
-            "Both machines need the same port + secret. One Listens, the other\n"
-            "Connects. Over the internet, tunnel via WireGuard/SSH (not encrypted).");
+            "Peers on the same LAN find each other automatically — no roles to set.\n"
+            "Give every machine the same secret (it both authenticates and picks the\n"
+            "mesh). WAN peers are optional hosts for syncing over the internet (open\n"
+            "the port; data is not encrypted — tunnel via WireGuard/SSH).");
         hint->set_xalign(0.0);
-        g.attach(*hint, 0, 6, 2, 1);
+        g.attach(*hint, 0, 5, 2, 1);
     }
 
     // --- buttons ---
@@ -346,7 +345,6 @@ Settings SettingsDialog::collect() const {
     s.audioDevice = strOr(audioDevice_, "default");
 
     s.syncEnabled = syncEnabled_->get_active();
-    s.syncRole = syncConnectRole_->get_active() ? "connect" : "listen";
     s.syncPeerHost = syncPeerHost_->get_text().raw();
     s.syncPeerHostAlt = syncPeerHostAlt_->get_text().raw();
     s.syncPort = toInt(syncPort_, s.syncPort);

@@ -91,9 +91,10 @@ private:
     void onTogglePaddle(bool on);
     void startPaddleKeyer();
     void onClusterConnectToggle();
-    void onSyncNow();          // force an anti-entropy pass with the peer
-    void startSync();          // start the transport for the configured role
+    void onSyncNow();          // force an anti-entropy pass with all peers
+    void startSync();          // (re)start the mesh transport
     void attachSyncedLog(QtLogPage* page);  // bind the coordinator to the default log
+    void updateSyncIndicator();             // status-bar peer count
     void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
     void onMapDock(const std::string& side);      // move the map dock to a side
     void startSkimmer();

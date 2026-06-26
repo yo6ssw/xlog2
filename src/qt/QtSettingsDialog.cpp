@@ -180,28 +180,25 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
     // --- Sync ---
     {
         auto* f = addPage("Sync");
-        syncEnabled_ = new QCheckBox("Synchronise the default logbook with a peer");
+        syncEnabled_ = new QCheckBox("Synchronise the default logbook with LAN peers");
         syncEnabled_->setChecked(s.syncEnabled);
-        syncRole_ = new QComboBox;
-        syncRole_->addItem("Listen (accept a connection)", "listen");
-        syncRole_->addItem("Connect (dial the peer)", "connect");
-        syncRole_->setCurrentIndex(s.syncRole == "connect" ? 1 : 0);
-        syncPeerHost_ = new QLineEdit(qstr(s.syncPeerHost));
-        syncPeerHost_->setPlaceholderText("peer host/IP (Connect role)");
-        syncPeerHostAlt_ = new QLineEdit(qstr(s.syncPeerHostAlt));
-        syncPeerHostAlt_->setPlaceholderText("fallback host, e.g. internet (optional)");
-        syncPort_ = new QSpinBox; syncPort_->setRange(1, 65535); syncPort_->setValue(s.syncPort);
         syncSecret_ = new QLineEdit(qstr(s.syncSecret));
         syncSecret_->setEchoMode(QLineEdit::Password);
+        syncPort_ = new QSpinBox; syncPort_->setRange(1, 65535); syncPort_->setValue(s.syncPort);
+        syncPeerHost_ = new QLineEdit(qstr(s.syncPeerHost));
+        syncPeerHost_->setPlaceholderText("optional WAN peer host (internet)");
+        syncPeerHostAlt_ = new QLineEdit(qstr(s.syncPeerHostAlt));
+        syncPeerHostAlt_->setPlaceholderText("optional second WAN peer host");
         f->addRow(syncEnabled_);
-        f->addRow("Role:", syncRole_);
-        f->addRow("Peer host:", syncPeerHost_);
-        f->addRow("Fallback host:", syncPeerHostAlt_);
-        f->addRow("Port:", syncPort_);
         f->addRow("Shared secret:", syncSecret_);
-        f->addRow(new QLabel("Both machines need the same port + secret. One Listens,\n"
-                             "the other Connects. Over the internet, tunnel via\n"
-                             "WireGuard/SSH (data is not encrypted)."));
+        f->addRow("Listen port:", syncPort_);
+        f->addRow("WAN peer:", syncPeerHost_);
+        f->addRow("WAN peer 2:", syncPeerHostAlt_);
+        f->addRow(new QLabel("Peers on the same LAN find each other automatically — no\n"
+                             "roles to set. Give every machine the same secret (it both\n"
+                             "authenticates and picks the mesh). WAN peers are optional\n"
+                             "host entries for syncing over the internet (open the port;\n"
+                             "data is not encrypted — tunnel via WireGuard/SSH)."));
     }
 
     // --- Skimmer ---
@@ -290,7 +287,6 @@ Settings QtSettingsDialog::result() const {
     s.audioDevice = sstrOr(audioDevice_, "default");
 
     s.syncEnabled = syncEnabled_->isChecked();
-    s.syncRole = syncRole_->currentData().toString().toStdString();
     s.syncPeerHost = sstr(syncPeerHost_);
     s.syncPeerHostAlt = sstr(syncPeerHostAlt_);
     s.syncPort = syncPort_->value();
