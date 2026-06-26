@@ -41,10 +41,12 @@ add_library(xlog_core STATIC
     src/core/logic/DupeMessage.cpp
     src/core/logic/QsoMapper.cpp
     src/core/logic/Geo.cpp
+    src/core/logic/Uuid.cpp
     src/core/settings/IniFile.cpp
     src/core/settings/Settings.cpp
     src/core/presenter/LogPagePresenter.cpp
     src/core/presenter/MainPresenter.cpp
+    src/core/presenter/SyncCoordinator.cpp
     src/core/platform/ProcessRunner.cpp
     src/core/platform/Rtkit.cpp
     src/core/services/Rig.cpp
@@ -54,6 +56,8 @@ add_library(xlog_core STATIC
     src/core/services/QrzCache.cpp
     src/core/services/CwKeyer.cpp
     src/core/services/DxCluster.cpp
+    src/core/services/SyncProtocol.cpp
+    src/core/services/LogbookSync.cpp
     src/core/services/Audio.cpp
     src/core/services/CwSkimmer.cpp
     src/core/services/RemotePaddleKeyer.cpp

@@ -135,16 +135,19 @@ void LogPagePresenter::onAddOrUpdate() {
         status("Cannot log a QSO without a callsign.");
         return;
     }
+    long id;
     if (editingId_ != 0) {
         logbook_.update(q);
+        id = editingId_;
         status("Updated QSO with " + q.call + ".");
     } else {
-        logbook_.add(q);
+        id = logbook_.add(q);
         status("Logged QSO with " + q.call + ".");
     }
     refreshList();
     clearForm();
     changed();
+    emitUpsert(id);
 }
 
 void LogPagePresenter::onDelete() {
@@ -152,11 +155,13 @@ void LogPagePresenter::onDelete() {
         status("No QSO selected to delete.");
         return;
     }
-    logbook_.remove(editingId_);
+    const RemoveResult rr = logbook_.removeTracked(editingId_);
     refreshList();
     clearForm();
     changed();
     status("QSO deleted.");
+    if (rr.ok && onLocalDelete)
+        onLocalDelete(rr.uuid, rr.deleted_at);
 }
 
 void LogPagePresenter::onClear() {
@@ -188,12 +193,14 @@ const Qso* LogPagePresenter::findQso(long id) const {
 void LogPagePresenter::deleteQso(long id) {
     if (id == 0)
         return;
-    logbook_.remove(id);
+    const RemoveResult rr = logbook_.removeTracked(id);
     refreshList();
     if (editingId_ == id)
         clearForm();  // the deleted row was loaded in the form
     changed();
     status("QSO deleted.");
+    if (rr.ok && onLocalDelete)
+        onLocalDelete(rr.uuid, rr.deleted_at);
 }
 
 void LogPagePresenter::onSetNow() {
@@ -279,7 +286,27 @@ long LogPagePresenter::addExternalQso(const Qso& q) {
     const long id = logbook_.add(q);
     refreshList();
     changed();
+    emitUpsert(id);
     return id;
+}
+
+void LogPagePresenter::emitUpsert(long id) {
+    if (!onLocalUpsert)
+        return;
+    if (const Qso* q = findQso(id))
+        onLocalUpsert(*q);
+}
+
+MergeResult LogPagePresenter::applyRemoteDelta(
+    const std::vector<Qso>& records, const std::vector<SyncEntry>& tombstones,
+    const std::string& localNodeId, const std::string& peerNodeId) {
+    const MergeResult r =
+        logbook_.applyRemote(records, tombstones, localNodeId, peerNodeId);
+    if (r.inserted || r.updated || r.deleted) {
+        refreshList();
+        changed();
+    }
+    return r;
 }
 
 bool LogPagePresenter::enrichFromQrz(long id, const QrzResult& r) {
@@ -302,6 +329,7 @@ bool LogPagePresenter::enrichFromQrz(long id, const QrzResult& r) {
     logbook_.update(u);
     refreshList();
     changed();
+    emitUpsert(id);
     return true;
 }
 
@@ -386,6 +414,8 @@ void LogPagePresenter::backfillDxcc() {
     logbook_.updateBatch(updates);
     refreshList();
     changed();
+    for (const auto& u : updates)
+        emitUpsert(u.id);
     status("Filled DXCC for " + std::to_string(updates.size()) + " QSO(s).");
 }
 
@@ -420,6 +450,8 @@ int LogPagePresenter::applyLocatorFill(
     logbook_.updateBatch(updates);
     refreshList();
     changed();
+    for (const auto& u : updates)
+        emitUpsert(u.id);
     return static_cast<int>(updates.size());
 }
 
@@ -427,6 +459,8 @@ void LogPagePresenter::markLotwSent(const std::vector<long>& ids, const std::str
     logbook_.markLotwSent(ids, date);
     refreshList();
     changed();
+    for (long id : ids)
+        emitUpsert(id);
 }
 
 int LogPagePresenter::applyLotwConfirmations(const std::vector<Qso>& confirmed) {

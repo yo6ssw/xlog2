@@ -2,6 +2,7 @@
 
 #include "Adif.h"
 #include "LogPage.h"
+#include "Uuid.h"
 #include "SettingsDialog.h"
 #include "Statistics.h"
 #include "UiUtil.h"
@@ -26,7 +27,9 @@ MainWindow::MainWindow()
       skimmer_(uiDispatcher_),
       audio_(uiDispatcher_),
       paddle_(uiDispatcher_),
-      hidPaddle_(uiDispatcher_) {
+      hidPaddle_(uiDispatcher_),
+      sync_(uiDispatcher_),
+      coordinator_(sync_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -137,6 +140,20 @@ MainWindow::MainWindow()
         setStatus(s);
     };
 
+    // Logbook sync: the transport moves bytes; the coordinator owns the protocol
+    // and is the only thing that touches the synced logbook (on the UI thread).
+    sync_.onConnected = [this] {
+        coordinator_.onConnected();
+        syncIndicator_.set_text("⇄ peer");
+    };
+    sync_.onDisconnected = [this] {
+        coordinator_.onDisconnected();
+        syncIndicator_.set_text(cfg().syncEnabled ? "⇄ waiting" : "");
+    };
+    sync_.onMessage = [this](const syncproto::Message& m) { coordinator_.onMessage(m); };
+    sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
+    coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+
     auto* statusBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     statusLabel_.set_xalign(0.0);
     statusLabel_.set_hexpand(true);
@@ -147,6 +164,9 @@ MainWindow::MainWindow()
     audioIndicator_.set_xalign(1.0);
     ui::setMargin(audioIndicator_, 4);
     statusBox->append(audioIndicator_);
+    syncIndicator_.set_xalign(1.0);
+    ui::setMargin(syncIndicator_, 4);
+    statusBox->append(syncIndicator_);
     vbox->append(*statusBox);
 
     // Service results are routed by the presenter (toolkit-neutral).
@@ -253,6 +273,9 @@ MainWindow::MainWindow()
     }
     if (notebook_.get_n_pages() == 0)
         openDefaultLog();
+    // The first/default tab is the synced logbook.
+    if (auto* p = dynamic_cast<LogPage*>(notebook_.get_nth_page(0)))
+        attachSyncedLog(p);
 
     updateTitle();
     setStatus("Ready.");
@@ -275,6 +298,10 @@ MainWindow::MainWindow()
     // Resume the remote paddle keyer if it was active last session.
     if (cfg().paddleEnabled)
         startPaddleKeyer();
+
+    // Resume logbook sync if it was enabled last session.
+    if (cfg().syncEnabled)
+        startSync();
 }
 
 void MainWindow::buildActions() {
@@ -329,6 +356,12 @@ void MainWindow::buildActions() {
         "mapshow", sigc::mem_fun(*this, &MainWindow::onMapToggleShow), false);
     mapDockAction_ = add_action_radio_string(
         "mapdock", sigc::mem_fun(*this, &MainWindow::onMapDock), "right");
+
+    add_action("syncnow", sigc::mem_fun(*this, &MainWindow::onSyncNow));
+    syncEnableAction_ = add_action_bool("syncenabled", [this]() {
+        cfg().syncEnabled = !cfg().syncEnabled;
+        startSync();  // also reconciles the toggle state
+    }, cfg().syncEnabled);
 }
 
 Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
@@ -421,6 +454,11 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     dockMenu->append("_Right",  "win.dxdock::right");
     clusterMenu->append_submenu("_Dock", dockMenu);
     menu->append_submenu("_Cluster", clusterMenu);
+
+    auto syncMenu = Gio::Menu::create();
+    syncMenu->append("_Enabled", "win.syncenabled");
+    syncMenu->append("Sync _now", "win.syncnow");
+    menu->append_submenu("S_ync", syncMenu);
 
     auto helpMenu = Gio::Menu::create();
     helpMenu->append("_About xlog2", "win.about");
@@ -960,6 +998,15 @@ void MainWindow::applySettings(const Settings& s) {
     cfg().skimmerBwNormRefHz = s.skimmerBwNormRefHz;
     cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
 
+    cfg().syncEnabled = s.syncEnabled;
+    cfg().syncRole = s.syncRole;
+    cfg().syncPeerHost = s.syncPeerHost;
+    cfg().syncPeerHostAlt = s.syncPeerHostAlt;
+    cfg().syncPort = s.syncPort;
+    cfg().syncSecret = s.syncSecret;
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    startSync();
+
     // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).
     applyKeyerConfig();
     if (listener_.isListening()) { listener_.stop(); startUdpListening(); }
@@ -1380,6 +1427,45 @@ void MainWindow::onClusterConnect() {
         applyDxDock();
     }
     cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
+}
+
+// --- logbook sync ------------------------------------------------------------
+
+void MainWindow::attachSyncedLog(LogPage* page) {
+    syncedPage_ = page;
+    if (!page) {
+        coordinator_.detach();
+        return;
+    }
+    if (cfg().syncNodeId.empty())
+        cfg().syncNodeId = uuidutil::newUuid();
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    coordinator_.attach(&page->presenter());
+    page->presenter().onLocalUpsert = [this](const Qso& q) { coordinator_.onLocalUpsert(q); };
+    page->presenter().onLocalDelete = [this](const std::string& u, const std::string& d) {
+        coordinator_.onLocalDelete(u, d);
+    };
+}
+
+void MainWindow::startSync() {
+    if (syncEnableAction_)
+        syncEnableAction_->set_state(Glib::Variant<bool>::create(cfg().syncEnabled));
+    if (!cfg().syncEnabled) {
+        sync_.stop();
+        syncIndicator_.set_text("");
+        return;
+    }
+    const auto role = cfg().syncRole == "connect" ? LogbookSync::Role::Connect
+                                                  : LogbookSync::Role::Listen;
+    std::string host = cfg().syncPeerHost;
+    if (host.empty() && !cfg().syncPeerHostAlt.empty())
+        host = cfg().syncPeerHostAlt;
+    syncIndicator_.set_text("⇄ waiting");
+    sync_.start(role, host, cfg().syncPort, cfg().syncReconnectMs);
+}
+
+void MainWindow::onSyncNow() {
+    coordinator_.syncNow();
 }
 
 void MainWindow::onSpotActivated(const DxSpot& spot) {

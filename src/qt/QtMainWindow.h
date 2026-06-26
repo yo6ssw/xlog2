@@ -5,6 +5,7 @@
 #include "CwSkimmer.h"
 #include "DxCluster.h"
 #include "IMainView.h"
+#include "LogbookSync.h"
 #include "Lotw.h"
 #include "MainPresenter.h"
 #include "Qrz.h"
@@ -12,6 +13,7 @@
 #include "RemotePaddleKeyer.h"
 #include "HidPaddleInput.h"
 #include "Rig.h"
+#include "SyncCoordinator.h"
 #include "Udp.h"
 
 #include <QMainWindow>
@@ -89,6 +91,9 @@ private:
     void onTogglePaddle(bool on);
     void startPaddleKeyer();
     void onClusterConnectToggle();
+    void onSyncNow();          // force an anti-entropy pass with the peer
+    void startSync();          // start the transport for the configured role
+    void attachSyncedLog(QtLogPage* page);  // bind the coordinator to the default log
     void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
     void onMapDock(const std::string& side);      // move the map dock to a side
     void startSkimmer();
@@ -122,14 +127,19 @@ private:
     AudioStreamClient audio_;
     RemotePaddleKeyer paddle_;
     HidPaddleInput    hidPaddle_;
+    LogbookSync       sync_;
+    SyncCoordinator   coordinator_;  // declared after sync_ (holds a reference to it)
 
     // The settings loaded at startup, kept so the shared column layout can be
     // applied to newly-created tabs (mirrors the gtkmm shell).
     IniFile         loadedIni_;
 
+    QtLogPage*        syncedPage_ = nullptr;  // the default log the coordinator drives
+
     QTabWidget*       tabs_    = nullptr;
     QLabel*           status_  = nullptr;
     QLabel*           audioIndicator_ = nullptr;  // live audio-frame counter
+    QLabel*           syncIndicator_  = nullptr;  // peer connection state
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QDockWidget*      rigDock_  = nullptr;

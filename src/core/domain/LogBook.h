@@ -15,6 +15,37 @@ enum class DupeRule {
     Call,             // same call (any band/mode/day)
 };
 
+// One entry in a sync manifest: a stable uuid plus its timestamp. For live
+// records `stamp` is the QSO's updated_at; for tombstones it is the deleted_at.
+struct SyncEntry {
+    std::string uuid;
+    std::string stamp;
+};
+
+// A compact summary of a logbook's syncable state: every live record's
+// (uuid, updated_at) and every tombstone's (uuid, deleted_at). Cheap to build
+// from the in-memory cache.
+struct SyncManifest {
+    std::vector<SyncEntry> records;
+    std::vector<SyncEntry> tombstones;
+};
+
+// Outcome of merging a remote delta, for status reporting.
+struct MergeResult {
+    int inserted = 0;
+    int updated  = 0;
+    int deleted  = 0;
+    int skipped  = 0;
+};
+
+// Outcome of a tracked delete: the deleted row's uuid + tombstone timestamp,
+// so the caller can propagate the deletion to peers.
+struct RemoveResult {
+    bool        ok = false;
+    std::string uuid;
+    std::string deleted_at;
+};
+
 // A logbook backed by a SQLite database. Every add/update/remove is committed
 // immediately, so an open file-backed logbook is always persisted. A freshly
 // constructed LogBook lives in an in-memory database (an unsaved "New" log)
@@ -43,6 +74,10 @@ public:
     long add(const Qso& q);
     bool update(const Qso& q);
     bool remove(long id);
+
+    // Like remove(), but also records a tombstone and reports the deleted row's
+    // uuid + tombstone timestamp so the deletion can be propagated to peers.
+    RemoveResult removeTracked(long id);
 
     // Updates many QSOs in a single transaction with one reload. Returns the
     // number written.
@@ -80,10 +115,45 @@ public:
     const std::string& path() const { return path_; }
     bool isFileBacked() const { return !path_.empty(); }
 
+    // --- Logbook sync ---
+
+    // A summary of this logbook's syncable state (live records + tombstones).
+    SyncManifest syncManifest() const;
+
+    // Full QSO records for the given uuids (those present in the cache).
+    std::vector<Qso> recordsByUuids(const std::vector<std::string>& uuids) const;
+
+    // Merge a remote delta into this logbook in a single transaction with one
+    // reload. Per uuid the newer updated_at wins; a tombstone whose deleted_at
+    // is newer deletes; equal timestamps are broken by node id (higher wins).
+    // Identity is matched by uuid only (the duplicate UI is bypassed). The
+    // incoming records carry their own uuid/updated_at, which are preserved.
+    MergeResult applyRemote(const std::vector<Qso>& records,
+                            const std::vector<SyncEntry>& tombstones,
+                            const std::string& localNodeId,
+                            const std::string& peerNodeId);
+
+    // The per-logbook sync identity, minted+persisted on first use. Two peers
+    // confirm they are syncing the same logbook by comparing this.
+    std::string ensureSyncId();
+    void        setSyncId(const std::string& id);
+
+    // The stored sync_id without minting one (empty if never paired). Used in
+    // the handshake so two fresh logbooks can agree on an id rather than each
+    // minting a distinct one and mismatching.
+    std::string syncId() const { return metaGet("sync_id"); }
+
 private:
     bool createSchema(sqlite3* db);
     void reload();
     void close();
+
+    // Backfills uuid/updated_at on rows created before sync existed, using a
+    // deterministic content hash so independent machines agree. Run on open().
+    void migrateUuids();
+
+    std::string metaGet(const std::string& key) const;
+    void        metaSet(const std::string& key, const std::string& value);
 
     // Inserts every QSO in one transaction, then reloads. Returns the count.
     int insertAll(const std::vector<Qso>& qsos);

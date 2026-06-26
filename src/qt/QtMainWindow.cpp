@@ -9,6 +9,7 @@
 #include "QtMapPanel.h"
 #include "QtSettingsDialog.h"
 #include "QtLogPage.h"
+#include "Uuid.h"
 #include "Statistics.h"
 #include "StrUtil.h"
 #include "TimeUtil.h"
@@ -90,7 +91,9 @@ QtMainWindow::QtMainWindow()
       skimmer_(uiDispatcher_),
       audio_(uiDispatcher_),
       paddle_(uiDispatcher_),
-      hidPaddle_(uiDispatcher_) {
+      hidPaddle_(uiDispatcher_),
+      sync_(uiDispatcher_),
+      coordinator_(sync_) {
     setWindowTitle("xlog2");
     resize(1024, 700);
 
@@ -120,6 +123,8 @@ QtMainWindow::QtMainWindow()
     // with transient status messages.
     audioIndicator_ = new QLabel;
     statusBar()->addPermanentWidget(audioIndicator_);
+    syncIndicator_ = new QLabel;
+    statusBar()->addPermanentWidget(syncIndicator_);
 
     // DX cluster dock: a band-map panel (spots table on top, telnet console
     // below) matching the gtkmm DxClusterPanel.
@@ -288,6 +293,20 @@ QtMainWindow::QtMainWindow()
     hidPaddle_.onDah    = [this](bool p) { paddle_.setDah(p); };
     hidPaddle_.onStatus = [this](const std::string& s) { setStatus(s); };
 
+    // Logbook sync: the transport moves bytes; the coordinator owns the protocol
+    // and is the only thing that touches the synced logbook (on the UI thread).
+    sync_.onConnected = [this] {
+        coordinator_.onConnected();
+        syncIndicator_->setText("⇄ peer");
+    };
+    sync_.onDisconnected = [this] {
+        coordinator_.onDisconnected();
+        syncIndicator_->setText(cfg().syncEnabled ? "⇄ waiting" : QString());
+    };
+    sync_.onMessage = [this](const syncproto::Message& m) { coordinator_.onMessage(m); };
+    sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
+    coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+
     // App-wide key filter for the `[`/`]` paddle simulation (see eventFilter).
     qApp->installEventFilter(this);
 
@@ -302,6 +321,9 @@ QtMainWindow::QtMainWindow()
     if (tabs_->count() == 0)
         openDefaultLog();
     updateWindowTitle();
+    // The first/default tab is the synced logbook.
+    if (auto* p = qobject_cast<QtLogPage*>(tabs_->widget(0)))
+        attachSyncedLog(p);
 
     if (cfg().udpEnabled)
         startUdpListening();
@@ -313,6 +335,8 @@ QtMainWindow::QtMainWindow()
         startAudioStream();
     if (cfg().paddleEnabled)
         startPaddleKeyer();
+    if (cfg().syncEnabled)
+        startSync();
 }
 
 // --- IMainView ---------------------------------------------------------------
@@ -578,6 +602,16 @@ void QtMainWindow::buildMenus() {
         const std::string s = side;
         connect(a, &QAction::triggered, this, [this, s]() { onMapDock(s); });
     }
+
+    auto* sync = menuBar()->addMenu("S&ync");
+    sync->addAction("Sync now", this, &QtMainWindow::onSyncNow);
+    auto* syncEnable = sync->addAction("Enabled");
+    syncEnable->setCheckable(true);
+    syncEnable->setChecked(cfg().syncEnabled);
+    connect(syncEnable, &QAction::toggled, this, [this](bool on) {
+        cfg().syncEnabled = on;
+        startSync();
+    });
 
     menuBar()->addMenu("&Help")->addAction("About xlog2", this, &QtMainWindow::onAbout);
 }
@@ -923,6 +957,45 @@ void QtMainWindow::onClusterConnectToggle() {
     cluster_.connectTo(cfg().dxHost, cfg().dxPort, cfg().dxLogin);
 }
 
+// --- logbook sync ------------------------------------------------------------
+
+void QtMainWindow::attachSyncedLog(QtLogPage* page) {
+    syncedPage_ = page;
+    if (!page) {
+        coordinator_.detach();
+        return;
+    }
+    // Mint a stable node id once (persisted on close); breaks LWW ties.
+    if (cfg().syncNodeId.empty())
+        cfg().syncNodeId = uuidutil::newUuid();
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    coordinator_.attach(&page->presenter());
+    // Propagate local edits/deletes to the peer in real time.
+    page->presenter().onLocalUpsert = [this](const Qso& q) { coordinator_.onLocalUpsert(q); };
+    page->presenter().onLocalDelete = [this](const std::string& u, const std::string& d) {
+        coordinator_.onLocalDelete(u, d);
+    };
+}
+
+void QtMainWindow::startSync() {
+    if (!cfg().syncEnabled) {
+        sync_.stop();
+        syncIndicator_->clear();
+        return;
+    }
+    const auto role = cfg().syncRole == "connect" ? LogbookSync::Role::Connect
+                                                  : LogbookSync::Role::Listen;
+    std::string host = cfg().syncPeerHost;
+    if (host.empty() && !cfg().syncPeerHostAlt.empty())
+        host = cfg().syncPeerHostAlt;
+    syncIndicator_->setText("⇄ waiting");
+    sync_.start(role, host, cfg().syncPort, cfg().syncReconnectMs);
+}
+
+void QtMainWindow::onSyncNow() {
+    coordinator_.syncNow();
+}
+
 // --- settings ----------------------------------------------------------------
 
 void QtMainWindow::onEditSettings() {
@@ -986,6 +1059,16 @@ void QtMainWindow::applySettings(const Settings& s) {
     cfg().skimmerBwNormDb = s.skimmerBwNormDb;
     cfg().skimmerBwNormRefHz = s.skimmerBwNormRefHz;
     cfg().skimmerBwOffsetDb = s.skimmerBwOffsetDb;
+
+    cfg().syncEnabled = s.syncEnabled;
+    cfg().syncRole = s.syncRole;
+    cfg().syncPeerHost = s.syncPeerHost;
+    cfg().syncPeerHostAlt = s.syncPeerHostAlt;
+    cfg().syncPort = s.syncPort;
+    cfg().syncSecret = s.syncSecret;
+    // Re-apply the secret to the live coordinator and (re)start the transport.
+    coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    startSync();
 
     // Re-apply to any running service (rig/DX/LoTW/QRZ take effect on next use).
     applyKeyerConfig();

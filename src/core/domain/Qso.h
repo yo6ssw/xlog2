@@ -37,4 +37,11 @@ struct Qso {
     std::string lotw_sent_date; // YYYY-MM-DD      LOTW_QSLSDATE
     std::string lotw_rcvd;      // "Y"/"N"/""     LOTW_QSL_RCVD ("Y" = confirmed)
     std::string lotw_rcvd_date; // YYYY-MM-DD      LOTW_QSLRDATE
+
+    // Logbook-sync identity & change tracking (internal; not on the entry form,
+    // not user-visible columns). uuid is a stable cross-machine id; updated_at
+    // is an ISO-8601 UTC millisecond timestamp bumped on every write, used for
+    // last-write-wins reconciliation. See LogBook and SyncCoordinator.
+    std::string uuid;
+    std::string updated_at;
 };

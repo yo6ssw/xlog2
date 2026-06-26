@@ -8,6 +8,7 @@
 #include "DxClusterPanel.h"
 #include "GlibDispatcher.h"
 #include "IMainView.h"
+#include "LogbookSync.h"
 #include "Lotw.h"
 #include "MainPresenter.h"
 #include "MapPanel.h"
@@ -17,6 +18,7 @@
 #include "HidPaddleInput.h"
 #include "Rig.h"
 #include "RigPanel.h"
+#include "SyncCoordinator.h"
 #include "Udp.h"
 
 #include <gtkmm.h>
@@ -130,6 +132,11 @@ private:
     void applyMapDock();                        // (re)build the paned
     void applyMapConfig();                      // after load: dock + seed locator
 
+    // --- logbook sync ---
+    void onSyncNow();                  // force an anti-entropy pass with the peer
+    void startSync();                  // start the transport for the configured role
+    void attachSyncedLog(LogPage* page);  // bind the coordinator to the default log
+
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
     void onClusterToggleShow();       // show/hide the panel
@@ -152,6 +159,8 @@ private:
     Gtk::Notebook                   notebook_;
     Gtk::Label                      statusLabel_;
     Gtk::Label                      audioIndicator_;  // live audio-frame counter
+    Gtk::Label                      syncIndicator_;   // peer connection state
+    LogPage*                        syncedPage_ = nullptr;  // the synced default log
     std::map<LogPage*, Gtk::Label*> tabLabels_;
 
     // Marshals worker-thread results from the services onto the UI thread.
@@ -176,10 +185,13 @@ private:
     AudioStreamClient               audio_;
     RemotePaddleKeyer               paddle_;
     HidPaddleInput                  hidPaddle_;
+    LogbookSync                     sync_;
+    SyncCoordinator                 coordinator_;  // after sync_ (holds a reference)
 
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
     Glib::RefPtr<Gio::SimpleAction> audioAction_;
     Glib::RefPtr<Gio::SimpleAction> paddleAction_;
+    Glib::RefPtr<Gio::SimpleAction> syncEnableAction_;
 
     // DX cluster panel + layout. dxPanel_ is a value member (like notebook_) so
     // it survives being reparented between paned slots when the dock side

@@ -90,6 +90,13 @@ private:
     QComboBox* audioRate_ = nullptr;
     QSpinBox*  audioChan_ = nullptr;
     QLineEdit* audioDevice_ = nullptr;
+    // --- sync ---
+    QCheckBox* syncEnabled_ = nullptr;
+    QComboBox* syncRole_ = nullptr;
+    QLineEdit* syncPeerHost_ = nullptr;
+    QLineEdit* syncPeerHostAlt_ = nullptr;
+    QSpinBox*  syncPort_ = nullptr;
+    QLineEdit* syncSecret_ = nullptr;
     // --- skimmer ---
     QSpinBox*  skGate_ = nullptr;
     QSpinBox*  skMinSnr_ = nullptr;
