@@ -123,10 +123,65 @@ bool QrzClient::lookup(const std::string& user, const std::string& password,
         hasResult_ = false;
     }
     busy_.store(true);
+    net_ = {user, password, callsign};
+
+    // 1) Local cache — a fresh hit skips the mesh and the network entirely.
+    if (auto cached = cache_.get(callsign, cacheDays_.load())) {
+        deliverResolved(std::move(*cached), {});
+        return true;
+    }
+
+    // 2) Peers — ask the mesh whether anyone has it cached. The resolver replies
+    //    once (UI thread) with a record or nullopt; on nullopt we hit qrz.com.
+    if (peerResolver_) {
+        peerResolver_(callsign, [this, w = std::weak_ptr<bool>(alive_)](
+                                    std::optional<QrzResult> r) {
+            if (w.expired())
+                return;
+            if (r && !r->call.empty()) {
+                cache_.put(*r);               // remember the peer's answer locally
+                deliverResolved(std::move(*r), {});
+            } else {
+                startNetwork();
+            }
+        });
+        return true;
+    }
+
+    // 3) No peer source — straight to qrz.com.
+    startNetwork();
+    return true;
+}
+
+void QrzClient::startNetwork() {
     if (thread_.joinable())
         thread_.join();
-    thread_ = std::thread(&QrzClient::worker, this, user, password, callsign);
-    return true;
+    thread_ = std::thread(&QrzClient::worker, this, net_.user, net_.password, net_.callsign);
+}
+
+void QrzClient::deliverResolved(QrzResult result, std::string error) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        result_    = std::move(result);
+        error_     = std::move(error);
+        hasResult_ = true;
+    }
+    // Post (never call onResult synchronously): the enrich queue sets its
+    // "active" flag after lookup() returns, and relies on the result arriving
+    // afterwards.
+    ui_.post([this, w = std::weak_ptr<bool>(alive_)]() {
+        if (!w.expired())
+            deliverResult();
+    });
+}
+
+std::optional<QrzResult> QrzClient::cachedLookup(const std::string& callsign) {
+    return cache_.get(callsign, cacheDays_.load());
+}
+
+void QrzClient::cachePut(const QrzResult& result) {
+    if (!result.call.empty())
+        cache_.put(result);
 }
 
 bool QrzClient::doLogin(void* curlV, const std::string& user,
@@ -207,10 +262,9 @@ void QrzClient::worker(std::string user, std::string password, std::string calls
     QrzResult result;
     std::string error;
 
-    // Cache first: a fresh hit skips the network entirely.
-    if (auto cached = cache_.get(callsign, cacheDays_.load())) {
-        result = std::move(*cached);
-    } else if (CURL* curl = curl_easy_init()) {
+    // The cache and peers were already consulted in lookup(); this is the
+    // network fallback.
+    if (CURL* curl = curl_easy_init()) {
         result = fetchOne(curl, user, password, callsign, error);
         curl_easy_cleanup(curl);
         if (error.empty() && !result.call.empty())

@@ -437,4 +437,57 @@ bool decodePush(const std::string& payload, Push& out) {
     return r.ok;
 }
 
+// --- QRZ -------------------------------------------------------------------
+
+namespace {
+void putQrz(std::string& s, const QrzResult& q) {
+    putStr(s, q.call);
+    putStr(s, q.name);
+    putStr(s, q.qth);
+    putStr(s, q.locator);
+    putStr(s, q.country);
+    putU32(s, static_cast<std::uint32_t>(q.fields.size()));
+    for (const auto& [k, v] : q.fields) { putStr(s, k); putStr(s, v); }
+}
+QrzResult getQrz(Reader& r) {
+    QrzResult q;
+    q.call = r.str(); q.name = r.str(); q.qth = r.str();
+    q.locator = r.str(); q.country = r.str();
+    const std::uint32_t n = r.u32();
+    for (std::uint32_t i = 0; i < n && r.ok; ++i) {
+        std::string k = r.str(), v = r.str();
+        q.fields.emplace_back(std::move(k), std::move(v));
+    }
+    return q;
+}
+}  // namespace
+
+std::string encodeQrzQuery(std::uint32_t id, const std::string& callsign) {
+    std::string s;
+    putU32(s, id);
+    putStr(s, callsign);
+    return s;
+}
+
+bool decodeQrzQuery(const std::string& payload, std::uint32_t& id, std::string& callsign) {
+    Reader r{payload.data(), payload.size()};
+    id = r.u32();
+    callsign = r.str();
+    return r.ok;
+}
+
+std::string encodeQrzResponse(std::uint32_t id, const QrzResult& result) {
+    std::string s;
+    putU32(s, id);
+    putQrz(s, result);
+    return s;
+}
+
+bool decodeQrzResponse(const std::string& payload, std::uint32_t& id, QrzResult& out) {
+    Reader r{payload.data(), payload.size()};
+    id = r.u32();
+    out = getQrz(r);
+    return r.ok;
+}
+
 }  // namespace syncproto

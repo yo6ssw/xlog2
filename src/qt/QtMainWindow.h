@@ -9,6 +9,7 @@
 #include "Lotw.h"
 #include "MainPresenter.h"
 #include "Qrz.h"
+#include "QrzPeer.h"
 #include "QtDispatcher.h"
 #include "RemotePaddleKeyer.h"
 #include "HidPaddleInput.h"
@@ -130,6 +131,7 @@ private:
     HidPaddleInput    hidPaddle_;
     LogbookSync       sync_;
     SyncCoordinator   coordinator_;  // declared after sync_ (holds a reference to it)
+    QrzPeer           qrzPeer_;      // after sync_ + qrz_ (holds references to both)
 
     // The settings loaded at startup, kept so the shared column layout can be
     // applied to newly-created tabs (mirrors the gtkmm shell).
