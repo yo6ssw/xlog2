@@ -247,6 +247,32 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         g.attach(*hint, 0, 6, 2, 1);
     }
 
+    // --- Sync ---
+    {
+        auto& g = addPage(*stack, "sync", "Sync");
+        syncEnabled_ = Gtk::make_managed<Gtk::CheckButton>("Synchronise the default logbook with a peer");
+        syncEnabled_->set_active(s.syncEnabled);
+        syncConnectRole_ = Gtk::make_managed<Gtk::CheckButton>("Connect to peer (unchecked = listen)");
+        syncConnectRole_->set_active(s.syncRole == "connect");
+        syncPeerHost_ = entry(s.syncPeerHost);
+        syncPeerHost_->set_placeholder_text("peer host/IP (Connect role)");
+        syncPeerHostAlt_ = entry(s.syncPeerHostAlt);
+        syncPeerHostAlt_->set_placeholder_text("fallback host, e.g. internet (optional)");
+        syncPort_ = entry(std::to_string(s.syncPort));
+        syncSecret_ = entry(s.syncSecret); syncSecret_->set_visibility(false);
+        g.attach(*syncEnabled_, 1, 0);
+        g.attach(*syncConnectRole_, 1, 1);
+        field(g, "Peer host:", *syncPeerHost_, 2);
+        field(g, "Fallback host:", *syncPeerHostAlt_, 3);
+        field(g, "Port:", *syncPort_, 4);
+        field(g, "Shared secret:", *syncSecret_, 5);
+        auto* hint = Gtk::make_managed<Gtk::Label>(
+            "Both machines need the same port + secret. One Listens, the other\n"
+            "Connects. Over the internet, tunnel via WireGuard/SSH (not encrypted).");
+        hint->set_xalign(0.0);
+        g.attach(*hint, 0, 6, 2, 1);
+    }
+
     // --- buttons ---
     auto* buttons = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     buttons->set_spacing(8);
@@ -318,6 +344,13 @@ Settings SettingsDialog::collect() const {
     s.audioSampleRate = toInt(audioRate_, 48000);
     s.audioChannels = toInt(audioChan_, 1);
     s.audioDevice = strOr(audioDevice_, "default");
+
+    s.syncEnabled = syncEnabled_->get_active();
+    s.syncRole = syncConnectRole_->get_active() ? "connect" : "listen";
+    s.syncPeerHost = syncPeerHost_->get_text().raw();
+    s.syncPeerHostAlt = syncPeerHostAlt_->get_text().raw();
+    s.syncPort = toInt(syncPort_, s.syncPort);
+    s.syncSecret = syncSecret_->get_text().raw();
 
     s.skimmerGate = toInt(skGate_, s.skimmerGate);
     s.skimmerMinSnr = toInt(skMinSnr_, s.skimmerMinSnr);

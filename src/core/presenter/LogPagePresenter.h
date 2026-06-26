@@ -33,6 +33,14 @@ public:
     std::function<void()>                    onAbortCw;     // abort keying
     std::function<void(const std::string&)>  onLocator;     // current locator (map "to")
 
+    // --- sync hooks (wired only for the synced logbook) ---
+    // A QSO was added or edited locally: propagate it to peers. Fired with the
+    // stored record (uuid + updated_at populated). Remote-applied merges do NOT
+    // fire these, so there is no echo loop.
+    std::function<void(const Qso&)>                            onLocalUpsert;
+    // A QSO was deleted locally: propagate the tombstone (uuid + deleted_at).
+    std::function<void(const std::string&, const std::string&)> onLocalDelete;
+
     // --- logbook operations (each refreshes the view + emits onChanged) ---
     void newInMemory();
     bool openFile(const std::string& path);
@@ -70,6 +78,20 @@ public:
     void markLotwSent(const std::vector<long>& ids, const std::string& date);
     int  applyLotwConfirmations(const std::vector<Qso>& confirmed);
 
+    // --- sync passthroughs (used by SyncCoordinator on the UI thread) ---
+    SyncManifest syncManifest() const { return logbook_.syncManifest(); }
+    std::vector<Qso> recordsByUuids(const std::vector<std::string>& uuids) const {
+        return logbook_.recordsByUuids(uuids);
+    }
+    // Merge a remote delta and refresh the view. Does NOT fire onLocal* hooks.
+    MergeResult applyRemoteDelta(const std::vector<Qso>& records,
+                                 const std::vector<SyncEntry>& tombstones,
+                                 const std::string& localNodeId,
+                                 const std::string& peerNodeId);
+    std::string syncId() const { return logbook_.syncId(); }
+    std::string ensureSyncId() { return logbook_.ensureSyncId(); }
+    void        setSyncId(const std::string& id) { logbook_.setSyncId(id); }
+
     // --- user events raised by the view ---
     void onCallChanged();           // refresh dupe + DXCC indicators
     void onLocatorChanged();        // locator typed -> push to the map panel
@@ -93,6 +115,7 @@ public:
     void beginSearch() { view_.showSearch(); }
 
 private:
+    void emitUpsert(long id);  // fire onLocalUpsert with the stored row
     void refreshList();
     void clearForm();
     void updateIndicators();        // dupe + DXCC from the current form

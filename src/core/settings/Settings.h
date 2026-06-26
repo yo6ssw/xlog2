@@ -85,6 +85,16 @@ struct Settings {
     int         skimmerBwOffsetDb  = 0;      // constant waterfall trim applied first,
                                              // dB (positive dims, negative brightens)
 
+    // [sync] — peer-to-peer logbook synchronisation (the default logbook)
+    bool        syncEnabled   = false;
+    std::string syncRole      = "listen";       // "listen" | "connect"
+    std::string syncPeerHost;                    // connect target (LAN ip/host)
+    std::string syncPeerHostAlt;                 // fallback host (e.g. internet)
+    int         syncPort      = 7388;
+    std::string syncSecret;                      // pre-shared HMAC key
+    int         syncReconnectMs = 5000;
+    std::string syncNodeId;                      // minted once; tie-breaker
+
     // [dxcluster]
     std::string dxHost;
     int         dxPort = 7300;
