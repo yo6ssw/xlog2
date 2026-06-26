@@ -1,1 +1,2 @@
 usr/share/xlog2/coastline.txt
+usr/lib/udev/rules.d/99-xlog2-paddle.rules

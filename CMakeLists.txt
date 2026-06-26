@@ -135,6 +135,10 @@ endif()
 # Shared runtime data (world-map coastline), installed for both frontends.
 install(FILES data/coastline.txt DESTINATION share/xlog2)
 
+# udev rule granting the local user access to the USB HID CW paddle (hidraw).
+# Lives under /usr/lib (not the multiarch libdir) per udev convention.
+install(FILES packaging/99-xlog2-paddle.rules DESTINATION lib/udev/rules.d)
+
 # ---------------------------------------------------------------------------
 # Qt Widgets backend (sources added in a later phase)
 # ---------------------------------------------------------------------------
