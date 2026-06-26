@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffb14a"/>
+      <stop offset="1" stop-color="#ef8a25"/>
+    </linearGradient>
+  </defs>
+  <!-- app tile -->
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#g)"/>
+  <rect x="6" y="6" width="116" height="58" rx="26" fill="#ffffff" opacity="0.10"/>
+  <!-- Morse: dit dah -->
+  <g fill="#ffffff">
+    <circle cx="40" cy="34" r="5"/>
+    <rect x="52" y="29" width="34" height="10" rx="5"/>
+  </g>
+  <!-- telegraph key -->
+  <g fill="#3a2410">
+    <!-- base -->
+    <rect x="26" y="86" width="76" height="13" rx="6"/>
+    <!-- pivot post -->
+    <rect x="44" y="62" width="9" height="28" rx="3"/>
+  </g>
+  <!-- lever arm -->
+  <line x1="48" y1="64" x2="98" y2="54" stroke="#3a2410" stroke-width="10" stroke-linecap="round"/>
+  <!-- finger knob -->
+  <circle cx="98" cy="54" r="10" fill="#2a1908"/>
+  <circle cx="98" cy="54" r="4" fill="#ffce9b"/>
+</svg>

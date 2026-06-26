@@ -4,6 +4,7 @@ Name=xlog2 (GTK)
 GenericName=Amateur-radio logger
 Comment=Log QSOs, exchange ADIF, control a rig, sync with LoTW
 Exec=xlog2-gtk
+Icon=xlog2-gtk
 Terminal=false
 Categories=HamRadio;Network;Utility;
 Keywords=ham;amateur radio;QSO;logbook;ADIF;hamlib;LoTW;

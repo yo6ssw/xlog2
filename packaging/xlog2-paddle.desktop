@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=xlog2 Paddle
+GenericName=CW practice keyer
+Comment=Iambic paddle practice keyer with click-free sidetone
+Exec=xlog2-paddle
+Icon=xlog2-paddle
+Terminal=false
+Categories=HamRadio;Utility;
+Keywords=ham;amateur radio;CW;morse;paddle;keyer;iambic;sidetone;
