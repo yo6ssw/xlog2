@@ -2,6 +2,7 @@
 
 #include "LogBook.h"  // SyncEntry, SyncManifest
 #include "Qso.h"
+#include "QrzResult.h"
 
 #include <cstdint>
 #include <string>
@@ -29,6 +30,8 @@ enum class Type : std::uint16_t {
     Push       = 8,
     Ping       = 9,
     Pong       = 10,
+    QrzQuery   = 11,  // "does anyone have this callsign cached?"
+    QrzResponse= 12,  // "yes — here is the record"
 };
 
 struct Message {
@@ -98,5 +101,15 @@ std::string encodePushRecord(const Qso& q);
 std::string encodePushTombstone(const SyncEntry& t);
 struct Push { bool isTombstone = false; Qso record; SyncEntry tomb; };
 bool decodePush(const std::string& payload, Push& out);
+
+// Distributed QRZ cache: a node asks the mesh whether anyone has a callsign
+// cached (QrzQuery), and a node that does answers with the record (QrzResponse).
+// The query id is echoed back so the asker can match the reply (it is unique
+// only per-asker; replies are addressed straight back, so cross-node reuse is
+// harmless).
+std::string encodeQrzQuery(std::uint32_t id, const std::string& callsign);
+bool decodeQrzQuery(const std::string& payload, std::uint32_t& id, std::string& callsign);
+std::string encodeQrzResponse(std::uint32_t id, const QrzResult& result);
+bool decodeQrzResponse(const std::string& payload, std::uint32_t& id, QrzResult& out);
 
 }  // namespace syncproto

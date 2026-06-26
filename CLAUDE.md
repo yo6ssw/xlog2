@@ -123,12 +123,21 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   via the neutral `ProcessRunner` (`posix_spawn` + `waitpid`).
 - `QrzClient` (`src/core/services/Qrz.*`) — QRZ.com XML lookups on a worker.
   Backed by a persistent on-disk **`QrzCache`** (`QrzCache.*`, a tiny SQLite file
-  at `$XDG_DATA_HOME/xlog2/qrz-cache.sqlite`): every lookup checks the cache
-  before the network, and stores fresh results; lifetime is `[qrz] cache_days`
-  (default 365, `<=0` disables). Besides single `lookup()`, `fillLocators()` does
-  a cache-first **bulk** locator fetch over many callsigns (Log ▸ Fill missing
-  locators), writing grids back to QSOs that lack one. `QrzResult` lives in its
-  own header so `QrzCache` and `QrzClient` can share it without a cycle.
+  at `$XDG_DATA_HOME/xlog2/qrz-cache.sqlite`); lifetime is `[qrz] cache_days`
+  (default 365, `<=0` disables). A single `lookup()` is a **three-tier** resolve,
+  orchestrated on the UI thread: (1) the local cache; (2) **mesh peers** — via an
+  injected `PeerResolver` (`setPeerResolver`), the sync mesh is asked whether any
+  peer has the call cached, and a hit is stored locally; (3) only on a miss does
+  it hit qrz.com on the worker. All delivery is posted async so `onResult` always
+  fires after `lookup()` returns (the enrich queue relies on that). The peer step
+  is `QrzPeer` (`src/core/presenter/QrzPeer.*`): it answers others' `QrzQuery`
+  from our cache and issues our queries with a timeout (first peer hit wins, else
+  nullopt → network). It rides the same mesh as logbook sync — the shell demuxes
+  `LogbookSync::onMessage` by `Type` (`QrzQuery`/`QrzResponse` → `QrzPeer`, else →
+  `SyncCoordinator`) — and needs no extra auth since mesh membership already
+  implies the shared secret. `fillLocators()` does a cache-first (no peer step)
+  **bulk** locator fetch (Log ▸ Fill missing locators). `QrzResult` lives in its
+  own header so `QrzCache`, `QrzClient` and `SyncProtocol` can share it.
 - `AudioStreamClient` (`src/core/services/Audio.*`) — subscribes to a **cwsd**
   `audio_stream_server` Opus-over-UDP rig-audio stream and plays it back. A
   worker owns a connected UDP socket (woken for stop via a self-pipe), sends a

@@ -54,6 +54,7 @@ add_library(xlog_core STATIC
     src/core/presenter/LogPagePresenter.cpp
     src/core/presenter/MainPresenter.cpp
     src/core/presenter/SyncCoordinator.cpp
+    src/core/presenter/QrzPeer.cpp
     src/core/platform/ProcessRunner.cpp
     src/core/platform/Rtkit.cpp
     src/core/services/Rig.cpp

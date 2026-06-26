@@ -28,7 +28,8 @@ MainWindow::MainWindow()
       paddle_(uiDispatcher_),
       hidPaddle_(uiDispatcher_),
       sync_(uiDispatcher_),
-      coordinator_(sync_) {
+      coordinator_(sync_),
+      qrzPeer_(sync_, qrz_) {
     set_title("xlog2");
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
@@ -150,10 +151,25 @@ MainWindow::MainWindow()
         updateSyncIndicator();
     };
     sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
-        coordinator_.onMessage(p, m);
+        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer.
+        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse)
+            qrzPeer_.onMessage(p, m);
+        else
+            coordinator_.onMessage(p, m);
     };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+
+    // Distributed QRZ cache: consult mesh peers between the local cache and
+    // qrz.com. The timer bounds how long we wait for a peer to answer.
+    qrzPeer_.scheduleOnce = [](int ms, std::function<void()> fn) {
+        Glib::signal_timeout().connect_once(std::move(fn), ms);
+    };
+    qrzPeer_.onStatus = [this](const std::string& s) { setStatus(s); };
+    qrz_.setPeerResolver([this](const std::string& call,
+                                std::function<void(std::optional<QrzResult>)> reply) {
+        qrzPeer_.query(call, std::move(reply));
+    });
 
     auto* statusBox = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
     statusLabel_.set_xalign(0.0);

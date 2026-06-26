@@ -13,6 +13,7 @@
 #include "MainPresenter.h"
 #include "MapPanel.h"
 #include "Qrz.h"
+#include "QrzPeer.h"
 #include "Qso.h"
 #include "RemotePaddleKeyer.h"
 #include "HidPaddleInput.h"
@@ -188,6 +189,7 @@ private:
     HidPaddleInput                  hidPaddle_;
     LogbookSync                     sync_;
     SyncCoordinator                 coordinator_;  // after sync_ (holds a reference)
+    QrzPeer                         qrzPeer_;      // after sync_ + qrz_ (refs both)
 
     Glib::RefPtr<Gio::SimpleAction> udpAction_;
     Glib::RefPtr<Gio::SimpleAction> audioAction_;

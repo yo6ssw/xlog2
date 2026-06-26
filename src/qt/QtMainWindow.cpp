@@ -16,6 +16,7 @@
 #include <QAction>
 #include <QActionGroup>
 #include <QApplication>
+#include <QTimer>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -92,7 +93,8 @@ QtMainWindow::QtMainWindow()
       paddle_(uiDispatcher_),
       hidPaddle_(uiDispatcher_),
       sync_(uiDispatcher_),
-      coordinator_(sync_) {
+      coordinator_(sync_),
+      qrzPeer_(sync_, qrz_) {
     setWindowTitle("xlog2");
     resize(1024, 700);
 
@@ -303,10 +305,25 @@ QtMainWindow::QtMainWindow()
         updateSyncIndicator();
     };
     sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
-        coordinator_.onMessage(p, m);
+        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer.
+        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse)
+            qrzPeer_.onMessage(p, m);
+        else
+            coordinator_.onMessage(p, m);
     };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+
+    // Distributed QRZ cache: consult mesh peers between the local cache and
+    // qrz.com. The timer bounds how long we wait for a peer to answer.
+    qrzPeer_.scheduleOnce = [](int ms, std::function<void()> fn) {
+        QTimer::singleShot(ms, [fn = std::move(fn)]() { fn(); });
+    };
+    qrzPeer_.onStatus = [this](const std::string& s) { setStatus(s); };
+    qrz_.setPeerResolver([this](const std::string& call,
+                                std::function<void(std::optional<QrzResult>)> reply) {
+        qrzPeer_.query(call, std::move(reply));
+    });
 
     // App-wide key filter for the `[`/`]` paddle simulation (see eventFilter).
     qApp->installEventFilter(this);
