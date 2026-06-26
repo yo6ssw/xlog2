@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2fd6ad"/>
+      <stop offset="1" stop-color="#0d8f74"/>
+    </linearGradient>
+  </defs>
+  <!-- app tile -->
+  <rect x="6" y="6" width="116" height="116" rx="26" fill="url(#g)"/>
+  <rect x="6" y="6" width="116" height="58" rx="26" fill="#ffffff" opacity="0.08"/>
+  <!-- logbook -->
+  <rect x="30" y="42" width="68" height="58" rx="7" fill="#ffffff"/>
+  <!-- binder holes -->
+  <g fill="#bfe9dd">
+    <circle cx="40" cy="55" r="3.2"/>
+    <circle cx="40" cy="71" r="3.2"/>
+    <circle cx="40" cy="87" r="3.2"/>
+  </g>
+  <!-- log lines -->
+  <g fill="#a4ddcd">
+    <rect x="52" y="52" width="36" height="6" rx="3"/>
+    <rect x="52" y="68" width="36" height="6" rx="3"/>
+    <rect x="52" y="84" width="24" height="6" rx="3"/>
+  </g>
+  <!-- transmit waves -->
+  <g fill="none" stroke="#ffce4a" stroke-width="6" stroke-linecap="round">
+    <path d="M104 38 A12 12 0 0 0 92 26"/>
+    <path d="M114 38 A22 22 0 0 0 92 16"/>
+  </g>
+  <circle cx="92" cy="38" r="5.5" fill="#ffce4a"/>
+</svg>

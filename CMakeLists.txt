@@ -130,6 +130,8 @@ if(XLOG_BUILD_GTK)
     endif()
     install(TARGETS xlog2-gtk RUNTIME DESTINATION bin)
     install(FILES packaging/xlog2-gtk.desktop DESTINATION share/applications)
+    install(FILES packaging/xlog2-gtk.svg
+            DESTINATION share/icons/hicolor/scalable/apps)
 endif()
 
 # Shared runtime data (world-map coastline), installed for both frontends.
@@ -179,6 +181,8 @@ if(XLOG_BUILD_QT)
     endif()
     install(TARGETS xlog2-qt RUNTIME DESTINATION bin)
     install(FILES packaging/xlog2-qt.desktop DESTINATION share/applications)
+    install(FILES packaging/xlog2-qt.svg
+            DESTINATION share/icons/hicolor/scalable/apps)
 
     # -----------------------------------------------------------------------
     # xlog2-paddle: standalone iambic-paddle practice keyer. Reuses the core
@@ -195,4 +199,7 @@ if(XLOG_BUILD_QT)
         target_compile_options(xlog2-paddle PRIVATE -Wall -Wextra)
     endif()
     install(TARGETS xlog2-paddle RUNTIME DESTINATION bin)
+    install(FILES packaging/xlog2-paddle.desktop DESTINATION share/applications)
+    install(FILES packaging/xlog2-paddle.svg
+            DESTINATION share/icons/hicolor/scalable/apps)
 endif()

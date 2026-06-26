@@ -1,3 +1,6 @@
 usr/bin/xlog2-qt
 usr/bin/xlog2-paddle
 usr/share/applications/xlog2-qt.desktop
+usr/share/applications/xlog2-paddle.desktop
+usr/share/icons/hicolor/scalable/apps/xlog2-qt.svg
+usr/share/icons/hicolor/scalable/apps/xlog2-paddle.svg
