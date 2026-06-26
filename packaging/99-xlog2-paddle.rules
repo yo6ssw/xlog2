@@ -1,0 +1,15 @@
+# xlog2 — local user access to the network CW paddle.
+#
+# The paddle is a Blue Pill / Maple-based USB HID keyer (USB vendor id 0x1eaf)
+# that xlog2 reads as a /dev/hidraw* device. By default hidraw nodes are
+# root-only, so without this rule xlog2 reports "HID paddle: found but
+# permission denied".
+#
+# TAG+="uaccess" hands the device to the active local user via systemd-logind
+# (the modern, no-group-needed path). GROUP/MODE are a fallback for systems
+# without logind — add yourself to the "plugdev" group there.
+#
+# After installing this file:
+#   sudo udevadm control --reload && sudo udevadm trigger
+# then replug the paddle.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1eaf", TAG+="uaccess", GROUP="plugdev", MODE="0660"

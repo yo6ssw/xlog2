@@ -50,4 +50,5 @@ Description: amateur-radio logging program (shared data)
  xlog2 is an amateur-radio logger with GTK 4 and Qt frontends.
  .
  This package provides architecture-independent runtime data shared by both
- frontends — currently the world-map coastline used by the map panel.
+ frontends: the world-map coastline used by the map panel, and the udev rule
+ that grants the local user access to the USB HID CW paddle.
