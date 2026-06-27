@@ -176,6 +176,12 @@ std::vector<std::vector<LatLon>> loadCoastline(const std::string& path) {
 std::string defaultCoastlinePath() {
     const std::string candidates[] = {
         envOr("XDG_DATA_HOME", ".local/share") + "/xlog2/coastline.txt",
+#ifdef XLOG_INSTALL_DATADIR
+        // The prefix this build was actually installed under (e.g. /usr or the
+        // CMake default /usr/local). Honoured first among system locations.
+        std::string(XLOG_INSTALL_DATADIR) + "/coastline.txt",
+#endif
+        "/usr/local/share/xlog2/coastline.txt",
         "/usr/share/xlog2/coastline.txt",
         "data/coastline.txt",
     };

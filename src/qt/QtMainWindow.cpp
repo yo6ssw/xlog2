@@ -11,6 +11,7 @@
 #include "QtLogPage.h"
 #include "Statistics.h"
 #include "StrUtil.h"
+#include "Version.h"
 #include "TimeUtil.h"
 
 #include <QAction>
@@ -95,7 +96,7 @@ QtMainWindow::QtMainWindow()
       sync_(uiDispatcher_),
       coordinator_(sync_),
       qrzPeer_(sync_, qrz_) {
-    setWindowTitle("xlog2");
+    setWindowTitle(QString("xlog2 %1").arg(xlog::kVersion));
     resize(1024, 700);
 
     tabs_ = new QTabWidget;
@@ -472,11 +473,12 @@ void QtMainWindow::updateTabTitle(QtLogPage* page) {
 
 void QtMainWindow::updateWindowTitle() {
     if (auto* p = currentPage())
-        setWindowTitle(QString("xlog2 — %1  (%2 QSOs)")
+        setWindowTitle(QString("xlog2 %1 — %2  (%3 QSOs)")
+                           .arg(xlog::kVersion)
                            .arg(QString::fromStdString(p->title()))
                            .arg(p->qsoCount()));
     else
-        setWindowTitle("xlog2");
+        setWindowTitle(QString("xlog2 %1").arg(xlog::kVersion));
 }
 
 QtLogPage* QtMainWindow::openDefaultLog() {
@@ -774,8 +776,10 @@ void QtMainWindow::onFillLocators() {
 
 void QtMainWindow::onAbout() {
     QMessageBox::about(this, "About xlog2",
-                       "xlog2 — a GTK4/Qt amateur-radio logger.\n"
-                       "Qt Widgets backend.");
+                       QString("xlog2 %1\n\n"
+                               "A GTK4/Qt amateur-radio logger.\n"
+                               "Qt Widgets backend.")
+                           .arg(xlog::kVersion));
 }
 
 // --- UDP ---------------------------------------------------------------------

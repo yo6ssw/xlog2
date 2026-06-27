@@ -1,6 +1,7 @@
 /build/
 /build-*/
 /dist/
+/.claude/
 *.xlog
 *.db
 *.sqlite
