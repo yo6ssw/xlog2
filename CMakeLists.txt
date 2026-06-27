@@ -98,6 +98,17 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(xlog_core PRIVATE -Wall -Wextra)
 endif()
 
+# Tell the core where shared data (coastline, etc.) gets installed, so the
+# runtime search honours the actual CMAKE_INSTALL_PREFIX (e.g. /usr vs the
+# default /usr/local) instead of guessing.
+target_compile_definitions(xlog_core PRIVATE
+    XLOG_INSTALL_DATADIR="${CMAKE_INSTALL_PREFIX}/share/xlog2")
+
+# Bake the project version (single source of truth) into the build; PUBLIC so it
+# reaches the frontends that include Version.h for the title bar / About dialog.
+target_compile_definitions(xlog_core PUBLIC
+    XLOG_VERSION="${PROJECT_VERSION}")
+
 # ---------------------------------------------------------------------------
 # xlog2-audioplay: headless tool that reads the xlog2 config and plays the cwsd
 # rig-audio stream. Toolkit-neutral: links only xlog_core (no GTK/Qt).

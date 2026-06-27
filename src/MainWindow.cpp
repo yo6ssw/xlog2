@@ -5,6 +5,7 @@
 #include "SettingsDialog.h"
 #include "Statistics.h"
 #include "UiUtil.h"
+#include "Version.h"
 
 #include <gdk/gdkkeysyms.h>
 
@@ -30,7 +31,7 @@ MainWindow::MainWindow()
       sync_(uiDispatcher_),
       coordinator_(sync_),
       qrzPeer_(sync_, qrz_) {
-    set_title("xlog2");
+    set_title(Glib::ustring("xlog2 ") + xlog::kVersion);
     set_default_size(1024, 700);
     // Hide (don't destroy) on close so XlogApplication's signal_hide handler
     // can delete us deterministically.
@@ -94,7 +95,8 @@ MainWindow::MainWindow()
     notebook_.signal_switch_page().connect(
         [this](Gtk::Widget* page, guint) {
             if (auto* lp = dynamic_cast<LogPage*>(page)) {
-                set_title("xlog2 — " + lp->title() + "  (" +
+                set_title(Glib::ustring("xlog2 ") + xlog::kVersion + " — " +
+                          lp->title() + "  (" +
                           std::to_string(lp->qsoCount()) + " QSOs)");
                 mapPanel_.setTo(lp->presenter().currentLocator());  // map "to" = new tab
             }
@@ -786,7 +788,7 @@ void MainWindow::onAbout() {
     about->set_modal(true);
     about->set_hide_on_close(true);
     about->set_program_name("xlog2");
-    about->set_version("0.1.0");
+    about->set_version(xlog::kVersion);
     about->set_comments(
         "A GTK4 amateur-radio logging program, in the spirit of xlog.\n"
         "Built with gtkmm-4, C++20, SQLite and Hamlib.");
@@ -1644,7 +1646,11 @@ void MainWindow::setStatus(const std::string& msg) {
 
 void MainWindow::updateTitle() {
     auto* page = currentPage();
-    const Glib::ustring name = page ? page->title() : "xlog2";
-    const std::size_t n = page ? page->qsoCount() : 0;
-    set_title("xlog2 — " + name + "  (" + std::to_string(n) + " QSOs)");
+    const Glib::ustring base = Glib::ustring("xlog2 ") + xlog::kVersion;
+    if (!page) {
+        set_title(base);
+        return;
+    }
+    set_title(base + " — " + page->title() + "  (" +
+              std::to_string(page->qsoCount()) + " QSOs)");
 }
