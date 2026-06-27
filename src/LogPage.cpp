@@ -233,11 +233,15 @@ void LogPage::showRowContextMenu(Gtk::ListItem* li, Gtk::Widget& anchor,
     rowMenu_->set_menu_model(menu);
 
     // Pop up under the pointer: translate the click point (in the cell's
-    // coordinates) into the column view's space, the popover's parent.
-    if (auto p = anchor.compute_point(columnView_, Gdk::Graphene::Point(x, y)))
+    // coordinates) into the column view's space, the popover's parent. Use the
+    // C API (stable since GTK 4.0) rather than Gtk::Widget::compute_point, whose
+    // gtkmm wrapper only exists in 4.12+ (not on our oldest PPA target).
+    graphene_point_t src{static_cast<float>(x), static_cast<float>(y)}, out;
+    if (gtk_widget_compute_point(anchor.gobj(), columnView_.Gtk::Widget::gobj(),
+                                 &src, &out))
         rowMenu_->set_pointing_to(
-            Gdk::Rectangle(static_cast<int>(p->get_x()),
-                           static_cast<int>(p->get_y()), 1, 1));
+            Gdk::Rectangle(static_cast<int>(out.x),
+                           static_cast<int>(out.y), 1, 1));
     rowMenu_->popup();
 }
 
