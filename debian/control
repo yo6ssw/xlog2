@@ -43,6 +43,20 @@ Description: amateur-radio logging program (Qt frontend)
  This package provides the Qt Widgets frontend, xlog2-qt. It reads and writes
  the same logbooks and settings as xlog2-gtk.
 
+Package: xlog2-syncd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: amateur-radio logging program (headless sync/backup peer)
+ xlog2 is an amateur-radio logger with GTK 4 and Qt frontends.
+ .
+ This package provides xlog2-syncd, a GUI-free backup peer: it joins the
+ logbook sync mesh and keeps a full replica of the synced default logbook, and
+ answers the mesh's distributed QRZ-cache queries while proactively enriching
+ its own QRZ cache by looking up newly-synced callsigns on QRZ.com. It is meant
+ to coexist with a GUI frontend on the same or a separate machine, keeping its
+ own data directory and reading only the shared secret and QRZ credentials from
+ the frontend's configuration.
+
 Package: xlog2-data
 Architecture: all
 Depends: ${misc:Depends}
