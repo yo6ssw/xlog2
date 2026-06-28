@@ -4,9 +4,11 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -27,6 +29,8 @@ class XlogRepository private constructor(appContext: Context) {
     private val settings = Settings(appContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dataDir = File(appContext.filesDir, "xlog2").apply { mkdirs() }
+    private val qrzClient = QrzClient()
+    private val qrzCache = QrzCache(appContext)
 
     private val _qsos = MutableStateFlow<List<Qso>>(emptyList())
     val qsos: StateFlow<List<Qso>> = _qsos.asStateFlow()
@@ -44,7 +48,11 @@ class XlogRepository private constructor(appContext: Context) {
     val identityKey: StateFlow<String> = _identityKey.asStateFlow()
 
     val status: SharedFlow<String> get() = core.status
-    val qrz: SharedFlow<QrzResult> get() = core.qrz
+
+    // QRZ resolves in Kotlin (native QRZ is compiled out of the mobile build),
+    // so the repository owns the result stream rather than passing core's through.
+    private val _qrz = MutableSharedFlow<QrzResult>(extraBufferCapacity = 16)
+    val qrz: SharedFlow<QrzResult> = _qrz.asSharedFlow()
 
     val isRunning: Boolean get() = core.isRunning
 
@@ -119,8 +127,27 @@ class XlogRepository private constructor(appContext: Context) {
     suspend fun exportAdif(): String =
         withContext(Dispatchers.IO) { core.exportAdif() }
 
-    // --- QRZ (mesh peers handled in native; qrz.com via Kotlin caller) ----
-    fun lookup(call: String) = scope.launch { core.lookup(call) }
+    // --- QRZ --------------------------------------------------------------
+    // Two-tier resolve, mirroring the desktop tiers available on mobile:
+    // on-device cache → qrz.com (OkHttp). The native QRZ subsystem (cache, mesh
+    // peers, libcurl network) is compiled out of the mobile build, so this is
+    // the whole path; results are published on [qrz] for the UI to consume.
+    fun lookup(call: String) = scope.launch {
+        val c = call.trim().uppercase()
+        if (c.isEmpty()) return@launch
+
+        qrzCache.get(c)?.let { _qrz.emit(it); return@launch }
+
+        val user = settings.qrzUser
+        if (user.isEmpty()) {
+            _qrz.emit(QrzResult(c, error = "Set your QRZ username/password in Settings"))
+            return@launch
+        }
+
+        val r = qrzClient.lookup(c, user, settings.qrzPassword)
+        if (r.error.isEmpty()) qrzCache.put(r)
+        _qrz.emit(r)
+    }
 
     // --- sync trust -------------------------------------------------------
     fun trustPeer(id: String) = scope.launch {

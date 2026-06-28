@@ -15,9 +15,11 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,6 +58,8 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
     val editingId by vm.editingId.collectAsStateWithLifecycle()
     val dxcc by vm.dxcc.collectAsStateWithLifecycle()
     val dupe by vm.dupe.collectAsStateWithLifecycle()
+    val qrzBusy by vm.qrzBusy.collectAsStateWithLifecycle()
+    val qrzStatus by vm.qrzStatus.collectAsStateWithLifecycle()
     val editing = editingId != 0L
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
@@ -92,8 +96,15 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
                     fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace,
                 ),
                 trailingIcon = {
-                    IconButton(onClick = { vm.lookupCall() }) {
-                        Icon(Icons.Default.Search, contentDescription = "QRZ lookup")
+                    if (qrzBusy) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(24.dp),
+                            strokeWidth = 2.dp,
+                        )
+                    } else {
+                        IconButton(onClick = { vm.lookupCall() }) {
+                            Icon(Icons.Default.Search, contentDescription = "QRZ lookup")
+                        }
                     }
                 },
                 keyboardOptions = KeyboardOptions(
@@ -115,6 +126,22 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
                     Text(
                         dxcc,
                         color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+            if (qrzStatus.isNotEmpty()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.Info,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        qrzStatus,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }

@@ -13,8 +13,8 @@ android {
         applicationId = "ro.scripca.xlog2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
 
         ndk {
             // ABIs we vendor deps for (see android/third_party/build-deps.sh).
@@ -78,4 +78,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
     implementation("androidx.navigation:navigation-compose:2.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
+
+    // Direct qrz.com XML-API lookups (the native core is built without libcurl).
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

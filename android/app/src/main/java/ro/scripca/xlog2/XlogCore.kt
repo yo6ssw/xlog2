@@ -203,6 +203,6 @@ data class PeerInfo(
 )
 
 data class QrzResult(
-    val call: String, val name: String, val qth: String,
-    val locator: String, val country: String, val error: String,
+    val call: String, val name: String = "", val qth: String = "",
+    val locator: String = "", val country: String = "", val error: String = "",
 )

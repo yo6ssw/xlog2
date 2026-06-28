@@ -40,18 +40,32 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
     private val _dupe = MutableStateFlow("")
     val dupe: StateFlow<String> = _dupe.asStateFlow()
 
+    /** A QRZ lookup is in flight (drives the spinner on the Call field). */
+    private val _qrzBusy = MutableStateFlow(false)
+    val qrzBusy: StateFlow<Boolean> = _qrzBusy.asStateFlow()
+
+    /** Transient QRZ feedback ("No record", an error, …); "" when idle/cleared. */
+    private val _qrzStatus = MutableStateFlow("")
+    val qrzStatus: StateFlow<String> = _qrzStatus.asStateFlow()
+
     private var indicatorJob: Job? = null
 
     init {
         viewModelScope.launch {
             repo.qrz.collect { r ->
-                // Auto-fill blank name/QTH/grid from a QRZ hit for the current call.
-                if (r.error.isEmpty() && r.call.equals(_form.value.call, ignoreCase = true)) {
+                _qrzBusy.value = false
+                // Ignore stale results for a call we're no longer entering.
+                if (!r.call.equals(_form.value.call, ignoreCase = true)) return@collect
+                if (r.error.isEmpty()) {
+                    // Auto-fill blank name/QTH/grid from the hit.
                     _form.value = _form.value.copy(
                         name = _form.value.name.ifEmpty { r.name },
                         qth = _form.value.qth.ifEmpty { r.qth },
                         locator = _form.value.locator.ifEmpty { r.locator },
                     )
+                    _qrzStatus.value = ""
+                } else {
+                    _qrzStatus.value = r.error
                 }
             }
         }
@@ -83,7 +97,10 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
 
     fun lookupCall() {
         val call = _form.value.call.trim()
-        if (call.isNotEmpty()) repo.lookup(call)
+        if (call.isEmpty()) return
+        _qrzStatus.value = ""
+        _qrzBusy.value = true
+        repo.lookup(call)
     }
 
     /** Begin a new QSO. Date/time = now, RST 599, and freq/band/mode carried
@@ -99,12 +116,16 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
         )
         _dxcc.value = ""
         _dupe.value = ""
+        _qrzStatus.value = ""
+        _qrzBusy.value = false
     }
 
     /** Load a stored QSO into the form for editing. */
     fun startEdit(q: Qso) {
         _editingId.value = q.id
         _form.value = q
+        _qrzStatus.value = ""
+        _qrzBusy.value = false
         onKeyFieldsChanged()
     }
 
