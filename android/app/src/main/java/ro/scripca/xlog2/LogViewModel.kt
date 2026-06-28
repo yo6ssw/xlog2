@@ -86,26 +86,46 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
         if (call.isNotEmpty()) repo.lookup(call)
     }
 
-    fun save() {
-        val f = _form.value
-        if (f.call.isBlank()) return
-        if (_editingId.value != 0L) repo.updateQso(_editingId.value, f)
-        else repo.addQso(f)
-        clear()
+    /** Begin a new QSO. Date/time = now, RST 599, and freq/band/mode carried
+     *  over from the most recent logged QSO (the repo list is ascending, so the
+     *  newest is last). Blank when the logbook is empty. */
+    fun startAdd() {
+        val last = repo.qsos.value.lastOrNull()
+        _editingId.value = 0L
+        _form.value = freshForm().copy(
+            freq = last?.freq ?: "",
+            band = last?.band ?: "",
+            mode = last?.mode ?: "",
+        )
+        _dxcc.value = ""
+        _dupe.value = ""
     }
 
-    fun loadForEdit(q: Qso) {
+    /** Load a stored QSO into the form for editing. */
+    fun startEdit(q: Qso) {
         _editingId.value = q.id
         _form.value = q
         onKeyFieldsChanged()
     }
 
-    fun delete() {
-        if (_editingId.value != 0L) repo.deleteQso(_editingId.value)
-        clear()
+    /** Persist the form. Returns false (no-op) when there's no callsign, so the
+     *  entry screen can stay open; true once added/updated. */
+    fun save(): Boolean {
+        val f = _form.value
+        if (f.call.isBlank()) return false
+        if (_editingId.value != 0L) repo.updateQso(_editingId.value, f)
+        else repo.addQso(f)
+        cancel()
+        return true
     }
 
-    fun clear() {
+    /** Delete a specific QSO from the list (propagates a tombstone). */
+    fun delete(q: Qso) {
+        if (q.id != 0L) repo.deleteQso(q.id)
+    }
+
+    /** Discard the in-progress add/edit and reset the form. */
+    fun cancel() {
         _editingId.value = 0L
         _form.value = freshForm()
         _dxcc.value = ""
