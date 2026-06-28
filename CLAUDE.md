@@ -290,6 +290,25 @@ password is plain text). gtkmm saves from `MainWindow::onCloseRequest`; Qt from
   after the window has its laid-out, possibly maximized, size); F1–F9 are
   window-wide `QShortcut`s routed to the active tab.
 
+**Headless tools** (`src/tools/`, each its own `add_executable` linking only
+`xlog_core` — no toolkit). They reuse the same neutral core the frontends do,
+with an `IUiDispatcher` that isn't a GUI loop. `xlog2-audioplay` plays the cwsd
+rig-audio stream; `xlog2-paddle` is a standalone practice keyer (links Qt for its
+small window — the exception); **`xlog2-syncd`** is a GUI-free **backup peer**: it
+joins the sync mesh and keeps a full replica of the synced logbook *and* answers
+the mesh's distributed QRZ-cache queries, proactively enriching its
+`qrz-cache.sqlite` by looking up newly-synced callsigns on qrz.com (the QRZ
+protocol is pull-only, so a passive node's cache would stay empty). It wires the
+exact same pieces `MainWindow` does (`LogbookSync` + `SyncCoordinator` +
+`LogPagePresenter` against a no-op `ILogPageView`, `QrzClient` + `QrzPeer`) behind
+a `MainLoopDispatcher` (a thread-safe queue drained by the main thread, *not* a
+run-inline dispatcher — sync callbacks re-enter the transport and must not run on
+the mesh's IO thread). It is meant to coexist with a GUI on the same machine, so
+it keeps its **own** data dir (`--data-dir`, default `$XDG_DATA_HOME/xlog2-syncd`:
+`default.xlog`, `qrz-cache.sqlite`, persisted `node_id`) and an **ephemeral mesh
+port**, reading only the shared secret + QRZ credentials from the GUI's
+`layout.ini` (`--config`).
+
 ## Versioning, packaging & releasing
 
 SemVer; the version's single source of truth is `project(VERSION ...)` in
