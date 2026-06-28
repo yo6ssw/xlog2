@@ -12,8 +12,9 @@
 #   systemctl --user enable --now xlog2-syncd.service
 #   journalctl --user -u xlog2-syncd -f      # follow its log
 #
-# On a headless backup box with no interactive session, allow the user manager
-# to run without a login (otherwise the service stops at logout):
+# To run WITHOUT a logged-in session (headless box, or so it survives logout and
+# starts at boot), enable lingering for the user once — this starts the user
+# manager at boot and brings up its enabled services with no login required:
 #   sudo loginctl enable-linger <user>
 
 [Unit]
@@ -31,13 +32,11 @@ RestartSec=5
 # Logs go to the journal (the daemon writes to stdout/stderr).
 SyslogIdentifier=xlog2-syncd
 
-# Modest hardening (safe for a user unit).
+# Only hardening valid under an unprivileged *user* manager. The Protect*/
+# Restrict* sandboxing options are deliberately omitted: they manipulate the
+# capability bounding set / mount namespaces, which a user manager lacks the
+# privilege for, and would abort the service with 218/CAPABILITIES.
 NoNewPrivileges=true
-ProtectControlGroups=true
-ProtectKernelModules=true
-ProtectKernelTunables=true
-RestrictNamespaces=true
-RestrictRealtime=true
 
 [Install]
 WantedBy=default.target
