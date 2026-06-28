@@ -1,1 +1,2 @@
 usr/bin/xlog2-syncd
+usr/lib/systemd/user/xlog2-syncd.service
