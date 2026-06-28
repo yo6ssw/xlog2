@@ -157,6 +157,9 @@ void usage(const char* argv0) {
         << "  --config PATH    layout.ini to read (default: " << defaultConfigPath() << ")\n"
         << "  --data-dir PATH  where to keep this peer's default.xlog,\n"
         << "                   qrz-cache.sqlite and node_id (default: " << defaultDataDir() << ")\n"
+        << "  --port N         fixed TCP listen port so other nodes can dial this peer\n"
+        << "                   as a static [sync] peer_host (default: 0 = ephemeral,\n"
+        << "                   discoverable only via multicast)\n"
         << "  --help           show this help\n";
 }
 
@@ -165,6 +168,7 @@ void usage(const char* argv0) {
 int main(int argc, char* argv[]) {
     std::string configPath = defaultConfigPath();
     std::string dataDir     = defaultDataDir();
+    int         listenPort  = 0;  // 0 = ephemeral; only multicast-discoverable
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
@@ -177,6 +181,14 @@ int main(int argc, char* argv[]) {
         };
         if (a == "--config")        configPath = next("--config");
         else if (a == "--data-dir") dataDir = next("--data-dir");
+        else if (a == "--port") {
+            const std::string v = next("--port");
+            listenPort = std::atoi(v.c_str());
+            if (listenPort < 0 || listenPort > 65535) {
+                std::cerr << "xlog2-syncd: --port must be 0..65535\n";
+                return 2;
+            }
+        }
         else if (a == "--help" || a == "-h") { usage(argv[0]); return 0; }
         else { std::cerr << "xlog2-syncd: unknown option '" << a << "'\n"; usage(argv[0]); return 2; }
     }
@@ -270,11 +282,12 @@ int main(int argc, char* argv[]) {
         pumpEnrich();
     };
 
-    // --- start the mesh (own node id, ephemeral port; multicast discovery) ---
+    // --- start the mesh (own node id; multicast discovery + optional fixed port) ---
     LogbookSync::Config cfg;
     cfg.nodeId = readFileTrimmed(nodeIdPath);   // empty => the mesh mints one
     cfg.group  = syncproto::meshGroup(s.syncSecret);
-    cfg.port   = 0;                             // ephemeral — avoid the GUI's port
+    cfg.port   = listenPort;                    // 0 = ephemeral (avoid the GUI's port);
+                                                // --port pins it so peers can statically dial us
     for (const std::string& h : {s.syncPeerHost, s.syncPeerHostAlt})
         if (auto pr = LogbookSync::parsePeer(h, s.syncPort); !pr.first.empty())
             cfg.staticPeers.push_back(pr);
@@ -297,6 +310,7 @@ int main(int argc, char* argv[]) {
 
     std::cout << "xlog2-syncd: node " << sync.localId()
               << "  group " << cfg.group
+              << "  port " << (cfg.port ? std::to_string(cfg.port) : "ephemeral")
               << "  logbook " << logPath << "\n";
     if (const std::string key = sync.identityKey(); !key.empty())
         std::cout << "xlog2-syncd: identity key " << key
