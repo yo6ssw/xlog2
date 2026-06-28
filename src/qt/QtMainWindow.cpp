@@ -19,8 +19,13 @@
 #include <QApplication>
 #include <QTimer>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QGuiApplication>
+#include <QHBoxLayout>
+#include <QPushButton>
+#include <QScrollArea>
 #include <QShowEvent>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -306,14 +311,21 @@ QtMainWindow::QtMainWindow()
         updateSyncIndicator();
     };
     sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
-        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer.
-        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse)
-            qrzPeer_.onMessage(p, m);
-        else
+        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer — but
+        // only for peers we trust, so an untrusted node can't mine our QRZ cache.
+        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse) {
+            if (coordinator_.isTrusted(p))
+                qrzPeer_.onMessage(p, m);
+        } else {
             coordinator_.onMessage(p, m);
+        }
     };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+    coordinator_.onPeersChanged = [this] {
+        updateSyncIndicator();
+        if (trustedPeersDialog_) refreshTrustedPeersDialog();
+    };
 
     // Distributed QRZ cache: consult mesh peers between the local cache and
     // qrz.com. The timer bounds how long we wait for a peer to answer.
@@ -632,6 +644,7 @@ void QtMainWindow::buildMenus() {
         cfg().syncEnabled = on;
         startSync();
     });
+    sync->addAction("Trusted peers…", this, &QtMainWindow::onManageTrustedPeers);
 
     menuBar()->addMenu("&Help")->addAction("About xlog2", this, &QtMainWindow::onAbout);
 }
@@ -1018,17 +1031,160 @@ void QtMainWindow::startSync() {
     for (const std::string& h : {cfg().syncPeerHost, cfg().syncPeerHostAlt})
         if (auto p = LogbookSync::parsePeer(h, cfg().syncPort); !p.first.empty())
             c.staticPeers.push_back(p);
+    // A shared secret secures the mesh (PSK) and enables a persistent identity
+    // (node id derives from the key), which in turn powers per-node trust.
+    c.psk = cfg().syncSecret;
+    if (!cfg().syncSecret.empty()) {
+        c.identityFile    = envPath("XDG_DATA_HOME", ".local/share") + "/node_identity";
+        c.requireIdentity = cfg().syncRequireIdentity;
+        c.nodeName        = cfg().syncNodeName;  // advisory; may be empty
+    }
     sync_.start(c);
     // Persist the resolved mesh id so the LWW tiebreak is stable across restarts,
     // and key the coordinator off the same id. (Empty if the mesh failed to start.)
     if (!sync_.localId().empty())
         cfg().syncNodeId = sync_.localId();
     coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    applySyncTrust();
     updateSyncIndicator();
 }
 
 void QtMainWindow::onSyncNow() {
     coordinator_.syncNow();
+}
+
+void QtMainWindow::applySyncTrust() {
+    // Trust is enforced only on a secured (identity-bearing) mesh.
+    std::vector<std::string> ids;
+    ids.reserve(cfg().syncTrustedPeers.size());
+    for (const auto& tp : cfg().syncTrustedPeers)
+        ids.push_back(tp.id);
+    coordinator_.setTrust(/*enforce=*/!cfg().syncSecret.empty(), ids);
+}
+
+void QtMainWindow::refreshTrustedPeersDialog() {
+    if (!trustedPeersList_)
+        return;
+    // Replace the list widget's layout wholesale.
+    if (auto* old = trustedPeersList_->layout())
+        delete old;
+    auto* col = new QVBoxLayout(trustedPeersList_);
+    col->setContentsMargins(0, 0, 0, 0);
+    col->setSpacing(6);
+
+    auto rows = coordinator_.peerSnapshot();
+    if (rows.empty()) {
+        auto* empty = new QLabel(
+            "No peers discovered yet. Peers appear here once they join the mesh.");
+        empty->setWordWrap(true);
+        col->addWidget(empty);
+        col->addStretch();
+        return;
+    }
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        if (a.trusted != b.trusted) return a.trusted > b.trusted;
+        if (a.online  != b.online)  return a.online  > b.online;
+        return a.id < b.id;
+    });
+
+    for (const auto& r : rows) {
+        auto* row = new QWidget;
+        auto* h = new QHBoxLayout(row);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->setSpacing(8);
+        h->addWidget(new QLabel(QString::fromUtf8(r.online ? "●" : "○")));
+
+        const std::string shortId = r.id.size() > 12 ? r.id.substr(0, 12) + "…" : r.id;
+        std::string text = r.name.empty() ? shortId : (r.name + "  (" + shortId + ")");
+        if (r.trusted && r.ready) text += "  — syncing";
+        else if (r.trusted)       text += "  — trusted";
+        auto* lbl = new QLabel(QString::fromStdString(text));
+        h->addWidget(lbl, /*stretch=*/1);
+
+        const std::string id = r.id, name = r.name;
+        if (r.trusted) {
+            auto* btn = new QPushButton("Revoke");
+            connect(btn, &QPushButton::clicked, this, [this, id]() {
+                auto& v = cfg().syncTrustedPeers;
+                v.erase(std::remove_if(v.begin(), v.end(),
+                                       [&](const auto& tp) { return tp.id == id; }),
+                        v.end());
+                coordinator_.revokePeer(id);
+                saveSettings();
+                refreshTrustedPeersDialog();
+            });
+            h->addWidget(btn);
+        } else {
+            auto* btn = new QPushButton("Trust");
+            connect(btn, &QPushButton::clicked, this, [this, id, name]() {
+                cfg().syncTrustedPeers.push_back({id, name});
+                coordinator_.trustPeer(id);
+                saveSettings();
+                refreshTrustedPeersDialog();
+            });
+            h->addWidget(btn);
+        }
+        col->addWidget(row);
+    }
+    col->addStretch();
+}
+
+void QtMainWindow::onManageTrustedPeers() {
+    if (trustedPeersDialog_) {  // already open — raise it
+        trustedPeersDialog_->raise();
+        trustedPeersDialog_->activateWindow();
+        return;
+    }
+    auto* dlg = new QDialog(this);
+    dlg->setWindowTitle("Trusted peers");
+    dlg->resize(460, 420);
+    dlg->setAttribute(Qt::WA_DeleteOnClose);
+    auto* v = new QVBoxLayout(dlg);
+
+    // This node's identity key (to share into a peer's allowlist).
+    const std::string key = sync_.identityKey();
+    auto* keyRow = new QHBoxLayout;
+    keyRow->addWidget(new QLabel("This node's key:"));
+    auto* keyEdit = new QLineEdit(QString::fromStdString(
+        key.empty() ? "(identity disabled — set a shared secret)" : key));
+    keyEdit->setReadOnly(true);
+    keyRow->addWidget(keyEdit, 1);
+    auto* copy = new QPushButton("Copy");
+    copy->setEnabled(!key.empty());
+    connect(copy, &QPushButton::clicked, this,
+            [key]() { QGuiApplication::clipboard()->setText(QString::fromStdString(key)); });
+    keyRow->addWidget(copy);
+    v->addLayout(keyRow);
+
+    auto* hint = new QLabel(
+        "Trusted peers exchange logbook data. Newly-discovered peers connect but "
+        "stay on hold until you trust them.");
+    hint->setWordWrap(true);
+    v->addWidget(hint);
+
+    auto* scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    trustedPeersList_ = new QWidget;
+    scroll->setWidget(trustedPeersList_);
+    v->addWidget(scroll, 1);
+
+    auto* buttons = new QHBoxLayout;
+    buttons->addStretch();
+    auto* refresh = new QPushButton("Refresh");
+    connect(refresh, &QPushButton::clicked, this, [this]() { refreshTrustedPeersDialog(); });
+    auto* close = new QPushButton("Close");
+    connect(close, &QPushButton::clicked, dlg, &QDialog::close);
+    buttons->addWidget(refresh);
+    buttons->addWidget(close);
+    v->addLayout(buttons);
+
+    trustedPeersDialog_ = dlg;
+    connect(dlg, &QObject::destroyed, this, [this]() {
+        trustedPeersDialog_ = nullptr;
+        trustedPeersList_   = nullptr;
+    });
+    refreshTrustedPeersDialog();
+    dlg->show();
 }
 
 // --- settings ----------------------------------------------------------------

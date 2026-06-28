@@ -138,6 +138,9 @@ private:
     void startSync();                  // (re)start the mesh transport
     void attachSyncedLog(LogPage* page);  // bind the coordinator to the default log
     void updateSyncIndicator();           // status-bar peer count
+    void applySyncTrust();                // push the settings allowlist into the coordinator
+    void onManageTrustedPeers();          // open the live trusted-peers dialog
+    void refreshTrustedPeersDialog();     // repopulate the open dialog from a snapshot
 
     // --- DX cluster ---
     void onClusterConnect();          // connect/disconnect toggle
@@ -195,6 +198,11 @@ private:
     Glib::RefPtr<Gio::SimpleAction> audioAction_;
     Glib::RefPtr<Gio::SimpleAction> paddleAction_;
     Glib::RefPtr<Gio::SimpleAction> syncEnableAction_;
+
+    // Live trusted-peers dialog (heap window; null when closed). trustedPeersBox_
+    // is the row container repopulated on every onPeersChanged.
+    Gtk::Window* trustedPeersDialog_ = nullptr;
+    Gtk::Box*    trustedPeersBox_    = nullptr;
 
     // DX cluster panel + layout. dxPanel_ is a value member (like notebook_) so
     // it survives being reparented between paned slots when the dock side

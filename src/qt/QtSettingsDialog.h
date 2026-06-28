@@ -96,6 +96,8 @@ private:
     QSpinBox*  syncPort_ = nullptr;
     QLineEdit* syncPeerHost_ = nullptr;
     QLineEdit* syncPeerHostAlt_ = nullptr;
+    QLineEdit* syncNodeName_ = nullptr;
+    QCheckBox* syncRequireIdentity_ = nullptr;
     // --- skimmer ---
     QSpinBox*  skGate_ = nullptr;
     QSpinBox*  skMinSnr_ = nullptr;

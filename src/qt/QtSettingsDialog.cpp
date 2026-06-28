@@ -189,16 +189,23 @@ QtSettingsDialog::QtSettingsDialog(const Settings& s, QWidget* parent)
         syncPeerHost_->setPlaceholderText("optional WAN peer host (internet)");
         syncPeerHostAlt_ = new QLineEdit(qstr(s.syncPeerHostAlt));
         syncPeerHostAlt_->setPlaceholderText("optional second WAN peer host");
+        syncNodeName_ = new QLineEdit(qstr(s.syncNodeName));
+        syncNodeName_->setPlaceholderText("optional display name for this node");
+        syncRequireIdentity_ = new QCheckBox("Reject peers without a verified identity");
+        syncRequireIdentity_->setChecked(s.syncRequireIdentity);
         f->addRow(syncEnabled_);
         f->addRow("Shared secret:", syncSecret_);
         f->addRow("Listen port:", syncPort_);
         f->addRow("WAN peer:", syncPeerHost_);
         f->addRow("WAN peer 2:", syncPeerHostAlt_);
+        f->addRow("Node name:", syncNodeName_);
+        f->addRow(syncRequireIdentity_);
         f->addRow(new QLabel("Peers on the same LAN find each other automatically — no\n"
-                             "roles to set. Give every machine the same secret (it both\n"
-                             "authenticates and picks the mesh). WAN peers are optional\n"
-                             "host entries for syncing over the internet (open the port;\n"
-                             "data is not encrypted — tunnel via WireGuard/SSH)."));
+                             "roles to set. Give every machine the same secret: it picks\n"
+                             "the mesh and (via libsodium) encrypts and authenticates every\n"
+                             "peer link, and each node gets a self-certifying identity.\n"
+                             "Choose who to sync with under Sync ▸ Trusted peers. WAN peers\n"
+                             "are optional hosts for syncing over the internet."));
     }
 
     // --- Skimmer ---
@@ -291,6 +298,8 @@ Settings QtSettingsDialog::result() const {
     s.syncPeerHostAlt = sstr(syncPeerHostAlt_);
     s.syncPort = syncPort_->value();
     s.syncSecret = sstr(syncSecret_);
+    s.syncNodeName = sstr(syncNodeName_);
+    s.syncRequireIdentity = syncRequireIdentity_->isChecked();
 
     s.skimmerGate = skGate_->value();
     s.skimmerMinSnr = skMinSnr_->value();

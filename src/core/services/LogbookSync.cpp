@@ -47,6 +47,22 @@ void LogbookSync::start(const Config& cfg) {
         if (!host.empty() && port > 0)
             mc.staticPeers.push_back({host, static_cast<uint16_t>(port)});
 
+    // Transport security: the shared secret doubles as the mesh PSK (encryption
+    // + authentication). With an identity file, each node gets a persistent
+    // self-certifying Ed25519 key — its id then provably hashes from that key,
+    // so peers can't impersonate one another. The trust allowlist is enforced
+    // one layer up (SyncCoordinator), so we leave mesh trustedKeys empty: every
+    // valid identity connects and is surfaced for the operator to trust.
+    if (!cfg.psk.empty()) {
+        mc.psk = cfg.psk;
+        if (!cfg.identityFile.empty()) {
+            mc.identityFile   = cfg.identityFile;
+            mc.requireIdentity = cfg.requireIdentity;
+            if (!cfg.nodeName.empty())
+                mc.nodeName = cfg.nodeName;
+        }
+    }
+
     auto mesh = std::make_unique<mm::mesh>(std::move(mc));
 
     mm::callbacks cb;
@@ -108,6 +124,17 @@ void LogbookSync::stop() {
 
 int LogbookSync::memberCount() const {
     return mesh_ ? static_cast<int>(mesh_->members().size()) : 0;
+}
+
+std::string LogbookSync::identityKey() const {
+    return mesh_ ? mesh_->identity_public_key() : std::string{};
+}
+
+std::string LogbookSync::peerName(const PeerKey& peer) const {
+    if (!mesh_)
+        return {};
+    auto pid = mm::peer_id::from_string(peer);
+    return pid ? mesh_->node_name(*pid) : std::string{};
 }
 
 void LogbookSync::broadcast(const syncproto::Message& m) {

@@ -13,6 +13,65 @@ void SyncCoordinator::configure(const std::string& nodeId,
     secret_ = secret;
 }
 
+void SyncCoordinator::setTrust(bool enforce,
+                               const std::vector<std::string>& trustedIds) {
+    trustEnforced_ = enforce;
+    trusted_.clear();
+    for (const auto& id : trustedIds)
+        if (!id.empty()) trusted_.insert(id);
+}
+
+bool SyncCoordinator::isTrusted(const PeerKey& peer) const {
+    return !trustEnforced_ || trusted_.count(peer) > 0;
+}
+
+void SyncCoordinator::trustPeer(const PeerKey& peer) {
+    trusted_.insert(peer);
+    // If the peer is already connected, drop its "untrusted" hold and start the
+    // handshake from scratch so anti-entropy runs.
+    auto it = peers_.find(peer);
+    if (it != peers_.end()) {
+        it->second = PeerState{};
+        if (synced_) sendHello(peer);
+    }
+    peersChanged();
+}
+
+void SyncCoordinator::revokePeer(const PeerKey& peer) {
+    trusted_.erase(peer);
+    auto it = peers_.find(peer);
+    if (it != peers_.end()) {
+        // Keep the entry (still a mesh member) but stop all data exchange.
+        it->second.ready     = false;
+        it->second.refused   = true;
+        it->second.untrusted = true;
+    }
+    peersChanged();
+}
+
+std::vector<SyncCoordinator::PeerInfo> SyncCoordinator::peerSnapshot() const {
+    std::vector<PeerInfo> out;
+    // Online peers (reachable mesh members), trusted or not.
+    for (const auto& [id, st] : peers_) {
+        PeerInfo pi;
+        pi.id      = id;
+        pi.name    = transport_.peerName(id);
+        pi.trusted = trusted_.count(id) > 0;
+        pi.online  = true;
+        pi.ready   = st.ready;
+        out.push_back(std::move(pi));
+    }
+    // Trusted peers that aren't currently connected.
+    for (const auto& id : trusted_) {
+        if (peers_.count(id)) continue;
+        PeerInfo pi;
+        pi.id      = id;
+        pi.trusted = true;
+        out.push_back(std::move(pi));
+    }
+    return out;
+}
+
 void SyncCoordinator::attach(LogPagePresenter* synced) {
     synced_ = synced;
     if (!synced)
@@ -29,12 +88,21 @@ int SyncCoordinator::readyPeerCount() const {
 void SyncCoordinator::onPeerUp(const PeerKey& peer) {
     if (!synced_)
         return;
-    peers_[peer] = PeerState{};  // fresh handshake state
+    PeerState& st = (peers_[peer] = PeerState{});  // fresh handshake state
+    if (!isTrusted(peer)) {
+        // Connected and identity-verified by the mesh, but not in our allowlist:
+        // hold off all logbook traffic and surface it for the operator to trust.
+        st.untrusted = true;
+        peersChanged();
+        return;
+    }
     sendHello(peer);
+    peersChanged();
 }
 
 void SyncCoordinator::onPeerDown(const PeerKey& peer) {
     peers_.erase(peer);
+    peersChanged();
 }
 
 void SyncCoordinator::sendHello(const PeerKey& peer) {
@@ -49,6 +117,13 @@ void SyncCoordinator::sendHello(const PeerKey& peer) {
 void SyncCoordinator::onMessage(const PeerKey& peer, const Message& m) {
     if (!synced_)
         return;
+    // Untrusted peers may still send us protocol frames (they may trust us);
+    // ignore everything until the operator admits them.
+    if (!isTrusted(peer)) {
+        PeerState& st = peers_[peer];
+        if (!st.untrusted) { st.untrusted = true; peersChanged(); }
+        return;
+    }
     switch (m.type) {
         case Type::Hello:      handleHello(peer, m);      break;
         case Type::HelloAck:   handleHelloAck(peer, m);   break;
@@ -66,6 +141,7 @@ void SyncCoordinator::maybeReady(const PeerKey& peer, PeerState& st) {
     if (st.peerHello && st.ackOk && !st.ready) {
         st.ready = true;
         status("Sync: connected to a peer.");
+        peersChanged();
         if (initiator(st)) beginAntiEntropy(peer);
     }
 }

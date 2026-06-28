@@ -24,9 +24,13 @@ pkg_check_modules(OPUS   REQUIRED IMPORTED_TARGET opus)   # rig audio stream cli
 pkg_check_modules(PIPEWIRE REQUIRED IMPORTED_TARGET libpipewire-0.3)  # rig audio playback + sidetone
 pkg_check_modules(DBUS   REQUIRED IMPORTED_TARGET dbus-1) # RealtimeKit RT scheduling for the keyer
 
-# multimaster: zero-dependency LAN gossip mesh (git submodule). Powers the
-# symmetric, auto-discovering logbook-sync transport. Static lib, links only
-# pthreads; we don't want its tests/examples in our build.
+# multimaster: LAN gossip mesh (git submodule). Powers the symmetric,
+# auto-discovering logbook-sync transport. Static lib; we don't want its
+# tests/examples in our build. MULTIMASTER_ENABLE_CRYPTO is left ON (the
+# default): the mesh links libsodium and, when sync is configured with a shared
+# secret, the secret becomes the mesh PSK — peer links are encrypted +
+# authenticated (X25519 + ChaCha20-Poly1305) and nodes carry self-certifying
+# Ed25519 identities. See docs/logbook-sync.md.
 set(MULTIMASTER_BUILD_TESTS    OFF CACHE BOOL "" FORCE)
 set(MULTIMASTER_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/multimaster EXCLUDE_FROM_ALL)
