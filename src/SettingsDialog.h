@@ -80,6 +80,8 @@ private:
     Gtk::Entry* syncPort_ = nullptr;
     Gtk::Entry* syncPeerHost_ = nullptr;
     Gtk::Entry* syncPeerHostAlt_ = nullptr;
+    Gtk::Entry* syncNodeName_ = nullptr;
+    Gtk::CheckButton* syncRequireIdentity_ = nullptr;
     // --- skimmer ---
     Gtk::Entry* skGate_ = nullptr;
     Gtk::Entry* skMinSnr_ = nullptr;

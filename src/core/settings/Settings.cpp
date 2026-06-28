@@ -1,5 +1,45 @@
 #include "Settings.h"
 
+namespace {
+
+// Trusted peers serialise to one ini value: entries split on \x1e (record sep),
+// id and label split on \x1f (unit sep) — both control chars that can't occur
+// in a hex mesh id or a typed label.
+constexpr char kRecSep = '\x1e';
+constexpr char kFldSep = '\x1f';
+
+std::vector<Settings::SyncTrustedPeer> parseTrustedPeers(const std::string& v) {
+    std::vector<Settings::SyncTrustedPeer> out;
+    std::size_t pos = 0;
+    while (pos < v.size()) {
+        std::size_t end = v.find(kRecSep, pos);
+        if (end == std::string::npos) end = v.size();
+        const std::string rec = v.substr(pos, end - pos);
+        pos = end + 1;
+        if (rec.empty()) continue;
+        const std::size_t f = rec.find(kFldSep);
+        Settings::SyncTrustedPeer tp;
+        tp.id    = rec.substr(0, f);
+        tp.label = (f == std::string::npos) ? "" : rec.substr(f + 1);
+        if (!tp.id.empty()) out.push_back(std::move(tp));
+    }
+    return out;
+}
+
+std::string serialiseTrustedPeers(const std::vector<Settings::SyncTrustedPeer>& v) {
+    std::string out;
+    for (const auto& tp : v) {
+        if (tp.id.empty()) continue;
+        if (!out.empty()) out += kRecSep;
+        out += tp.id;
+        out += kFldSep;
+        out += tp.label;
+    }
+    return out;
+}
+
+}  // namespace
+
 Settings Settings::load(const IniFile& ini) {
     Settings s;
 
@@ -72,6 +112,9 @@ Settings Settings::load(const IniFile& ini) {
     s.syncPeerHost    = ini.getString("sync", "peer_host", s.syncPeerHost);
     s.syncPeerHostAlt = ini.getString("sync", "peer_host_alt", s.syncPeerHostAlt);
     s.syncNodeId      = ini.getString("sync", "node_id", s.syncNodeId);
+    s.syncRequireIdentity = ini.getBool("sync", "require_identity", s.syncRequireIdentity);
+    s.syncNodeName    = ini.getString("sync", "node_name", s.syncNodeName);
+    s.syncTrustedPeers = parseTrustedPeers(ini.getString("sync", "trusted_peers", ""));
 
     s.dxHost        = ini.getString("dxcluster", "host", s.dxHost);
     s.dxPort        = ini.getInt("dxcluster", "port", s.dxPort);
@@ -155,6 +198,9 @@ void Settings::store(IniFile& ini) const {
     ini.setString("sync", "peer_host", syncPeerHost);
     ini.setString("sync", "peer_host_alt", syncPeerHostAlt);
     ini.setString("sync", "node_id", syncNodeId);
+    ini.setBool("sync", "require_identity", syncRequireIdentity);
+    ini.setString("sync", "node_name", syncNodeName);
+    ini.setString("sync", "trusted_peers", serialiseTrustedPeers(syncTrustedPeers));
 
     ini.setString("dxcluster", "host", dxHost);
     ini.setInt("dxcluster", "port", dxPort);

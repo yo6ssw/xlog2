@@ -4,6 +4,7 @@
 
 #include <array>
 #include <string>
+#include <vector>
 
 // The scalar application configuration, toolkit-neutral. Window geometry, the
 // session tab list and the per-column layout stay in the IniFile directly
@@ -93,6 +94,14 @@ struct Settings {
     std::string syncPeerHost;                    // optional WAN peer (host) for the internet
     std::string syncPeerHostAlt;                 // optional second WAN peer
     std::string syncNodeId;                      // mesh id, minted once; tie-breaker
+    // When a secret is set, the mesh is secured (encryption) and each node holds
+    // a self-certifying Ed25519 identity; these govern its per-node trust.
+    bool        syncRequireIdentity = true;      // reject peers without an identity
+    std::string syncNodeName;                    // signed display name (default: station call)
+    // Per-node allowlist: only these mesh ids exchange logbook data. Others still
+    // connect and surface in the Trusted-peers dialog for the operator to admit.
+    struct SyncTrustedPeer { std::string id; std::string label; };
+    std::vector<SyncTrustedPeer> syncTrustedPeers;
 
     // [dxcluster]
     std::string dxHost;

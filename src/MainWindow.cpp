@@ -153,14 +153,21 @@ MainWindow::MainWindow()
         updateSyncIndicator();
     };
     sync_.onMessage = [this](const LogbookSync::PeerKey& p, const syncproto::Message& m) {
-        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer.
-        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse)
-            qrzPeer_.onMessage(p, m);
-        else
+        // QRZ peer-cache messages ride the same mesh; route them to QrzPeer — but
+        // only for peers we trust, so an untrusted node can't mine our QRZ cache.
+        if (m.type == syncproto::Type::QrzQuery || m.type == syncproto::Type::QrzResponse) {
+            if (coordinator_.isTrusted(p))
+                qrzPeer_.onMessage(p, m);
+        } else {
             coordinator_.onMessage(p, m);
+        }
     };
     sync_.onStatus  = [this](const std::string& s) { setStatus(s); };
     coordinator_.onStatus = [this](const std::string& s) { setStatus(s); };
+    coordinator_.onPeersChanged = [this] {
+        updateSyncIndicator();
+        if (trustedPeersDialog_) refreshTrustedPeersDialog();
+    };
 
     // Distributed QRZ cache: consult mesh peers between the local cache and
     // qrz.com. The timer bounds how long we wait for a peer to answer.
@@ -377,6 +384,7 @@ void MainWindow::buildActions() {
         "mapdock", sigc::mem_fun(*this, &MainWindow::onMapDock), "right");
 
     add_action("syncnow", sigc::mem_fun(*this, &MainWindow::onSyncNow));
+    add_action("synctrust", sigc::mem_fun(*this, &MainWindow::onManageTrustedPeers));
     syncEnableAction_ = add_action_bool("syncenabled", [this]() {
         cfg().syncEnabled = !cfg().syncEnabled;
         startSync();  // also reconciles the toggle state
@@ -477,6 +485,7 @@ Glib::RefPtr<Gio::Menu> MainWindow::buildMenuModel() {
     auto syncMenu = Gio::Menu::create();
     syncMenu->append("_Enabled", "win.syncenabled");
     syncMenu->append("Sync _now", "win.syncnow");
+    syncMenu->append("_Trusted peers…", "win.synctrust");
     menu->append_submenu("S_ync", syncMenu);
 
     auto helpMenu = Gio::Menu::create();
@@ -1485,15 +1494,174 @@ void MainWindow::startSync() {
     for (const std::string& h : {cfg().syncPeerHost, cfg().syncPeerHostAlt})
         if (auto p = LogbookSync::parsePeer(h, cfg().syncPort); !p.first.empty())
             c.staticPeers.push_back(p);
+    // A shared secret secures the mesh (PSK) and enables a persistent identity
+    // (node id derives from the key), which in turn powers per-node trust.
+    c.psk = cfg().syncSecret;
+    if (!cfg().syncSecret.empty()) {
+        c.identityFile    = Glib::build_filename(
+            Glib::get_user_data_dir(), "xlog2", "node_identity");
+        c.requireIdentity = cfg().syncRequireIdentity;
+        c.nodeName        = cfg().syncNodeName;  // advisory; may be empty
+    }
     sync_.start(c);
     if (!sync_.localId().empty())
         cfg().syncNodeId = sync_.localId();
     coordinator_.configure(cfg().syncNodeId, cfg().syncSecret);
+    applySyncTrust();
     updateSyncIndicator();
 }
 
 void MainWindow::onSyncNow() {
     coordinator_.syncNow();
+}
+
+void MainWindow::applySyncTrust() {
+    // Trust is enforced only on a secured (identity-bearing) mesh.
+    std::vector<std::string> ids;
+    ids.reserve(cfg().syncTrustedPeers.size());
+    for (const auto& tp : cfg().syncTrustedPeers)
+        ids.push_back(tp.id);
+    coordinator_.setTrust(/*enforce=*/!cfg().syncSecret.empty(), ids);
+}
+
+void MainWindow::refreshTrustedPeersDialog() {
+    if (!trustedPeersBox_)
+        return;
+    // Clear existing rows.
+    while (auto* child = trustedPeersBox_->get_first_child())
+        trustedPeersBox_->remove(*child);
+
+    auto rows = coordinator_.peerSnapshot();
+    if (rows.empty()) {
+        auto* empty = Gtk::make_managed<Gtk::Label>(
+            "No peers discovered yet. Peers appear here once they join the mesh.");
+        empty->set_xalign(0.0);
+        empty->set_wrap(true);
+        trustedPeersBox_->append(*empty);
+        return;
+    }
+    // Trusted first, then untrusted; within each, online first.
+    std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) {
+        if (a.trusted != b.trusted) return a.trusted > b.trusted;
+        if (a.online  != b.online)  return a.online  > b.online;
+        return a.id < b.id;
+    });
+
+    for (const auto& r : rows) {
+        auto* row = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+        row->set_spacing(8);
+        const std::string dot = r.online ? "●" : "○";
+        auto* dotLbl = Gtk::make_managed<Gtk::Label>(dot);
+        dotLbl->add_css_class(r.online ? "success" : "dim-label");
+        row->append(*dotLbl);
+
+        const std::string shortId = r.id.size() > 12 ? r.id.substr(0, 12) + "…" : r.id;
+        std::string text = r.name.empty() ? shortId : (r.name + "  (" + shortId + ")");
+        if (r.trusted && r.ready) text += "  — syncing";
+        else if (r.trusted)       text += "  — trusted";
+        auto* lbl = Gtk::make_managed<Gtk::Label>(text);
+        lbl->set_xalign(0.0);
+        lbl->set_hexpand(true);
+        row->append(*lbl);
+
+        const std::string id = r.id, name = r.name;
+        if (r.trusted) {
+            auto* btn = Gtk::make_managed<Gtk::Button>("Revoke");
+            btn->signal_clicked().connect([this, id]() {
+                auto& v = cfg().syncTrustedPeers;
+                v.erase(std::remove_if(v.begin(), v.end(),
+                                       [&](const auto& tp) { return tp.id == id; }),
+                        v.end());
+                coordinator_.revokePeer(id);
+                saveSettings();
+                refreshTrustedPeersDialog();
+            });
+            row->append(*btn);
+        } else {
+            auto* btn = Gtk::make_managed<Gtk::Button>("Trust");
+            btn->add_css_class("suggested-action");
+            btn->signal_clicked().connect([this, id, name]() {
+                cfg().syncTrustedPeers.push_back({id, name});
+                coordinator_.trustPeer(id);
+                saveSettings();
+                refreshTrustedPeersDialog();
+            });
+            row->append(*btn);
+        }
+        trustedPeersBox_->append(*row);
+    }
+}
+
+void MainWindow::onManageTrustedPeers() {
+    if (trustedPeersDialog_) {  // already open — just raise it
+        trustedPeersDialog_->present();
+        return;
+    }
+    auto* win = new Gtk::Window();
+    win->set_transient_for(*this);
+    win->set_title("Trusted peers");
+    win->set_default_size(460, 420);
+    win->set_hide_on_close(true);
+
+    auto* box = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    box->set_spacing(8);
+    ui::setMargin(*box, 12);
+
+    // This node's identity key (for sharing into a peer's allowlist).
+    const std::string key = sync_.identityKey();
+    auto* keyRow = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    keyRow->set_spacing(8);
+    keyRow->append(*Gtk::make_managed<Gtk::Label>("This node's key:"));
+    auto* keyEntry = Gtk::make_managed<Gtk::Entry>();
+    keyEntry->set_text(key.empty() ? "(identity disabled — set a shared secret)" : key);
+    keyEntry->set_editable(false);
+    keyEntry->set_hexpand(true);
+    keyRow->append(*keyEntry);
+    auto* copy = Gtk::make_managed<Gtk::Button>("Copy");
+    copy->set_sensitive(!key.empty());
+    copy->signal_clicked().connect([this, key]() { get_clipboard()->set_text(key); });
+    keyRow->append(*copy);
+    box->append(*keyRow);
+
+    auto* hint = Gtk::make_managed<Gtk::Label>(
+        "Trusted peers exchange logbook data. Newly-discovered peers connect but "
+        "stay on hold until you trust them.");
+    hint->set_xalign(0.0);
+    hint->set_wrap(true);
+    hint->add_css_class("dim-label");
+    box->append(*hint);
+
+    box->append(*Gtk::make_managed<Gtk::Separator>(Gtk::Orientation::HORIZONTAL));
+
+    auto* sc = Gtk::make_managed<Gtk::ScrolledWindow>();
+    sc->set_vexpand(true);
+    trustedPeersBox_ = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::VERTICAL);
+    trustedPeersBox_->set_spacing(6);
+    sc->set_child(*trustedPeersBox_);
+    box->append(*sc);
+
+    auto* buttons = Gtk::make_managed<Gtk::Box>(Gtk::Orientation::HORIZONTAL);
+    buttons->set_spacing(8);
+    buttons->set_halign(Gtk::Align::END);
+    auto* refresh = Gtk::make_managed<Gtk::Button>("Refresh");
+    refresh->signal_clicked().connect([this]() { refreshTrustedPeersDialog(); });
+    auto* close = Gtk::make_managed<Gtk::Button>("Close");
+    close->signal_clicked().connect([win]() { win->close(); });
+    buttons->append(*refresh);
+    buttons->append(*close);
+    box->append(*buttons);
+
+    win->set_child(*box);
+    trustedPeersDialog_ = win;
+    win->signal_hide().connect([this, win]() {
+        if (trustedPeersDialog_ == win) {
+            trustedPeersDialog_ = nullptr;
+            trustedPeersBox_    = nullptr;
+        }
+        delete win;
+    });
+    refreshTrustedPeersDialog();
+    win->present();
 }
 
 void MainWindow::onSpotActivated(const DxSpot& spot) {

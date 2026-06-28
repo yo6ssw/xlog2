@@ -43,6 +43,20 @@ public:
         int         port = 0;  // mesh TCP listen port (0 = ephemeral)
         // Optional persistent WAN peers (host, port), dialed and kept connected.
         std::vector<std::pair<std::string, int>> staticPeers;
+
+        // --- transport security (all optional) ---
+        // Pre-shared key. When non-empty the mesh is secured: peer links are
+        // mutually authenticated + encrypted, and (with identityFile set) nodes
+        // carry self-certifying Ed25519 identities. Empty => legacy plaintext.
+        std::string psk;
+        // Path to this node's persistent identity seed (mesh-managed, mode 0600).
+        // Non-empty enables identity; requires a non-empty psk. When set, the
+        // mesh derives the node id from the identity key (nodeId is ignored).
+        std::string identityFile;
+        // This node's signed, gossiped display name (advisory; not unique).
+        std::string nodeName;
+        // Reject peers that present no identity (only meaningful with identity on).
+        bool        requireIdentity = true;
     };
 
     void start(const Config& cfg);
@@ -56,6 +70,14 @@ public:
 
     // Count of reachable mesh members (excludes self).
     int memberCount() const;
+
+    // This node's Ed25519 identity public key (hex), or "" when no identity is
+    // configured. Stable across restarts; peers add it to their allowlist.
+    std::string identityKey() const;
+
+    // The signed/operator-assigned display name for a connected peer, or "" if
+    // unknown. Only meaningful on an identity-enabled mesh.
+    std::string peerName(const PeerKey& peer) const;
 
     // Flood a message to every mesh member. Used for anti-entropy fan-out is
     // avoided; prefer sendTo for anything that must respect the auth gate.

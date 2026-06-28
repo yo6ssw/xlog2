@@ -66,6 +66,35 @@ frames. The mesh `group` is derived from the shared secret
 only thing that touches the logbook. Optional **static peers** (host:port) cover
 the WAN (internet) case where multicast can't reach.
 
+### Transport security (PSK + identity)
+
+When a shared secret is set, the secret doubles as the mesh **PSK**: the
+multimaster transport (via libsodium) mutually authenticates every peer link and
+**encrypts it** (X25519 key agreement → ChaCha20-Poly1305, per-connection forward
+secrecy), and discovery announces carry a keyed MAC. On the wire the QSO data is
+no longer plaintext — a tunnel is no longer required for confidentiality (though
+it's still fine to use one).
+
+On a secured mesh each node also holds a persistent **self-certifying Ed25519
+identity**, seeded from `node_identity` (mode 0600) in the data dir. The node's
+mesh id becomes a hash of its public key, so a peer's id *proves* ownership of
+its key — peers can't impersonate one another, and `Reject peers without a
+verified identity` (on by default) drops any peer that presents none.
+
+### Per-node trust (app-layer allowlist)
+
+Identity tells you *which* key a peer holds; **trust** decides who you actually
+sync with. Rather than the mesh's own allowlist (which would reject unknown peers
+at the handshake, so you'd never see them), xlog2 enforces trust one layer up, in
+`SyncCoordinator`, keyed by mesh id: the mesh admits every identity-verified peer,
+but an **untrusted** peer gets no `HELLO` and none of its frames are processed —
+it simply surfaces in **Sync ▸ Trusted peers** for the operator to admit. QRZ
+peer-cache queries are gated the same way. `SyncCoordinator::setTrust` seeds the
+allowlist from settings; `trustPeer`/`revokePeer` mutate it live and the change is
+persisted. `xlog2-syncd`, being a headless backup peer, does **not** enforce trust
+— it accepts any same-secret, identity-verified node and prints its own identity
+key so you can trust it from a GUI peer.
+
 Frames: `magic 'XLSG' | version | type | length | payload` (`SyncProtocol`); the
 mesh delivers each as one complete message. When a peer becomes reachable, both
 sides exchange `HELLO`/`HELLO_ACK`, authenticating with an HMAC over a nonce
@@ -83,8 +112,14 @@ Edit ▸ Settings ▸ **Sync** (both frontends), or the **Sync** menu:
 
 - **Enabled** — turn sync on/off (also a menu toggle).
 - **Shared secret** — the one knob that matters: give every machine the **same**
-  secret. It both authenticates peers (HMAC handshake) and selects the mesh
-  (group is derived from it), so different-secret instances never even connect.
+  secret. It authenticates peers (HMAC handshake), **encrypts** every link (PSK),
+  selects the mesh (group is derived from it) and enables per-node identity — so
+  different-secret instances never even connect. Use a high-entropy value (it is
+  hashed to a key, not stretched — not a weak password).
+- **Node name** — optional signed display name gossiped to peers (advisory; shown
+  in the Trusted-peers dialog). The mesh id stays the canonical identifier.
+- **Reject peers without a verified identity** — on by default; leave it on unless
+  bridging a transitional mesh that still has legacy (pre-identity) nodes.
 - **Listen port** — the mesh's TCP port (default 7388). Peers on a LAN don't need
   it to match (they advertise their port via multicast), but a fixed value is
   needed for a WAN peer to reach this node.
@@ -95,14 +130,22 @@ There is **no role to set** — start the app on each machine with the same secr
 and they find each other. The status bar shows `⇄ N` (reachable peers).
 **Sync now** forces an anti-entropy pass with every connected peer.
 
+### Trusting peers
+
+**Sync ▸ Trusted peers…** opens a live dialog: it shows this node's identity key
+(to share), the peers you already trust (with an online indicator and *Revoke*),
+and any **discovered-but-untrusted** peers currently connected (with *Trust*). A
+peer exchanges logbook data only once trusted — and trust is per-side, so each
+operator admits the other. The list updates as peers come and go.
+
 ### Networking
 
 On a LAN, auto-discovery (UDP multicast, local subnet) needs nothing configured.
 Over the internet, set one reachable side as the other's **WAN peer** (open /
-port-forward the listen port) — or, better, run both inside a **WireGuard/SSH
-tunnel** and sync over that. The shared-secret HMAC stops an unwanted peer from
-merging, but the QSO data on the wire is **not encrypted**; tunnel it for
-confidentiality. TLS is a possible follow-up.
+port-forward the listen port). With a shared secret set, the link is already
+authenticated **and encrypted** (PSK), so a tunnel is no longer required for
+confidentiality — though running both inside a **WireGuard/SSH tunnel** remains a
+fine way to avoid exposing the port at all.
 
 ## Assumptions & limitations
 

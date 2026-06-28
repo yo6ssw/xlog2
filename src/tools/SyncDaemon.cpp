@@ -278,16 +278,30 @@ int main(int argc, char* argv[]) {
     for (const std::string& h : {s.syncPeerHost, s.syncPeerHostAlt})
         if (auto pr = LogbookSync::parsePeer(h, s.syncPort); !pr.first.empty())
             cfg.staticPeers.push_back(pr);
+    // Match the GUI: a shared secret secures the mesh (PSK) and gives this peer a
+    // persistent self-certifying identity. As a headless backup peer it accepts
+    // any same-secret, identity-verified node (no interactive allowlist) — trust
+    // it from a GUI peer's Sync ▸ Trusted peers using the key printed below.
+    cfg.psk = s.syncSecret;
+    if (!s.syncSecret.empty()) {
+        cfg.identityFile    = dataDir + "/node_identity";
+        cfg.requireIdentity = s.syncRequireIdentity;
+        cfg.nodeName        = !s.syncNodeName.empty() ? s.syncNodeName : "xlog2-syncd";
+    }
 
     sync.start(cfg);
     if (cfg.nodeId.empty() && !sync.localId().empty())
         writeFile(nodeIdPath, sync.localId());  // persist the minted id
     coord.configure(sync.localId(), s.syncSecret);
+    coord.setTrust(/*enforce=*/false, {});  // backup peer: trust all same-secret nodes
 
     std::cout << "xlog2-syncd: node " << sync.localId()
               << "  group " << cfg.group
-              << "  logbook " << logPath
-              << "  (Ctrl-C to quit)" << std::endl;
+              << "  logbook " << logPath << "\n";
+    if (const std::string key = sync.identityKey(); !key.empty())
+        std::cout << "xlog2-syncd: identity key " << key
+                  << " (add to a peer's trusted list)\n";
+    std::cout << "xlog2-syncd: (Ctrl-C to quit)" << std::endl;
 
     // --- main loop: drain marshalled callbacks; sweep for enrichment ~60s ---
     using clock = std::chrono::steady_clock;

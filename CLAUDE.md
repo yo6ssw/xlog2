@@ -30,7 +30,8 @@ GDK_BACKEND=wayland ./build/xlog2-gtk
 sudo apt install build-essential cmake pkg-config \
                  libgtkmm-4.0-dev qt6-base-dev \
                  libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
-                 libopus-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev
+                 libopus-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev \
+                 libsodium-dev
 # tqsl (LoTW upload, runtime only): sudo apt install tqsl
 ```
 
@@ -251,9 +252,23 @@ name derived via `bands::forFrequencyMHz`), dates are `DD Mon YYYY`, and
   REQUEST/RECORDS, tombstones from the manifest); steady state pushes each local
   change to every authenticated peer, so push + anti-entropy compose safely.
   Config is the `[sync]` block, edited in Edit ▸ Settings ▸ Sync; there's a Sync
-  menu (Enabled / Sync now) and a status-bar peer-count indicator. The node id is
-  the mesh peer id (minted once, persisted); clocks are assumed NTP-synced
-  (wall-clock + node-id, not a logical clock). **Full reference:
+  menu (Enabled / Sync now / Trusted peers…) and a status-bar peer-count indicator.
+  The node id is the mesh peer id (minted once, persisted); clocks are assumed
+  NTP-synced (wall-clock + node-id, not a logical clock).
+  **Transport security:** when a secret is set it doubles as the mesh **PSK**, so
+  multimaster (libsodium) encrypts + authenticates every peer link (X25519 +
+  ChaCha20-Poly1305) and each node carries a persistent **self-certifying Ed25519
+  identity** (seed in `$XDG_DATA_HOME/xlog2/node_identity`, mode 0600; the mesh id
+  becomes a hash of the key). The mesh's own `trustedKeys` allowlist is left empty
+  on purpose (it rejects unknown peers at the handshake); instead **per-node trust
+  is enforced one layer up in `SyncCoordinator`** (`setTrust`/`trustPeer`/
+  `revokePeer`/`isTrusted`, keyed by mesh id): every identity-verified peer
+  connects, but an untrusted one gets no HELLO and none of its frames (incl. QRZ
+  peer queries) are processed — it just surfaces in the live **Sync ▸ Trusted
+  peers** dialog for the operator to admit. The allowlist persists in `[sync]
+  trusted_peers` (id+label). `xlog2-syncd` enables identity but does **not**
+  enforce trust (`setTrust(false, {})`) — a headless backup accepts any same-secret
+  identity-verified node and prints its key. **Full reference:
   `docs/logbook-sync.md`.**
 - Posted closures hold a `weak_ptr` liveness token so a result arriving after
   the controller/view is gone is dropped.

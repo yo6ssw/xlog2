@@ -258,18 +258,26 @@ SettingsDialog::SettingsDialog(const Settings& s, std::function<void(const Setti
         syncPeerHost_->set_placeholder_text("optional WAN peer host (internet)");
         syncPeerHostAlt_ = entry(s.syncPeerHostAlt);
         syncPeerHostAlt_->set_placeholder_text("optional second WAN peer host");
+        syncNodeName_ = entry(s.syncNodeName);
+        syncNodeName_->set_placeholder_text("optional display name for this node");
+        syncRequireIdentity_ = Gtk::make_managed<Gtk::CheckButton>(
+            "Reject peers without a verified identity");
+        syncRequireIdentity_->set_active(s.syncRequireIdentity);
         g.attach(*syncEnabled_, 1, 0);
         field(g, "Shared secret:", *syncSecret_, 1);
         field(g, "Listen port:", *syncPort_, 2);
         field(g, "WAN peer:", *syncPeerHost_, 3);
         field(g, "WAN peer 2:", *syncPeerHostAlt_, 4);
+        field(g, "Node name:", *syncNodeName_, 5);
+        g.attach(*syncRequireIdentity_, 1, 6);
         auto* hint = Gtk::make_managed<Gtk::Label>(
             "Peers on the same LAN find each other automatically — no roles to set.\n"
-            "Give every machine the same secret (it both authenticates and picks the\n"
-            "mesh). WAN peers are optional hosts for syncing over the internet (open\n"
-            "the port; data is not encrypted — tunnel via WireGuard/SSH).");
+            "Give every machine the same secret: it picks the mesh and (via libsodium)\n"
+            "encrypts and authenticates every peer link, and each node gets a\n"
+            "self-certifying identity. Choose who to sync with under Sync ▸ Trusted\n"
+            "peers. WAN peers are optional hosts for syncing over the internet.");
         hint->set_xalign(0.0);
-        g.attach(*hint, 0, 5, 2, 1);
+        g.attach(*hint, 0, 7, 2, 1);
     }
 
     // --- buttons ---
@@ -349,6 +357,8 @@ Settings SettingsDialog::collect() const {
     s.syncPeerHostAlt = syncPeerHostAlt_->get_text().raw();
     s.syncPort = toInt(syncPort_, s.syncPort);
     s.syncSecret = syncSecret_->get_text().raw();
+    s.syncNodeName = syncNodeName_->get_text().raw();
+    s.syncRequireIdentity = syncRequireIdentity_->get_active();
 
     s.skimmerGate = toInt(skGate_, s.skimmerGate);
     s.skimmerMinSnr = toInt(skMinSnr_, s.skimmerMinSnr);

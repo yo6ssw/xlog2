@@ -7,6 +7,8 @@
 #include <functional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
+#include <vector>
 
 class LogPagePresenter;
 
@@ -29,10 +31,34 @@ public:
     explicit SyncCoordinator(LogbookSync& transport) : transport_(transport) {}
 
     std::function<void(const std::string&)> onStatus;
+    // Fired (UI thread) whenever the peer set or its trust/readiness changes, so
+    // a "Trusted peers" view can refresh. Never fired during destruction.
+    std::function<void()> onPeersChanged;
 
     // node id breaks last-write-wins ties and decides who initiates; secret is
     // the pre-shared HMAC key (empty disables auth).
     void configure(const std::string& nodeId, const std::string& secret);
+
+    // --- per-node trust (app-layer allowlist) ---
+    // When enforced, only peers whose mesh id is trusted exchange logbook data;
+    // others still connect (identity-verified by the mesh) and are surfaced via
+    // onPeersChanged so the operator can trust them. Enforcement is meaningful
+    // only on an identity-enabled mesh; pass enforce=false for legacy/plaintext.
+    void setTrust(bool enforce, const std::vector<std::string>& trustedIds);
+    bool isTrusted(const LogbookSync::PeerKey& peer) const;
+    void trustPeer(const LogbookSync::PeerKey& peer);   // admit + begin syncing
+    void revokePeer(const LogbookSync::PeerKey& peer);  // stop syncing with peer
+
+    // A snapshot of every known peer (online now, or trusted-but-offline) for the
+    // trusted-peers UI. `name` is the peer's signed/labelled display name.
+    struct PeerInfo {
+        std::string id;
+        std::string name;
+        bool        trusted = false;
+        bool        online  = false;  // currently a reachable mesh member
+        bool        ready   = false;  // handshake complete (actively syncing)
+    };
+    std::vector<PeerInfo> peerSnapshot() const;
 
     // Bind to the synced logbook tab (the persistent default log). Pass nullptr
     // to detach (e.g. the tab closed or was Saved-As elsewhere).
@@ -63,6 +89,7 @@ private:
         bool        ackOk     = false;  // received an accepting HELLO_ACK
         bool        ready     = false;  // handshake complete
         bool        refused   = false;  // auth / sync_id mismatch: ignore data
+        bool        untrusted = false;  // connected but not in the allowlist
         std::string peerNodeId;         // their node id (LWW tiebreak)
     };
 
@@ -81,10 +108,14 @@ private:
     // The higher node id drives the anti-entropy pass for a given peer.
     bool initiator(const PeerState& st) const { return nodeId_ > st.peerNodeId; }
 
+    void peersChanged() { if (onPeersChanged) onPeersChanged(); }
+
     LogbookSync&      transport_;
     LogPagePresenter* synced_ = nullptr;
     std::string       nodeId_;
     std::string       secret_;
 
+    bool                                         trustEnforced_ = false;
+    std::unordered_set<LogbookSync::PeerKey>     trusted_;
     std::unordered_map<LogbookSync::PeerKey, PeerState> peers_;
 };

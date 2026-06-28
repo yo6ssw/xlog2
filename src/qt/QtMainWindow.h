@@ -25,6 +25,8 @@ class QTabWidget;
 class QLabel;
 class QDockWidget;
 class QActionGroup;
+class QDialog;
+class QWidget;
 class QtDxClusterPanel;
 class QtRigPanel;
 class QtCwSkimmerPanel;
@@ -96,6 +98,9 @@ private:
     void startSync();          // (re)start the mesh transport
     void attachSyncedLog(QtLogPage* page);  // bind the coordinator to the default log
     void updateSyncIndicator();             // status-bar peer count
+    void applySyncTrust();                  // push the settings allowlist into the coordinator
+    void onManageTrustedPeers();            // open the live trusted-peers dialog
+    void refreshTrustedPeersDialog();       // repopulate the open dialog from a snapshot
     void onSkimmerDock(const std::string& side);  // move the skimmer dock to a side
     void onMapDock(const std::string& side);      // move the map dock to a side
     void startSkimmer();
@@ -143,6 +148,10 @@ private:
     QLabel*           status_  = nullptr;
     QLabel*           audioIndicator_ = nullptr;  // live audio-frame counter
     QLabel*           syncIndicator_  = nullptr;  // peer connection state
+    // Live trusted-peers dialog (null when closed); peersList_ is repopulated on
+    // every onPeersChanged.
+    QDialog*          trustedPeersDialog_ = nullptr;
+    QWidget*          trustedPeersList_   = nullptr;
     QDockWidget*      dxDock_  = nullptr;
     QtDxClusterPanel* dxPanel_ = nullptr;
     QDockWidget*      rigDock_  = nullptr;
