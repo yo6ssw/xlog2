@@ -120,6 +120,17 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 
 # ---------------------------------------------------------------------------
+# xlog2-syncd: headless backup peer — replicates the synced logbook and enriches
+# the shared qrz.com cache. Toolkit-neutral: links only xlog_core (no GTK/Qt).
+# ---------------------------------------------------------------------------
+add_executable(xlog2-syncd src/tools/SyncDaemon.cpp)
+target_link_libraries(xlog2-syncd PRIVATE xlog_core)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(xlog2-syncd PRIVATE -Wall -Wextra)
+endif()
+install(TARGETS xlog2-syncd RUNTIME DESTINATION bin)
+
+# ---------------------------------------------------------------------------
 # gtkmm backend
 # ---------------------------------------------------------------------------
 if(XLOG_BUILD_GTK)
