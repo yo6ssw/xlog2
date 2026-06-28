@@ -1,0 +1,43 @@
+# systemd *user* service for the xlog2 headless sync/backup peer.
+#
+# It runs as your own login user so it picks up the GUI's configuration and data
+# directories automatically:
+#   config   ~/.config/xlog2/layout.ini      (shared secret + QRZ credentials)
+#   data     ~/.local/share/xlog2-syncd/     (its own replica + QRZ cache)
+# To point it elsewhere, add args to ExecStart, e.g.
+#   ExecStart=/usr/bin/xlog2-syncd --config %h/.config/xlog2/layout.ini --data-dir %h/.local/share/xlog2-syncd
+#
+# Enable it for your user:
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now xlog2-syncd.service
+#   journalctl --user -u xlog2-syncd -f      # follow its log
+#
+# On a headless backup box with no interactive session, allow the user manager
+# to run without a login (otherwise the service stops at logout):
+#   sudo loginctl enable-linger <user>
+
+[Unit]
+Description=xlog2 headless logbook sync/backup peer
+Documentation=https://github.com/yo6ssw/xlog2/blob/master/docs/logbook-sync.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/xlog2-syncd
+# Restart on crashes, but not when it exits cleanly (e.g. bad config).
+Restart=on-failure
+RestartSec=5
+# Logs go to the journal (the daemon writes to stdout/stderr).
+SyslogIdentifier=xlog2-syncd
+
+# Modest hardening (safe for a user unit).
+NoNewPrivileges=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictNamespaces=true
+RestrictRealtime=true
+
+[Install]
+WantedBy=default.target

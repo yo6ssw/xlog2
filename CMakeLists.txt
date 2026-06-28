@@ -133,6 +133,8 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(xlog2-syncd PRIVATE -Wall -Wextra)
 endif()
 install(TARGETS xlog2-syncd RUNTIME DESTINATION bin)
+# systemd *user* service (runs as the login user, inheriting its XDG dirs).
+install(FILES packaging/xlog2-syncd.service DESTINATION lib/systemd/user)
 
 # ---------------------------------------------------------------------------
 # gtkmm backend
