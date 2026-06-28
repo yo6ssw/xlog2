@@ -1,7 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- A Material3 DayNight base; the actual colors come from Compose's
-         XlogTheme. This exists only so the manifest android:theme resolves and
-         the splash/system bars look right before Compose takes over. -->
-    <style name="Theme.Xlog2" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- A minimal NoActionBar base; the real colors come from Compose's
+         XlogTheme. This only governs the brief pre-Compose window: a DayNight
+         window background (see values-night) so there's no flash, and
+         transparent system bars to match enableEdgeToEdge(). -->
+    <style name="Theme.Xlog2" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:windowBackground">@color/window_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
 </resources>

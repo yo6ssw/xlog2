@@ -6,6 +6,7 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
@@ -17,6 +18,9 @@ class MainActivity : ComponentActivity() {
     ) { /* notification permission is best-effort */ }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // Draw behind the system bars (Android 15 enforces this on targetSdk 35);
+        // the bar icons auto-adapt to light/dark and Scaffold supplies the insets.
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&

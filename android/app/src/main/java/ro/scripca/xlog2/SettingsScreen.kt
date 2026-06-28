@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
@@ -12,14 +13,17 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -27,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -51,11 +57,14 @@ fun SettingsScreen(nav: NavHostController) {
     var peers by remember { mutableStateOf(s.staticPeers.joinToString("\n")) }
     var qrzUser by remember { mutableStateOf(s.qrzUser) }
     var qrzPass by remember { mutableStateOf(s.qrzPassword) }
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { Text("Settings") },
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = { nav.popBackStack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
@@ -65,36 +74,51 @@ fun SettingsScreen(nav: NavHostController) {
         },
     ) { pad ->
         Column(
-            Modifier.padding(pad).fillMaxSize().padding(16.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            Modifier
+                .padding(pad)
+                .fillMaxSize()
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Section("Station")
-            OutlinedTextField(call, { call = it.uppercase() }, label = { Text("My callsign") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(locator, { locator = it.uppercase() }, label = { Text("My locator (grid)") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-
-            Section("Sync mesh")
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Enabled", Modifier.weight(1f))
-                Switch(checked = enabled, onCheckedChange = { enabled = it })
+            SectionCard("Station") {
+                OutlinedTextField(call, { call = it.uppercase() }, label = { Text("My callsign") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(locator, { locator = it.uppercase() }, label = { Text("My locator (grid)") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
             }
-            OutlinedTextField(secret, { secret = it }, label = { Text("Shared secret (PSK)") },
-                singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(nodeName, { nodeName = it }, label = { Text("Node name (optional)") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(peers, { peers = it },
-                label = { Text("Static WAN peers (one host[:port] per line)") },
-                modifier = Modifier.fillMaxWidth())
 
-            Section("QRZ.com (optional)")
-            OutlinedTextField(qrzUser, { qrzUser = it }, label = { Text("QRZ username") },
-                singleLine = true, modifier = Modifier.fillMaxWidth())
-            OutlinedTextField(qrzPass, { qrzPass = it }, label = { Text("QRZ password") },
-                singleLine = true, visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth())
+            SectionCard("Sync mesh") {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Enabled", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Keep the logbook in sync with your other devices",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = enabled, onCheckedChange = { enabled = it })
+                }
+                OutlinedTextField(secret, { secret = it }, label = { Text("Shared secret (PSK)") },
+                    singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(nodeName, { nodeName = it }, label = { Text("Node name (optional)") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(peers, { peers = it },
+                    label = { Text("Static WAN peers (one host[:port] per line)") },
+                    modifier = Modifier.fillMaxWidth())
+            }
+
+            SectionCard("QRZ.com (optional)") {
+                OutlinedTextField(qrzUser, { qrzUser = it }, label = { Text("QRZ username") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(qrzPass, { qrzPass = it }, label = { Text("QRZ password") },
+                    singleLine = true, visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                    modifier = Modifier.fillMaxWidth())
+            }
 
             Button(
                 onClick = {
@@ -112,14 +136,33 @@ fun SettingsScreen(nav: NavHostController) {
                     if (enabled) SyncService.start(ctx) else SyncService.stop(ctx)
                     nav.popBackStack()
                 },
-                modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             ) { Text("Save & restart sync") }
+
+            Text(
+                "XLOG2  ·  v${BuildConfig.VERSION_NAME} (build ${BuildConfig.VERSION_CODE})",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp),
+            )
         }
     }
 }
 
 @Composable
-private fun Section(title: String) {
-    Text(title, style = androidx.compose.material3.MaterialTheme.typography.titleMedium,
-        modifier = Modifier.padding(top = 8.dp))
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            content()
+        }
+    }
 }

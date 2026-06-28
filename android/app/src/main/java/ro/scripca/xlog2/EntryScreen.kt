@@ -3,28 +3,37 @@ package ro.scripca.xlog2
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.Public
+import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -48,11 +57,14 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
     val dxcc by vm.dxcc.collectAsStateWithLifecycle()
     val dupe by vm.dupe.collectAsStateWithLifecycle()
     val editing = editingId != 0L
+    val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
             TopAppBar(
                 title = { Text(if (editing) "Edit QSO" else "New QSO") },
+                scrollBehavior = scrollBehavior,
                 navigationIcon = {
                     IconButton(onClick = { vm.cancel(); nav.popBackStack() }) {
                         Icon(Icons.Default.Close, contentDescription = "Cancel")
@@ -65,9 +77,10 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
             Modifier
                 .padding(pad)
                 .fillMaxSize()
-                .padding(horizontal = 12.dp)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Prominent Call field with an inline QRZ-lookup button.
             OutlinedTextField(
@@ -91,42 +104,74 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
             )
 
             if (dxcc.isNotEmpty()) {
-                Text(dxcc, color = MaterialTheme.colorScheme.secondary,
-                    style = MaterialTheme.typography.bodyMedium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Outlined.Public,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.secondary,
+                    )
+                    Spacer(Modifier.size(6.dp))
+                    Text(
+                        dxcc,
+                        color = MaterialTheme.colorScheme.secondary,
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
             }
             if (dupe.isNotEmpty()) {
-                Card(Modifier.fillMaxWidth()) {
-                    Text("⚠ $dupe", color = MaterialTheme.colorScheme.error,
-                        modifier = Modifier.padding(8.dp))
+                Surface(
+                    shape = MaterialTheme.shapes.medium,
+                    color = MaterialTheme.colorScheme.errorContainer,
+                    contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        Modifier.padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            Icons.Outlined.Warning,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp),
+                        )
+                        Spacer(Modifier.size(8.dp))
+                        Text(dupe, style = MaterialTheme.typography.bodyMedium)
+                    }
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Field("Freq", form.freq, Modifier.weight(1f), KeyboardType.Decimal) {
-                    vm.onFreqChanged(it)
+            SectionCard("Signal") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Field("Freq", form.freq, Modifier.weight(1f), KeyboardType.Decimal) {
+                        vm.onFreqChanged(it)
+                    }
+                    Field("Band", form.band, Modifier.weight(1f)) {
+                        vm.update { q -> q.copy(band = it) }; vm.onKeyFieldsChanged()
+                    }
+                    Field("Mode", form.mode, Modifier.weight(1f)) {
+                        vm.update { q -> q.copy(mode = it.uppercase()) }; vm.onKeyFieldsChanged()
+                    }
                 }
-                Field("Band", form.band, Modifier.weight(1f)) {
-                    vm.update { q -> q.copy(band = it) }; vm.onKeyFieldsChanged()
-                }
-                Field("Mode", form.mode, Modifier.weight(1f)) {
-                    vm.update { q -> q.copy(mode = it.uppercase()) }; vm.onKeyFieldsChanged()
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Field("RST s", form.rstSent, Modifier.weight(1f)) { vm.update { q -> q.copy(rstSent = it) } }
-                Field("RST r", form.rstRcvd, Modifier.weight(1f)) { vm.update { q -> q.copy(rstRcvd = it) } }
-                Field("Power", form.power, Modifier.weight(1f), KeyboardType.Number) {
-                    vm.update { q -> q.copy(power = it) }
-                }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Field("Name", form.name, Modifier.weight(1f)) { vm.update { q -> q.copy(name = it) } }
-                Field("Grid", form.locator, Modifier.weight(1f)) {
-                    vm.update { q -> q.copy(locator = it.uppercase()) }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Field("RST s", form.rstSent, Modifier.weight(1f)) { vm.update { q -> q.copy(rstSent = it) } }
+                    Field("RST r", form.rstRcvd, Modifier.weight(1f)) { vm.update { q -> q.copy(rstRcvd = it) } }
+                    Field("Power", form.power, Modifier.weight(1f), KeyboardType.Number) {
+                        vm.update { q -> q.copy(power = it) }
+                    }
                 }
             }
-            Field("QTH", form.qth, Modifier.fillMaxWidth()) { vm.update { q -> q.copy(qth = it) } }
-            Field("Comment", form.comment, Modifier.fillMaxWidth()) { vm.update { q -> q.copy(comment = it) } }
+
+            SectionCard("Operator") {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Field("Name", form.name, Modifier.weight(1f)) { vm.update { q -> q.copy(name = it) } }
+                    Field("Grid", form.locator, Modifier.weight(1f)) {
+                        vm.update { q -> q.copy(locator = it.uppercase()) }
+                    }
+                }
+                Field("QTH", form.qth, Modifier.fillMaxWidth()) { vm.update { q -> q.copy(qth = it) } }
+                Field("Comment", form.comment, Modifier.fillMaxWidth()) { vm.update { q -> q.copy(comment = it) } }
+            }
 
             Button(
                 onClick = { if (vm.save()) nav.popBackStack() },
@@ -134,6 +179,23 @@ fun EntryScreen(nav: NavHostController, vm: LogViewModel) {
             ) {
                 Text(if (editing) "UPDATE" else "LOG", fontSize = 18.sp)
             }
+        }
+    }
+}
+
+@Composable
+private fun SectionCard(title: String, content: @Composable () -> Unit) {
+    ElevatedCard(Modifier.fillMaxWidth()) {
+        Column(
+            Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+            )
+            content()
         }
     }
 }
