@@ -64,6 +64,17 @@ fun SettingsScreen(nav: NavHostController) {
     var freqEnabled by remember { mutableStateOf(s.freqEnabled) }
     var freqHost by remember { mutableStateOf(s.freqHost) }
     var freqPort by remember { mutableStateOf(s.freqPort.toString()) }
+    var pdlHost by remember { mutableStateOf(s.paddleHost) }
+    var pdlPort by remember { mutableStateOf(s.paddlePort.toString()) }
+    var pdlWpm by remember { mutableStateOf(s.paddleWpm.toString()) }
+    var pdlIambicB by remember { mutableStateOf(s.paddleIambicB) }
+    var pdlUltimatic by remember { mutableStateOf(s.paddleUltimatic) }
+    var pdlAutospace by remember { mutableStateOf(s.paddleAutospace) }
+    var pdlSidetone by remember { mutableStateOf(s.paddleSidetone) }
+    var pdlToneHz by remember { mutableStateOf(s.paddleToneHz.toString()) }
+    var pdlLevel by remember { mutableStateOf(s.paddleLevel.toString()) }
+    var pdlMuteAudio by remember { mutableStateOf(s.paddleMuteAudio) }
+    var pdlMuteTail by remember { mutableStateOf(s.paddleMuteTailMs.toString()) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
@@ -171,6 +182,41 @@ fun SettingsScreen(nav: NavHostController) {
                 }
             }
 
+            SectionCard("CW paddle keyer (cwsd remote_key)") {
+                OutlinedTextField(pdlHost, { pdlHost = it },
+                    label = { Text("remote_key host (blank = audio host)") }, singleLine = true,
+                    modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(pdlPort, { pdlPort = it.filter(Char::isDigit) },
+                        label = { Text("UDP port") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                    OutlinedTextField(pdlWpm, { pdlWpm = it.filter(Char::isDigit) },
+                        label = { Text("Speed (wpm)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                }
+                SwitchRow("Iambic B", "Off = iambic A", pdlIambicB) { pdlIambicB = it }
+                SwitchRow("Ultimatic", "Last-pressed-wins (overrides iambic)", pdlUltimatic) { pdlUltimatic = it }
+                SwitchRow("Autospace", "Enforce a full inter-character space", pdlAutospace) { pdlAutospace = it }
+                SwitchRow("Sidetone", "Local audio feedback while keying", pdlSidetone) { pdlSidetone = it }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(pdlToneHz, { pdlToneHz = it.filter(Char::isDigit) },
+                        label = { Text("Tone (Hz)") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                    OutlinedTextField(pdlLevel, { pdlLevel = it.filter(Char::isDigit) },
+                        label = { Text("Volume 0–100") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                }
+                SwitchRow("Mute rig audio while keying", "Semi-break-in", pdlMuteAudio) { pdlMuteAudio = it }
+                OutlinedTextField(pdlMuteTail, { pdlMuteTail = it.filter(Char::isDigit) },
+                    label = { Text("Mute hang after key-up (ms)") }, singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth())
+            }
+
             Button(
                 onClick = {
                     s.myCallsign = call
@@ -188,6 +234,21 @@ fun SettingsScreen(nav: NavHostController) {
                     s.freqEnabled = freqEnabled
                     s.freqHost = freqHost.trim()
                     s.freqPort = freqPort.toIntOrNull() ?: 4532
+                    s.paddleHost = pdlHost.trim()
+                    s.paddlePort = pdlPort.toIntOrNull() ?: 6790
+                    s.paddleWpm = pdlWpm.toIntOrNull() ?: 20
+                    s.paddleIambicB = pdlIambicB
+                    s.paddleUltimatic = pdlUltimatic
+                    s.paddleAutospace = pdlAutospace
+                    s.paddleSidetone = pdlSidetone
+                    s.paddleToneHz = pdlToneHz.toIntOrNull() ?: 600
+                    s.paddleLevel = pdlLevel.toIntOrNull() ?: 50
+                    s.paddleMuteAudio = pdlMuteAudio
+                    s.paddleMuteTailMs = pdlMuteTail.toIntOrNull() ?: 500
+                    // If the keyer is running, bounce it so new keying settings apply.
+                    if (XlogRepository.get(ctx).paddleActive.value) {
+                        PaddleService.stop(ctx); PaddleService.start(ctx)
+                    }
                     // Re-open the core with the new secret/peers/creds, then
                     // (re)align the foreground service with the enabled toggle.
                     XlogRepository.get(ctx).restart()
@@ -205,6 +266,21 @@ fun SettingsScreen(nav: NavHostController) {
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 12.dp),
             )
         }
+    }
+}
+
+@Composable
+private fun SwitchRow(title: String, subtitle: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+            Text(title, style = MaterialTheme.typography.bodyLarge)
+            Text(
+                subtitle,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        Switch(checked = checked, onCheckedChange = onCheckedChange)
     }
 }
 

@@ -104,4 +104,54 @@ class Settings(context: Context) {
 
     /** Effective rigctld host: explicit [freqHost] or, if blank, [audioHost]. */
     val effectiveFreqHost: String get() = freqHost.ifBlank { audioHost }
+
+    // --- [paddle] — cwsd remote_key real paddle keying over UDP (see PaddleKeyer) ---
+    // Host defaults to an IP for the same mDNS reason as [audio]; blank falls back
+    // to the audio host (cwsd usually serves remote_key on the same machine).
+    var paddleHost: String
+        get() = prefs.getString("paddle_host", "") ?: ""
+        set(v) = prefs.edit { putString("paddle_host", v) }
+
+    var paddlePort: Int
+        get() = prefs.getInt("paddle_port", 6790)
+        set(v) = prefs.edit { putInt("paddle_port", v) }
+
+    var paddleWpm: Int
+        get() = prefs.getInt("paddle_wpm", 20)
+        set(v) = prefs.edit { putInt("paddle_wpm", v) }
+
+    var paddleIambicB: Boolean
+        get() = prefs.getBoolean("paddle_iambic_b", false)
+        set(v) = prefs.edit { putBoolean("paddle_iambic_b", v) }
+
+    var paddleUltimatic: Boolean
+        get() = prefs.getBoolean("paddle_ultimatic", false)
+        set(v) = prefs.edit { putBoolean("paddle_ultimatic", v) }
+
+    var paddleAutospace: Boolean
+        get() = prefs.getBoolean("paddle_autospace", true)
+        set(v) = prefs.edit { putBoolean("paddle_autospace", v) }
+
+    var paddleSidetone: Boolean
+        get() = prefs.getBoolean("paddle_sidetone", true)
+        set(v) = prefs.edit { putBoolean("paddle_sidetone", v) }
+
+    var paddleToneHz: Int
+        get() = prefs.getInt("paddle_tone_hz", 600)
+        set(v) = prefs.edit { putInt("paddle_tone_hz", v) }
+
+    var paddleLevel: Int
+        get() = prefs.getInt("paddle_level", 50)
+        set(v) = prefs.edit { putInt("paddle_level", v) }
+
+    var paddleMuteAudio: Boolean
+        get() = prefs.getBoolean("paddle_mute_audio", true)
+        set(v) = prefs.edit { putBoolean("paddle_mute_audio", v) }
+
+    var paddleMuteTailMs: Int
+        get() = prefs.getInt("paddle_mute_tail_ms", 500)
+        set(v) = prefs.edit { putInt("paddle_mute_tail_ms", v) }
+
+    /** Effective remote_key host: explicit [paddleHost] or, if blank, [audioHost]. */
+    val effectivePaddleHost: String get() = paddleHost.ifBlank { audioHost }
 }

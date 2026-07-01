@@ -40,7 +40,16 @@ class AudioStreamClient {
     val framesDecoded: StateFlow<Long> = _framesDecoded.asStateFlow()
 
     @Volatile private var running = false
+    @Volatile private var muted = false
     private var worker: Thread? = null
+
+    /**
+     * Mute playback without unsubscribing: keep receiving + decoding (so the
+     * stream stays subscribed and the decoder stays in sync) but play silence.
+     * Used for semi-break-in — the paddle keyer silences the rig audio while
+     * transmitting so you don't hear your own delayed signal fighting the sidetone.
+     */
+    fun setMuted(m: Boolean) { muted = m }
 
     fun start(cfg: Config) {
         stop()
@@ -125,7 +134,10 @@ class AudioStreamClient {
                     if (gap in 1..MAX_CONCEAL) {
                         repeat(gap.toInt()) {
                             val g = dec.decodePlc(pcm, lastFrameSamples)
-                            if (g > 0) { track.write(pcm, 0, g * cfg.channels); frames++ }
+                            if (g > 0) {
+                                if (muted) pcm.fill(0.toShort(), 0, g * cfg.channels)
+                                track.write(pcm, 0, g * cfg.channels); frames++
+                            }
                         }
                     }
                     // gap == 0: in order; huge gap: reorder/restart — just decode this one.
@@ -134,6 +146,7 @@ class AudioStreamClient {
                 val opus = rx.copyOfRange(HEADER, n)
                 val got = dec.decode(opus, opus.size, pcm, maxFrame)
                 if (got > 0) {
+                    if (muted) pcm.fill(0.toShort(), 0, got * cfg.channels)
                     track.write(pcm, 0, got * cfg.channels)
                     lastFrameSamples = got
                     frames++

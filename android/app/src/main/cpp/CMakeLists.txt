@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../../../native
                  ${CMAKE_BINARY_DIR}/xlog_mobile)
 
-add_library(xlog2jni SHARED xlog_jni.cpp opus_jni.cpp)
+add_library(xlog2jni SHARED xlog_jni.cpp opus_jni.cpp paddle_jni.cpp)
 target_link_libraries(xlog2jni PRIVATE xlog_mobile log)
 
 # Vendored libopus for the rig-audio decoder (opus_jni.cpp). Same per-ABI layout

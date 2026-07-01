@@ -1,0 +1,152 @@
+package ro.scripca.xlog2
+
+import android.app.PendingIntent
+import android.content.Context
+import android.content.Intent
+import android.hardware.usb.UsbConstants
+import android.hardware.usb.UsbDevice
+import android.hardware.usb.UsbDeviceConnection
+import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
+import android.hardware.usb.UsbManager
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+
+/**
+ * Reads the custom xlog2 vendor-HID Morse paddle (USB VID 0x1EAF, the companion
+ * ../paddles firmware) over Android's USB Host API — the phone-side analogue of
+ * the desktop's [HidPaddleInput] /dev/hidraw reader. Each interrupt report's byte 0
+ * carries the contact state (bit0 = dit, bit1 = dah); edges drive [onDit]/[onDah]
+ * (wired to the keyer). A worker thread auto-discovers the device, requests USB
+ * permission once, and reads the interrupt endpoint until unplugged/stopped.
+ */
+class UsbPaddle(context: Context) {
+
+    var onDit: ((Boolean) -> Unit)? = null
+    var onDah: ((Boolean) -> Unit)? = null
+
+    private val _status = MutableStateFlow("USB paddle: idle")
+    val status: StateFlow<String> = _status.asStateFlow()
+    private val _connected = MutableStateFlow(false)
+    val connected: StateFlow<Boolean> = _connected.asStateFlow()
+
+    private val appCtx = context.applicationContext
+    private val usb = appCtx.getSystemService(Context.USB_SERVICE) as UsbManager
+
+    @Volatile private var running = false
+    private var thread: Thread? = null
+
+    fun start() {
+        stop()
+        running = true
+        thread = Thread({ run() }, "xlog2-usbpaddle").apply { isDaemon = true; start() }
+    }
+
+    fun stop() {
+        running = false
+        thread?.let { it.interrupt(); it.join(1000) }
+        thread = null
+        _connected.value = false
+    }
+
+    private fun findDevice(): UsbDevice? =
+        usb.deviceList.values.firstOrNull { it.vendorId == VID }
+
+    private fun run() {
+        var permissionRequested = false
+        while (running) {
+            val dev = findDevice()
+            if (dev == null) {
+                permissionRequested = false
+                _status.value = "USB paddle: not found — plug it in (USB-C/OTG)"
+                sleep(1500)
+                continue
+            }
+            if (!usb.hasPermission(dev)) {
+                if (!permissionRequested) {
+                    requestPermission(dev)
+                    permissionRequested = true
+                    _status.value = "USB paddle: waiting for permission…"
+                }
+                sleep(1000)
+                continue
+            }
+            permissionRequested = false
+            readDevice(dev)   // blocks until disconnect / stop
+        }
+        _connected.value = false
+    }
+
+    /** Locate a HID interface with an interrupt-IN endpoint and read its reports. */
+    private fun readDevice(dev: UsbDevice) {
+        var iface: UsbInterface? = null
+        var epIn: UsbEndpoint? = null
+        loop@ for (i in 0 until dev.interfaceCount) {
+            val itf = dev.getInterface(i)
+            for (e in 0 until itf.endpointCount) {
+                val ep = itf.getEndpoint(e)
+                if (ep.direction == UsbConstants.USB_DIR_IN &&
+                    ep.type == UsbConstants.USB_ENDPOINT_XFER_INT
+                ) {
+                    iface = itf; epIn = ep; break@loop
+                }
+            }
+        }
+        if (iface == null || epIn == null) {
+            _status.value = "USB paddle: no interrupt endpoint"
+            sleep(2000)
+            return
+        }
+        val conn: UsbDeviceConnection = usb.openDevice(dev) ?: run {
+            _status.value = "USB paddle: open failed"
+            sleep(2000)
+            return
+        }
+        var lastDit = false
+        var lastDah = false
+        try {
+            conn.claimInterface(iface, true)
+            _connected.value = true
+            _status.value = "USB paddle: connected"
+            val buf = ByteArray(maxOf(2, epIn.maxPacketSize))
+            while (running) {
+                // Interrupt IN; times out when the paddle is idle so we can re-check
+                // `running`. A contact edge returns immediately (report byte 0).
+                val n = conn.bulkTransfer(epIn, buf, buf.size, 200)
+                if (n <= 0) continue
+                val dit = (buf[0].toInt() and 0x01) != 0
+                val dah = (buf[0].toInt() and 0x02) != 0
+                if (dit != lastDit) { lastDit = dit; onDit?.invoke(dit) }
+                if (dah != lastDah) { lastDah = dah; onDah?.invoke(dah) }
+            }
+        } catch (e: Exception) {
+            _status.value = "USB paddle: ${e.message ?: "read error"}"
+        } finally {
+            if (lastDit) onDit?.invoke(false)   // don't leave a contact stuck closed
+            if (lastDah) onDah?.invoke(false)
+            runCatching { conn.releaseInterface(iface) }
+            conn.close()
+            _connected.value = false
+            if (running) _status.value = "USB paddle: disconnected — searching…"
+        }
+    }
+
+    private fun requestPermission(dev: UsbDevice) {
+        val pi = PendingIntent.getBroadcast(
+            appCtx, 0,
+            Intent(ACTION_USB_PERMISSION).setPackage(appCtx.packageName),
+            PendingIntent.FLAG_MUTABLE,
+        )
+        runCatching { usb.requestPermission(dev, pi) }
+    }
+
+    private fun sleep(ms: Long) {
+        try { Thread.sleep(ms) } catch (e: InterruptedException) { running = false }
+    }
+
+    companion object {
+        private const val VID = 0x1EAF   // LeafLabs Maple (Blue Pill) — the paddle firmware
+        private const val ACTION_USB_PERMISSION = "ro.scripca.xlog2.USB_PERMISSION"
+    }
+}

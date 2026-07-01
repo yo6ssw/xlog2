@@ -21,6 +21,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.Podcasts
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.Inbox
@@ -102,6 +103,9 @@ fun LogListScreen(nav: NavHostController, vm: LogViewModel) {
                     }
                     IconButton(onClick = { nav.navigate(Routes.AUDIO) }) {
                         Icon(Icons.Default.Headphones, contentDescription = "Rig audio")
+                    }
+                    IconButton(onClick = { nav.navigate(Routes.PADDLE) }) {
+                        Icon(Icons.Default.Podcasts, contentDescription = "CW paddle keyer")
                     }
                     IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")

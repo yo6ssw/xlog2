@@ -85,6 +85,10 @@ endif()
 # On Android, compile the sqlite3 amalgamation straight into the lib.
 if(ANDROID)
     list(APPEND XLOG_MOBILE_SRC ${VENDOR}/sqlite/sqlite3.c)
+    # The remote paddle keyer (real paddle keying over UDP). Android-only here: on
+    # the host carve-out build it would pull PipeWire; the desktop frontends build
+    # it via their own CMake. Its sidetone uses AAudio on Android (see the file).
+    list(APPEND XLOG_MOBILE_SRC ${CORE}/services/RemotePaddleKeyer.cpp)
 endif()
 
 add_library(xlog_mobile STATIC ${XLOG_MOBILE_SRC})
@@ -100,6 +104,8 @@ if(ANDROID)
     target_include_directories(xlog_mobile PUBLIC
         ${ABIDIR}/include ${VENDOR}/sqlite)
     target_link_libraries(xlog_mobile PUBLIC ${ABIDIR}/lib/libsodium.a)
+    # AAudio backs the paddle keyer's local sidetone (RemotePaddleKeyer.cpp).
+    target_link_libraries(xlog_mobile PUBLIC aaudio)
     if(XLOG_MOBILE_QRZ)
         if(NOT EXISTS "${ABIDIR}/lib/libcurl.a")
             message(FATAL_ERROR

@@ -1,10 +1,16 @@
 #include "RemotePaddleKeyer.h"
 
 #include "RemoteKeyProtocol.h"
-#include "Rtkit.h"
 
+#ifdef __ANDROID__
+// Android has no PipeWire/rtkit: the sidetone uses AAudio (NDK low-latency audio)
+// and the realtime bump falls back to a plain SCHED_FIFO attempt (see below).
+#include <aaudio/AAudio.h>
+#else
+#include "Rtkit.h"
 #include <pipewire/pipewire.h>
 #include <spa/param/audio/format-utils.h>
+#endif
 
 #include <netdb.h>
 #include <pthread.h>
@@ -48,7 +54,11 @@ bool raiseToRealtime() {
     sp.sched_priority = prio;
     if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0)
         return true;
+#ifdef __ANDROID__
+    return false;  // no rtkit on Android; element timing is schedule-locked anyway
+#else
     return platform::makeThreadRealtime(prio);  // desktop fallback via RealtimeKit
+#endif
 }
 
 // Resolve + open a connected UDP socket. connect() pins the peer so send() needs
@@ -89,6 +99,7 @@ int connectUdp(const std::string& host, int port, std::string& err) {
 // chronically xran, glitching every other stream on the sink (notably the
 // rig-audio stream). A native node at ~10 ms keeps the feel tight without
 // destabilizing the graph.
+#ifndef __ANDROID__
 struct PwSidetone {
     static constexpr unsigned kRate = 48000;
 
@@ -234,6 +245,100 @@ void PwSidetone::shutdown() {
         loop = nullptr;
     }
 }
+using Sidetone = PwSidetone;
+
+#else  // __ANDROID__
+
+// AAudio sidetone: the Android analogue of PwSidetone. A low-latency output
+// stream whose data callback synthesises the same click-free (ramped-envelope)
+// sine gated by the key-state atomic. Same public shape (init/shutdown) so
+// sidetoneWorker() is platform-agnostic.
+struct AaSidetone {
+    AAudioStream*      stream = nullptr;
+    std::atomic<bool>* toneOn = nullptr;   // key state, owned by the keyer
+    int    rate     = 48000;
+    int    channels = 1;
+    double phase    = 0.0;
+    double gain     = 0.0;
+    double phaseInc = 0.0;
+    double gainStep = 0.0;
+    double amp      = 0.0;
+
+    static aaudio_data_callback_result_t onData(AAudioStream*, void* userData,
+                                                 void* audioData, std::int32_t numFrames) {
+        auto* st  = static_cast<AaSidetone*>(userData);
+        auto* dst = static_cast<std::int16_t*>(audioData);
+        for (std::int32_t f = 0; f < numFrames; ++f) {
+            const bool on = st->toneOn->load(std::memory_order_relaxed);  // per-frame for low latency
+            if (on && st->gain < 1.0)
+                st->gain = std::min(1.0, st->gain + st->gainStep);
+            else if (!on && st->gain > 0.0)
+                st->gain = std::max(0.0, st->gain - st->gainStep);
+            const auto s = static_cast<std::int16_t>(
+                st->gain > 0.0 ? std::sin(st->phase) * st->gain * st->amp : 0.0);
+            for (int c = 0; c < st->channels; ++c)
+                dst[f * st->channels + c] = s;
+            st->phase += st->phaseInc;
+            if (st->phase >= 2.0 * M_PI)
+                st->phase -= 2.0 * M_PI;
+        }
+        return AAUDIO_CALLBACK_RESULT_CONTINUE;
+    }
+
+    bool init(int toneHz, int levelPct, int /*latencyFrames*/, const std::string& /*target*/,
+              std::atomic<bool>* tone, std::string& err) {
+        toneOn = tone;
+        phase  = 0.0;
+        gain   = 0.0;
+        amp    = (levelPct / 100.0) * 0.6 * 32767.0;
+
+        AAudioStreamBuilder* b = nullptr;
+        if (AAudio_createStreamBuilder(&b) != AAUDIO_OK) {
+            err = "AAudio_createStreamBuilder failed";
+            return false;
+        }
+        AAudioStreamBuilder_setFormat(b, AAUDIO_FORMAT_PCM_I16);
+        AAudioStreamBuilder_setChannelCount(b, 1);
+        AAudioStreamBuilder_setSampleRate(b, rate);
+        AAudioStreamBuilder_setPerformanceMode(b, AAUDIO_PERFORMANCE_MODE_LOW_LATENCY);
+        AAudioStreamBuilder_setDataCallback(b, onData, this);
+        const aaudio_result_t r = AAudioStreamBuilder_openStream(b, &stream);
+        AAudioStreamBuilder_delete(b);
+        if (r != AAUDIO_OK || stream == nullptr) {
+            err = AAudio_convertResultToText(r);
+            stream = nullptr;
+            return false;
+        }
+        // The device may open at a different rate/channel count than requested;
+        // read the actuals so the tone frequency and envelope stay correct.
+        rate     = AAudioStream_getSampleRate(stream);
+        channels = AAudioStream_getChannelCount(stream);
+        if (rate <= 0) rate = 48000;
+        if (channels < 1) channels = 1;
+        phaseInc = 2.0 * M_PI * toneHz / rate;
+        gainStep = 1.0 / (rate * 0.005);   // 5 ms attack/decay envelope
+
+        const aaudio_result_t rs = AAudioStream_requestStart(stream);
+        if (rs != AAUDIO_OK) {
+            err = AAudio_convertResultToText(rs);
+            AAudioStream_close(stream);
+            stream = nullptr;
+            return false;
+        }
+        return true;
+    }
+
+    void shutdown() {
+        if (stream != nullptr) {
+            AAudioStream_requestStop(stream);
+            AAudioStream_close(stream);
+            stream = nullptr;
+        }
+    }
+};
+using Sidetone = AaSidetone;
+
+#endif  // __ANDROID__
 
 }  // namespace
 
@@ -515,7 +620,7 @@ void RemotePaddleKeyer::sidetoneWorker(RemotePaddleConfig cfg) {
     const int toneHz   = cfg.toneHz > 0 ? cfg.toneHz : 600;
     const int levelPct = cfg.level < 0 ? 0 : (cfg.level > 100 ? 100 : cfg.level);
 
-    PwSidetone tone;
+    Sidetone tone;
     std::string err;
     if (!tone.init(toneHz, levelPct, cfg.sidetoneLatencyFrames, cfg.device, &toneOn_, err)) {
         postStatus("Paddle keyer: sidetone unavailable — " + err);

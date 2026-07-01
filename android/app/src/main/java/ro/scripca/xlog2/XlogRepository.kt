@@ -46,6 +46,16 @@ class XlogRepository private constructor(appContext: Context) {
     private val _audioActive = MutableStateFlow(false)
     val audioActive: StateFlow<Boolean> = _audioActive.asStateFlow()
 
+    // Remote paddle keyer + USB HID paddle reader (driven by PaddleService).
+    private val keyer = PaddleKeyer()
+    private val usbPaddle = UsbPaddle(appContext)
+
+    val paddleStatus: StateFlow<String> = keyer.status
+    val paddleTransmitting: StateFlow<Boolean> = keyer.transmitting
+    val paddleActive: StateFlow<Boolean> = keyer.active
+    val usbPaddleStatus: StateFlow<String> = usbPaddle.status
+    val usbPaddleConnected: StateFlow<Boolean> = usbPaddle.connected
+
     private val _qsos = MutableStateFlow<List<Qso>>(emptyList())
     val qsos: StateFlow<List<Qso>> = _qsos.asStateFlow()
 
@@ -196,6 +206,41 @@ class XlogRepository private constructor(appContext: Context) {
         rig.stop()
         _audioActive.value = false
     }
+
+    // --- paddle keyer + USB paddle (driven by PaddleService) --------------
+    /** Start the remote paddle keyer and the USB HID paddle reader. */
+    fun startPaddle() {
+        // USB paddle contacts drive the native keyer directly (lock-free atomics).
+        usbPaddle.onDit = { keyer.setDit(it) }
+        usbPaddle.onDah = { keyer.setDah(it) }
+        // Semi-break-in: mute the rig-audio stream while transmitting.
+        keyer.onTransmitChange = { tx -> if (settings.paddleMuteAudio) audio.setMuted(tx) }
+        keyer.start(
+            PaddleKeyer.Config(
+                host = settings.effectivePaddleHost,
+                port = settings.paddlePort,
+                wpm = settings.paddleWpm,
+                iambicB = settings.paddleIambicB,
+                ultimatic = settings.paddleUltimatic,
+                autospace = settings.paddleAutospace,
+                sidetone = settings.paddleSidetone,
+                toneHz = settings.paddleToneHz,
+                level = settings.paddleLevel,
+                muteTailMs = settings.paddleMuteTailMs,
+            )
+        )
+        usbPaddle.start()
+    }
+
+    fun stopPaddle() {
+        usbPaddle.stop()
+        keyer.stop()
+        audio.setMuted(false)   // lift any lingering semi-break-in mute
+    }
+
+    /** On-screen (touch) paddle contacts for the Paddle panel test keys. */
+    fun paddleDit(pressed: Boolean) = keyer.setDit(pressed)
+    fun paddleDah(pressed: Boolean) = keyer.setDah(pressed)
 
     private fun copyAssetIfMissing(name: String) {
         val dst = File(dataDir, name)

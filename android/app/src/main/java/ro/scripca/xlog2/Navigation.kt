@@ -13,6 +13,7 @@ object Routes {
     const val SYNC = "sync"
     const val PEERS = "peers"
     const val AUDIO = "audio"
+    const val PADDLE = "paddle"
 }
 
 @Composable
@@ -30,5 +31,6 @@ fun XlogNavHost(nav: NavHostController) {
         composable(Routes.SYNC) { SyncScreen(nav) }
         composable(Routes.PEERS) { PeersScreen(nav) }
         composable(Routes.AUDIO) { AudioScreen(nav) }
+        composable(Routes.PADDLE) { PaddleScreen(nav) }
     }
 }

@@ -13,6 +13,8 @@
     <!-- Keep the rig-audio stream + frequency poll alive in the background. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- USB HID Morse paddle (VID 0x1EAF) read via the USB Host API. -->
+    <uses-feature android:name="android.hardware.usb.host" android:required="false" />
 
     <application
         android:name=".XlogApp"
@@ -42,5 +44,10 @@
             android:name=".AudioService"
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
+
+        <service
+            android:name=".PaddleService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 </manifest>
