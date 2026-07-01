@@ -105,7 +105,10 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Begin a new QSO. Date/time = now, RST 599, and freq/band/mode carried
      *  over from the most recent logged QSO (the repo list is ascending, so the
-     *  newest is last). Blank when the logbook is empty. */
+     *  newest is last). Blank when the logbook is empty. When rigctld is
+     *  connected the rig's live frequency wins over the carried-over value and
+     *  its band is auto-derived — matching the desktop, which tracks the rig
+     *  into the entry form. */
     fun startAdd() {
         val last = repo.qsos.value.lastOrNull()
         _editingId.value = 0L
@@ -118,6 +121,9 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
         _dupe.value = ""
         _qrzStatus.value = ""
         _qrzBusy.value = false
+
+        val rigHz = if (repo.rigConnected.value) repo.rigFreqHz.value else null
+        if (rigHz != null && rigHz > 0) onFreqChanged(formatMhz(rigHz))
     }
 
     /** Load a stored QSO into the form for editing. */
@@ -164,4 +170,12 @@ class LogViewModel(app: Application) : AndroidViewModel(app) {
         SimpleDateFormat(pattern, Locale.US).apply {
             timeZone = TimeZone.getTimeZone("UTC")
         }.format(Date())
+
+    /** 14074000 Hz -> "14.074" MHz (trailing zeros trimmed), as the form/desktop
+     *  store frequencies. */
+    private fun formatMhz(hz: Long): String {
+        var s = "%.6f".format(Locale.US, hz / 1_000_000.0)
+        if ('.' in s) s = s.trimEnd('0').trimEnd('.')
+        return s
+    }
 }
