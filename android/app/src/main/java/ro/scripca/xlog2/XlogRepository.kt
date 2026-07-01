@@ -89,6 +89,16 @@ class XlogRepository private constructor(appContext: Context) {
                 _memberCount.value = core.memberCount()
             }
         }
+        // Remember the last frequency seen on each band, so the band selector can
+        // return the operator to where they left off.
+        scope.launch {
+            rig.freqHz.collect { hz ->
+                if (hz == null || hz <= 0) return@collect
+                val band = RigBands.forHz(hz) ?: return@collect
+                if (settings.lastBandFreqHz(band.name) != hz)
+                    settings.setLastBandFreqHz(band.name, hz)
+            }
+        }
     }
 
     fun start() {
@@ -210,8 +220,12 @@ class XlogRepository private constructor(appContext: Context) {
     /** Retune the rig by a signed Hz nudge (« ‹ › » tune buttons). */
     fun stepRigFrequency(deltaHz: Long) = rig.stepFrequency(deltaHz)
 
-    /** Set the rig to an absolute frequency in Hz (band change / QSY). */
-    fun setRigFrequency(hz: Long) = rig.setFrequency(hz)
+    /** QSY to [band]: the last frequency the operator used there, or — if none
+     *  recorded — the middle of the band's CW segment. */
+    fun qsyToBand(band: RigBand) {
+        val last = settings.lastBandFreqHz(band.name)
+        rig.setFrequency(if (last > 0) last else band.cwMidHz)
+    }
 
     // --- paddle keyer + USB paddle (driven by PaddleService) --------------
     /** Start the remote paddle keyer and the USB HID paddle reader. */

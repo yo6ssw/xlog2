@@ -1,8 +1,8 @@
 package ro.scripca.xlog2
 
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -19,20 +18,26 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -135,7 +140,7 @@ fun AudioScreen(nav: NavHostController) {
                             OutlinedButton(
                                 onClick = { repo.stepRigFrequency(step.hz) },
                                 enabled = canTune,
-                                contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                                contentPadding = PaddingValues(0.dp),
                                 modifier = Modifier.width(56.dp).height(48.dp),
                             ) {
                                 Text(step.label, fontSize = 20.sp, fontWeight = FontWeight.Bold)
@@ -143,22 +148,15 @@ fun AudioScreen(nav: NavHostController) {
                         }
                     }
 
-                    // --- band selector: tap to QSY to a band's default frequency.
-                    val curBand = freqHz?.let { hz -> HF_BANDS.firstOrNull { hz in it.lowHz..it.highHz }?.name }
+                    // --- band selector: pick a band to QSY to (last-used freq
+                    // there, else the middle of its CW segment).
+                    val curBand = freqHz?.let { RigBands.forHz(it)?.name }
                     Spacer(Modifier.height(12.dp))
-                    Row(
-                        Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        for (band in HF_BANDS) {
-                            FilterChip(
-                                selected = band.name == curBand,
-                                onClick = { repo.setRigFrequency(band.defaultHz) },
-                                enabled = canTune,
-                                label = { Text(band.name) },
-                            )
-                        }
-                    }
+                    BandSelector(
+                        current = curBand,
+                        enabled = canTune,
+                        onSelect = { repo.qsyToBand(it) },
+                    )
                 }
             }
 
@@ -214,6 +212,39 @@ fun AudioScreen(nav: NavHostController) {
     }
 }
 
+/** Read-only combo box of HF bands; picking one QSYs to its default frequency. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BandSelector(current: String?, enabled: Boolean, onSelect: (RigBand) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(
+        expanded = expanded && enabled,
+        onExpandedChange = { if (enabled) expanded = it },
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        OutlinedTextField(
+            value = current ?: "—",
+            onValueChange = {},
+            readOnly = true,
+            enabled = enabled,
+            label = { Text("Band") },
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable, enabled).fillMaxWidth(),
+        )
+        ExposedDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            for (band in RigBands.all) {
+                DropdownMenuItem(
+                    text = { Text(band.name) },
+                    onClick = {
+                        expanded = false
+                        onSelect(band)
+                    },
+                )
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatusLine(text: String, color: Color) {
     Text(text, style = MaterialTheme.typography.bodySmall, color = color)
@@ -227,28 +258,6 @@ private val TUNE_STEPS = listOf(
     TuneStep("‹", -100L),
     TuneStep("›", 100L),
     TuneStep("»", 500L),
-)
-
-/**
- * HF bands the operator can jump to, with an inclusive Hz range (to highlight
- * the band the rig is currently on) and a default dial frequency to QSY to —
- * the widely-known FT8 dial for that band, a recognisable band-centre marker.
- */
-private class BandPreset(val name: String, val lowHz: Long, val highHz: Long, val defaultHz: Long)
-
-private val HF_BANDS = listOf(
-    BandPreset("160m", 1_800_000, 2_000_000, 1_840_000),
-    BandPreset("80m", 3_500_000, 4_000_000, 3_573_000),
-    BandPreset("60m", 5_060_000, 5_450_000, 5_357_000),
-    BandPreset("40m", 7_000_000, 7_300_000, 7_074_000),
-    BandPreset("30m", 10_100_000, 10_150_000, 10_136_000),
-    BandPreset("20m", 14_000_000, 14_350_000, 14_074_000),
-    BandPreset("17m", 18_068_000, 18_168_000, 18_100_000),
-    BandPreset("15m", 21_000_000, 21_450_000, 21_074_000),
-    BandPreset("12m", 24_890_000, 24_990_000, 24_915_000),
-    BandPreset("10m", 28_000_000, 29_700_000, 28_074_000),
-    BandPreset("6m", 50_000_000, 54_000_000, 50_313_000),
-    BandPreset("2m", 144_000_000, 148_000_000, 144_174_000),
 )
 
 /** 14074000 Hz → "14.07400" MHz string (10 Hz resolution). */

@@ -105,6 +105,11 @@ class Settings(context: Context) {
     /** Effective rigctld host: explicit [freqHost] or, if blank, [audioHost]. */
     val effectiveFreqHost: String get() = freqHost.ifBlank { audioHost }
 
+    /** Last frequency (Hz) the rig was seen on for [band], or 0 if none recorded.
+     *  The band selector QSYs here so switching bands returns you where you left. */
+    fun lastBandFreqHz(band: String): Long = prefs.getLong("band_last_$band", 0L)
+    fun setLastBandFreqHz(band: String, hz: Long) = prefs.edit { putLong("band_last_$band", hz) }
+
     // --- [paddle] — cwsd remote_key real paddle keying over UDP (see PaddleKeyer) ---
     // Host defaults to an IP for the same mDNS reason as [audio]; blank falls back
     // to the audio host (cwsd usually serves remote_key on the same machine).
