@@ -83,8 +83,10 @@ echo ">> building libsodium (dist-build/android-*.sh)"
       before=$(ls -d libsodium-android-* 2>/dev/null || true)
       "./dist-build/$script"
       after=$(ls -d libsodium-android-* 2>/dev/null || true)
+      # `grep .` exits 1 when nothing is new (a rebuild, dirs already present);
+      # tolerate that under `set -o pipefail` and fall back to the newest dir below.
       src=$(comm -13 <(echo "$before" | tr ' ' '\n' | sort) \
-                     <(echo "$after"  | tr ' ' '\n' | sort) | grep . | head -1)
+                     <(echo "$after"  | tr ' ' '\n' | sort) | { grep . || true; } | head -1)
       [ -n "$src" ] || src=$(ls -dt libsodium-android-* | head -1)
       [ -f "$src/lib/libsodium.a" ] || { echo "libsodium build for $abi failed (no $src/lib/libsodium.a)" >&2; exit 1; }
       out="$HERE/$abi"; mkdir -p "$out/lib" "$out/include"
@@ -92,6 +94,43 @@ echo ">> building libsodium (dist-build/android-*.sh)"
       cp -r "$src/include/." "$out/include/"
       echo "   $abi <- $src"
   done )
+
+# --- libopus (rig-audio Opus decode on the client) --------------------------
+# Cross-compiled with the NDK clang via opus's autotools. Decode-only use, but we
+# build the full static lib (small) and let the linker drop unused encoder code.
+OPUS_VER="1.5.2"
+if [ ! -d "$work/libopus" ]; then
+    echo ">> fetching libopus $OPUS_VER"
+    ( cd "$work"
+      curl -fsSLO "https://downloads.xiph.org/releases/opus/opus-$OPUS_VER.tar.gz"
+      tar xzf "opus-$OPUS_VER.tar.gz"
+      mv "opus-$OPUS_VER" libopus )
+fi
+echo ">> building libopus"
+for abi in $ABIS; do
+    case "$abi" in
+      arm64-v8a)   triple=aarch64-linux-android; host=aarch64-linux-android;;
+      armeabi-v7a) triple=armv7a-linux-androideabi; host=arm-linux-androideabi;;
+      x86_64)      triple=x86_64-linux-android; host=x86_64-linux-android;;
+      *) echo "unhandled abi $abi" >&2; exit 1;;
+    esac
+    bdir="$work/libopus/build-$abi"
+    rm -rf "$bdir"; mkdir -p "$bdir"
+    ( cd "$bdir"
+      export CC="$TOOLCHAIN/bin/${triple}${API}-clang"
+      export AR="$TOOLCHAIN/bin/llvm-ar"
+      export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+      export CFLAGS="-fPIC -O2"
+      ../configure --host="$host" --prefix="$bdir/out" \
+          --disable-shared --enable-static --disable-doc --disable-extra-programs >/dev/null
+      make -j"$(nproc)" >/dev/null
+      make install >/dev/null )
+    [ -f "$bdir/out/lib/libopus.a" ] || { echo "libopus build for $abi failed" >&2; exit 1; }
+    out="$HERE/$abi"; mkdir -p "$out/lib" "$out/include"
+    cp "$bdir/out/lib/libopus.a" "$out/lib/"
+    cp -r "$bdir/out/include/opus" "$out/include/"
+    echo "   $abi opus <- $bdir"
+done
 
 # --- libcurl (optional; needs a TLS backend) --------------------------------
 if [ "$WANT_QRZ" = "1" ]; then

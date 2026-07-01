@@ -32,6 +32,20 @@ class XlogRepository private constructor(appContext: Context) {
     private val qrzClient = QrzClient()
     private val qrzCache = QrzCache(appContext)
 
+    // Rig-audio streaming + frequency polling. Process-lifetime singletons like
+    // the core; [AudioService] keeps the process alive so they run in background.
+    private val audio = AudioStreamClient()
+    private val rig = RigctldClient()
+
+    val audioStreaming: StateFlow<Boolean> = audio.streaming
+    val audioStatus: StateFlow<String> = audio.status
+    val audioFrames: StateFlow<Long> = audio.framesDecoded
+    val rigFreqHz: StateFlow<Long?> = rig.freqHz
+    val rigConnected: StateFlow<Boolean> = rig.connected
+
+    private val _audioActive = MutableStateFlow(false)
+    val audioActive: StateFlow<Boolean> = _audioActive.asStateFlow()
+
     private val _qsos = MutableStateFlow<List<Qso>>(emptyList())
     val qsos: StateFlow<List<Qso>> = _qsos.asStateFlow()
 
@@ -159,6 +173,29 @@ class XlogRepository private constructor(appContext: Context) {
         settings.trustedIds = settings.trustedIds - id
     }
     fun syncNow() = scope.launch { core.syncNow() }
+
+    // --- rig audio + frequency (driven by AudioService) -------------------
+    /** Start streaming rig audio and (if enabled) polling the rig frequency. */
+    fun startAudio() {
+        audio.start(
+            AudioStreamClient.Config(
+                host = settings.audioHost,
+                port = settings.audioPort,
+                sampleRate = settings.audioSampleRate,
+                channels = settings.audioChannels,
+            )
+        )
+        if (settings.freqEnabled) {
+            rig.start(settings.effectiveFreqHost, settings.freqPort, settings.freqPollMs.toLong())
+        }
+        _audioActive.value = true
+    }
+
+    fun stopAudio() {
+        audio.stop()
+        rig.stop()
+        _audioActive.value = false
+    }
 
     private fun copyAssetIfMissing(name: String) {
         val dst = File(dataDir, name)

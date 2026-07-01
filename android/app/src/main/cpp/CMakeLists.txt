@@ -12,8 +12,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../../../../native
                  ${CMAKE_BINARY_DIR}/xlog_mobile)
 
-add_library(xlog2jni SHARED xlog_jni.cpp)
+add_library(xlog2jni SHARED xlog_jni.cpp opus_jni.cpp)
 target_link_libraries(xlog2jni PRIVATE xlog_mobile log)
+
+# Vendored libopus for the rig-audio decoder (opus_jni.cpp). Same per-ABI layout
+# as libsodium, produced by android/third_party/build-deps.sh.
+set(XLOG_OPUS "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/${ANDROID_ABI}")
+if(NOT EXISTS "${XLOG_OPUS}/lib/libopus.a")
+    message(FATAL_ERROR
+        "Missing ${XLOG_OPUS}/lib/libopus.a — run android/third_party/build-deps.sh first")
+endif()
+target_include_directories(xlog2jni PRIVATE ${XLOG_OPUS}/include)
+target_link_libraries(xlog2jni PRIVATE ${XLOG_OPUS}/lib/libopus.a)
 
 # 16 KB page-size compatibility (Android 15+ devices, e.g. recent Samsung/Pixel).
 # NDK r26 still defaults LOAD segments to 4 KB (0x1000); force 16 KB (0x4000) so

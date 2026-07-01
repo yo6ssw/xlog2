@@ -57,6 +57,13 @@ fun SettingsScreen(nav: NavHostController) {
     var peers by remember { mutableStateOf(s.staticPeers.joinToString("\n")) }
     var qrzUser by remember { mutableStateOf(s.qrzUser) }
     var qrzPass by remember { mutableStateOf(s.qrzPassword) }
+    var audioHost by remember { mutableStateOf(s.audioHost) }
+    var audioPort by remember { mutableStateOf(s.audioPort.toString()) }
+    var audioRate by remember { mutableStateOf(s.audioSampleRate.toString()) }
+    var audioChannels by remember { mutableStateOf(s.audioChannels.toString()) }
+    var freqEnabled by remember { mutableStateOf(s.freqEnabled) }
+    var freqHost by remember { mutableStateOf(s.freqHost) }
+    var freqPort by remember { mutableStateOf(s.freqPort.toString()) }
     val scrollBehavior = TopAppBarDefaults.pinnedScrollBehavior()
 
     Scaffold(
@@ -120,6 +127,50 @@ fun SettingsScreen(nav: NavHostController) {
                     modifier = Modifier.fillMaxWidth())
             }
 
+            SectionCard("Rig audio (cwsd Opus stream)") {
+                OutlinedTextField(audioHost, { audioHost = it }, label = { Text("Audio host") },
+                    singleLine = true, modifier = Modifier.fillMaxWidth())
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(audioPort, { audioPort = it.filter(Char::isDigit) },
+                        label = { Text("UDP port") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                    OutlinedTextField(audioRate, { audioRate = it.filter(Char::isDigit) },
+                        label = { Text("Sample rate") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                    OutlinedTextField(audioChannels, { audioChannels = it.filter(Char::isDigit) },
+                        label = { Text("Channels") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                }
+                Text(
+                    "Sample rate and channels must match the server.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Show rig frequency", style = MaterialTheme.typography.bodyLarge)
+                        Text(
+                            "Poll a Hamlib rigctld server for the current frequency",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(checked = freqEnabled, onCheckedChange = { freqEnabled = it })
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(freqHost, { freqHost = it },
+                        label = { Text("rigctld host (blank = audio host)") }, singleLine = true,
+                        modifier = Modifier.weight(2f))
+                    OutlinedTextField(freqPort, { freqPort = it.filter(Char::isDigit) },
+                        label = { Text("Port") }, singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        modifier = Modifier.weight(1f))
+                }
+            }
+
             Button(
                 onClick = {
                     s.myCallsign = call
@@ -130,6 +181,13 @@ fun SettingsScreen(nav: NavHostController) {
                     s.staticPeers = peers.split('\n').map { it.trim() }.filter { it.isNotEmpty() }
                     s.qrzUser = qrzUser
                     s.qrzPassword = qrzPass
+                    s.audioHost = audioHost.trim()
+                    s.audioPort = audioPort.toIntOrNull() ?: 7355
+                    s.audioSampleRate = audioRate.toIntOrNull() ?: 8000
+                    s.audioChannels = audioChannels.toIntOrNull() ?: 1
+                    s.freqEnabled = freqEnabled
+                    s.freqHost = freqHost.trim()
+                    s.freqPort = freqPort.toIntOrNull() ?: 4532
                     // Re-open the core with the new secret/peers/creds, then
                     // (re)align the foreground service with the enabled toggle.
                     XlogRepository.get(ctx).restart()

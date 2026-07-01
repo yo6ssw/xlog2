@@ -62,4 +62,46 @@ class Settings(context: Context) {
     var qrzPassword: String
         get() = prefs.getString("qrz_password", "") ?: ""
         set(v) = prefs.edit { putString("qrz_password", v) }
+
+    // --- [audio] — cwsd Opus-over-UDP rig-audio stream (see AudioStreamClient) ---
+    // Default is an IP, not an mDNS ".local" name: Android's resolver can't do
+    // mDNS, so a "*.local" host would fail to connect (the desktop resolves it
+    // via nss-mdns). Edit in Settings for a different server.
+    var audioHost: String
+        get() = prefs.getString("audio_host", "192.168.3.41") ?: "192.168.3.41"
+        set(v) = prefs.edit { putString("audio_host", v) }
+
+    var audioPort: Int
+        get() = prefs.getInt("audio_port", 7355)
+        set(v) = prefs.edit { putInt("audio_port", v) }
+
+    /** Opus sample rate; must match the server (8000/12000/16000/24000/48000). */
+    var audioSampleRate: Int
+        get() = prefs.getInt("audio_sample_rate", 8000)
+        set(v) = prefs.edit { putInt("audio_sample_rate", v) }
+
+    var audioChannels: Int
+        get() = prefs.getInt("audio_channels", 1)
+        set(v) = prefs.edit { putInt("audio_channels", v) }
+
+    // --- [rig] — Hamlib rigctld frequency polling (see RigctldClient) ---
+    var freqEnabled: Boolean
+        get() = prefs.getBoolean("freq_enabled", true)
+        set(v) = prefs.edit { putBoolean("freq_enabled", v) }
+
+    /** rigctld host; blank falls back to [audioHost] (cwsd usually serves both). */
+    var freqHost: String
+        get() = prefs.getString("freq_host", "") ?: ""
+        set(v) = prefs.edit { putString("freq_host", v) }
+
+    var freqPort: Int
+        get() = prefs.getInt("freq_port", 4532)
+        set(v) = prefs.edit { putInt("freq_port", v) }
+
+    var freqPollMs: Int
+        get() = prefs.getInt("freq_poll_ms", 500)
+        set(v) = prefs.edit { putInt("freq_poll_ms", v) }
+
+    /** Effective rigctld host: explicit [freqHost] or, if blank, [audioHost]. */
+    val effectiveFreqHost: String get() = freqHost.ifBlank { audioHost }
 }

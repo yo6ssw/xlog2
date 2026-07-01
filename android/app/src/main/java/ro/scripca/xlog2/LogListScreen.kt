@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Sync
 import androidx.compose.material.icons.outlined.Inbox
@@ -98,6 +99,9 @@ fun LogListScreen(nav: NavHostController, vm: LogViewModel) {
                         ) {
                             Icon(Icons.Default.Sync, contentDescription = "Sync ($members peers)")
                         }
+                    }
+                    IconButton(onClick = { nav.navigate(Routes.AUDIO) }) {
+                        Icon(Icons.Default.Headphones, contentDescription = "Rig audio")
                     }
                     IconButton(onClick = { nav.navigate(Routes.SETTINGS) }) {
                         Icon(Icons.Default.Settings, contentDescription = "Settings")
