@@ -81,6 +81,34 @@ is copied to the app's files dir and loaded, so the DXCC chip (country · CQ ·
 ITU · continent) resolves offline. Replace that asset to update the prefix
 table. If it's ever absent the feature degrades gracefully (blank chip).
 
+## USB HID paddle (`UsbPaddle.kt`)
+
+The phone-side reader for the vendor-HID Morse paddle (USB VID `0x1EAF`), the
+analogue of the desktop's `/dev/hidraw` `HidPaddleInput`. It reads the interrupt
+report over the USB Host API and drives the native keyer (`onDit`/`onDah` →
+`PaddleKeyer.setDit`/`setDah`); report byte 0 is bit0 = dit, bit1 = dah. Two
+Android-specific gotchas, both fixed and commented in the file — mind them if you
+touch this code:
+
+- **Composite device — pick the HID interface, not the first interrupt-IN
+  endpoint.** The paddle enumerates as CDC-ACM serial **+** HID; the CDC comms
+  interface (class 2) also exposes an interrupt-IN endpoint (its modem-status
+  notification channel) that never carries paddle reports. Match
+  `interfaceClass == USB_CLASS_HID` (class 3).
+- **Read via `UsbRequest`, and catch `TimeoutException`.** `bulkTransfer()` is
+  unreliable on interrupt endpoints (usbfs builds a bulk pipe). Use the async
+  `UsbRequest` (`initialize`/`queue`/`requestWait`). Critically,
+  `requestWait(timeout)` **throws `TimeoutException`** on an idle timeout (it does
+  not return null) — swallow it and keep the request queued, or the read loop
+  tears down every 200 ms, flapping the connected state and dropping a held
+  contact.
+
+Debugging tip: the phone has a single USB-C port, so the paddle and USB adb can't
+be attached at once. logcat's ring buffer survives the disconnect — clear it,
+run the paddle session unplugged, then replug USB and `adb logcat -d`. The keyer
+itself connects to cwsd over the **network**, so keyer/UI-only bugs reproduce
+over adb with no paddle.
+
 ## Notes / known gaps
 
 - **QRZ qrz.com** lookups are not yet wired in Kotlin (OkHttp); the native

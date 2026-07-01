@@ -9,9 +9,11 @@ import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
 import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbManager
+import android.hardware.usb.UsbRequest
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.nio.ByteBuffer
 
 /**
  * Reads the custom xlog2 vendor-HID Morse paddle (USB VID 0x1EAF, the companion
@@ -19,7 +21,8 @@ import kotlinx.coroutines.flow.asStateFlow
  * the desktop's [HidPaddleInput] /dev/hidraw reader. Each interrupt report's byte 0
  * carries the contact state (bit0 = dit, bit1 = dah); edges drive [onDit]/[onDah]
  * (wired to the keyer). A worker thread auto-discovers the device, requests USB
- * permission once, and reads the interrupt endpoint until unplugged/stopped.
+ * permission once, and reads the interrupt endpoint (via the async [UsbRequest]
+ * API — see [readDevice]) until unplugged/stopped.
  */
 class UsbPaddle(context: Context) {
 
@@ -78,15 +81,22 @@ class UsbPaddle(context: Context) {
         _connected.value = false
     }
 
-    /** Locate a HID interface with an interrupt-IN endpoint and read its reports. */
+    /** Locate the HID interface's interrupt-IN endpoint and read its reports. */
     private fun readDevice(dev: UsbDevice) {
         var iface: UsbInterface? = null
         var epIn: UsbEndpoint? = null
+        // The paddle enumerates as a composite device (CDC-ACM serial + HID). The
+        // CDC comms interface (class 2) also has an interrupt-IN endpoint — its
+        // modem-status notification channel — so we must match the *HID* interface
+        // (class 3) specifically, not merely the first interrupt-IN endpoint, or we
+        // end up reading the serial notification endpoint (which never carries
+        // paddle reports) and spin re-claiming it.
         loop@ for (i in 0 until dev.interfaceCount) {
             val itf = dev.getInterface(i)
             for (e in 0 until itf.endpointCount) {
                 val ep = itf.getEndpoint(e)
-                if (ep.direction == UsbConstants.USB_DIR_IN &&
+                if (itf.interfaceClass == UsbConstants.USB_CLASS_HID &&
+                    ep.direction == UsbConstants.USB_DIR_IN &&
                     ep.type == UsbConstants.USB_ENDPOINT_XFER_INT
                 ) {
                     iface = itf; epIn = ep; break@loop
@@ -94,7 +104,7 @@ class UsbPaddle(context: Context) {
             }
         }
         if (iface == null || epIn == null) {
-            _status.value = "USB paddle: no interrupt endpoint"
+            _status.value = "USB paddle: no HID interrupt endpoint"
             sleep(2000)
             return
         }
@@ -105,24 +115,61 @@ class UsbPaddle(context: Context) {
         }
         var lastDit = false
         var lastDah = false
+        val req = UsbRequest()
         try {
             conn.claimInterface(iface, true)
+            if (!req.initialize(conn, epIn)) {
+                _status.value = "USB paddle: endpoint init failed"
+                sleep(2000)
+                return
+            }
             _connected.value = true
             _status.value = "USB paddle: connected"
-            val buf = ByteArray(maxOf(2, epIn.maxPacketSize))
+            // Interrupt IN via the async UsbRequest API. bulkTransfer() is
+            // unreliable on interrupt endpoints — usbfs builds a *bulk* pipe, and
+            // the kernel URB-type mismatch makes it return -1 on many devices
+            // (silently swallowed as a timeout), so no edges ever arrive. Here the
+            // firmware sends a report only on a contact change; the queued request
+            // stays pending until then, so requestWait's 200 ms timeout is just how
+            // often we re-check `running` while idle.
+            val size = maxOf(2, epIn.maxPacketSize)
+            val buf = ByteBuffer.allocate(size)
+            if (!req.queue(buf)) {
+                _status.value = "USB paddle: read queue failed"
+                return
+            }
             while (running) {
-                // Interrupt IN; times out when the paddle is idle so we can re-check
-                // `running`. A contact edge returns immediately (report byte 0).
-                val n = conn.bulkTransfer(epIn, buf, buf.size, 200)
-                if (n <= 0) continue
-                val dit = (buf[0].toInt() and 0x01) != 0
-                val dah = (buf[0].toInt() and 0x02) != 0
-                if (dit != lastDit) { lastDit = dit; onDit?.invoke(dit) }
-                if (dah != lastDah) { lastDah = dah; onDah?.invoke(dah) }
+                // requestWait(timeout) signals an idle timeout by THROWING
+                // TimeoutException (not returning null, as some docs imply) — the
+                // request stays queued, so we just keep waiting and re-check
+                // `running`. Letting it escape would tear down the whole session
+                // every 200 ms (flapping the connected state + dropping held
+                // contacts via the finally's safety key-up).
+                val done = try {
+                    conn.requestWait(200) ?: continue
+                } catch (e: java.util.concurrent.TimeoutException) {
+                    continue
+                }
+                if (done !== req) continue
+                val n = buf.position()   // bytes transferred (single-arg queue, API 26+)
+                if (n > 0) {
+                    val b0 = buf.get(0).toInt() and 0xFF
+                    val dit = (b0 and 0x01) != 0
+                    val dah = (b0 and 0x02) != 0
+                    if (dit != lastDit) { lastDit = dit; onDit?.invoke(dit) }
+                    if (dah != lastDah) { lastDah = dah; onDah?.invoke(dah) }
+                }
+                buf.clear()
+                if (!req.queue(buf)) {   // re-arm for the next report
+                    _status.value = "USB paddle: read queue failed"
+                    break
+                }
             }
         } catch (e: Exception) {
             _status.value = "USB paddle: ${e.message ?: "read error"}"
         } finally {
+            runCatching { req.cancel() }
+            runCatching { req.close() }
             if (lastDit) onDit?.invoke(false)   // don't leave a contact stuck closed
             if (lastDah) onDah?.invoke(false)
             runCatching { conn.releaseInterface(iface) }
