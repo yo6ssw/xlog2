@@ -207,6 +207,12 @@ class XlogRepository private constructor(appContext: Context) {
         _audioActive.value = false
     }
 
+    /** Retune the rig by a signed Hz nudge (« ‹ › » tune buttons). */
+    fun stepRigFrequency(deltaHz: Long) = rig.stepFrequency(deltaHz)
+
+    /** Set the rig to an absolute frequency in Hz (band change / QSY). */
+    fun setRigFrequency(hz: Long) = rig.setFrequency(hz)
+
     // --- paddle keyer + USB paddle (driven by PaddleService) --------------
     /** Start the remote paddle keyer and the USB HID paddle reader. */
     fun startPaddle() {
