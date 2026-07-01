@@ -1,15 +1,18 @@
 package ro.scripca.xlog2
 
+import android.app.ForegroundServiceStartNotAllowedException
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
+import androidx.core.app.ServiceCompat
 
 /**
  * Foreground service that keeps the sync mesh alive while the app is
@@ -25,8 +28,35 @@ class SyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        startForeground(NOTIF_ID, buildNotification())
+        // A null intent means the system is restarting us — which, on Android 12+,
+        // happens while the app is in the background where promoting to foreground
+        // is illegal. Don't even try; bail so we never crash the process. We are
+        // START_NOT_STICKY, so this restart path should not occur, but guard anyway.
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
+        // Promoting to foreground is disallowed from the background (API 31+); if
+        // that ever happens, catch it instead of crashing the whole process.
+        try {
+            ServiceCompat.startForeground(
+                this, NOTIF_ID, buildNotification(),
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                else 0
+            )
+        } catch (e: Exception) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+                e is ForegroundServiceStartNotAllowedException
+            ) {
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            throw e
+        }
+
+        // Only after a successful foreground promotion do we take resources.
         val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
         multicastLock = wifi.createMulticastLock("xlog2-sync").apply {
             setReferenceCounted(false)
@@ -34,7 +64,7 @@ class SyncService : Service() {
         }
 
         XlogRepository.get(applicationContext).start()
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     override fun onDestroy() {
