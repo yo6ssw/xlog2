@@ -30,11 +30,14 @@ AutoName: XLOG2
 RepoType: git
 Repo: https://github.com/yo6ssw/xlog2.git
 
-# NOTE: reproducible builds (Binaries + AllowedAPKSigningKeys) are not declared:
-# everything reproduces except the JNI libxlog2jni.so (which statically links
-# libsodium/opus/sqlite built via autotools), so F-Droid signs the app with its
-# own key for now. Revisit once the native build is bit-reproducible across the
-# GitHub and F-Droid buildservers.
+# Reproducible builds: F-Droid builds from source, then checks its APK against
+# the developer-signed release APK below (which must be signed by the key whose
+# certificate SHA-256 is listed). On a match, F-Droid ships the developer-signed
+# APK, so users can move between the GitHub release and F-Droid without a
+# signature conflict. The GitHub Actions "Android APK" workflow publishes
+# xlog2-android-<version>.apk on each vX.Y.Z release.
+Binaries: https://github.com/yo6ssw/xlog2/releases/download/v%v/xlog2-android-%v.apk
+AllowedAPKSigningKeys: 295dcb7ce93977048c86fa8b38c300a5a4e0d474bd933fb363bfdcbb5be929ce
 
 Builds:
   - versionName: 0.6.7

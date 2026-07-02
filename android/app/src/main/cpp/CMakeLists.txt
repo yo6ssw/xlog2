@@ -38,5 +38,14 @@ if(NOT XLOG_MOBILE_QRZ)
     target_compile_definitions(xlog2jni PRIVATE XLOG_NO_QRZ=1)
 endif()
 
+# Reproducible builds. AGP links with -Wl,--build-id=sha1, but that id is a hash
+# over the linked .so INCLUDING the -g debug info, whose embedded absolute source
+# and NDK paths differ between build hosts (our GitHub CI vs the F-Droid
+# buildserver). The differing build-id is a NOTE (not a debug section) so it
+# survives stripping, and it is the ONLY thing that stops libxlog2jni.so
+# reproducing (verified: the stripped libs are byte-identical once the build-id
+# is removed). Drop it so F-Droid's from-source build matches the published APK.
+target_link_options(xlog2jni PRIVATE "-Wl,--build-id=none")
+
 # Strip in release to keep the .so small.
 target_link_options(xlog2jni PRIVATE $<$<CONFIG:Release>:-s>)
