@@ -1,3 +1,10 @@
+xlog2 (0.6.0) noble; urgency=medium
+
+  * First open-source release: GPL-3.0 LICENSE, SPDX headers, CONTRIBUTING,
+    Code of Conduct, issue/PR templates, CI, and public multimaster submodule.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 12:00:00 +0300
+
 xlog2 (0.5.2) noble; urgency=medium
 
   * Release 0.5.2.

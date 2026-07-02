@@ -150,6 +150,18 @@ g++ -std=c++20 -Isrc/core/domain -Isrc/core/logic \
     $(pkg-config --cflags --libs sqlite3 hamlib libcurl) -o /tmp/foo_test
 ```
 
+## Related projects
+
+Part of a small suite of Linux ham-radio tools:
+
+- **[cwsd](https://github.com/yo6ssw/cwsd)** — the rig-host daemon xlog2 talks
+  to: rig control (`rigctld`), network CW (`cwdaemon`), the Opus rig-audio
+  stream, and remote paddle keying (`remote_key`).
+- **[usb-paddles](https://github.com/yo6ssw/usb-paddles)** — USB Morse-paddle
+  firmware read by xlog2's `HidPaddleInput`.
+- **[multimaster](https://github.com/benishor/multimaster)** — the LAN
+  gossip-mesh library behind xlog2's logbook sync and distributed QRZ cache.
+
 ## License
 
 GPL-3.0, like the original xlog. See [`LICENSE`](LICENSE).
