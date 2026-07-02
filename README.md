@@ -1,5 +1,8 @@
 # xlog2
 
+> Part of the **[hamtools](https://github.com/yo6ssw/hamtools)** suite — see the
+> hub for how cwsd, xlog2 and usb-paddles combine into an integrated (remote) station.
+
 A desktop **amateur-radio logging program** — a clone of the classic
 [xlog](http://www.nongnu.org/xlog/), rebuilt in **C++20** with **CMake**.
 
