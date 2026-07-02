@@ -1,0 +1,29 @@
+xlog2 is an amateur-radio (ham) logging application. This is its mobile
+field-logging client: log QSOs (contacts) on your phone in the field and have
+them appear on your desktop station automatically — and vice-versa.
+
+The phone is not a separate logbook that you sync later. It is a third frontend
+over the very same C++ core as the xlog2 desktop app, so it joins the identical
+peer-to-peer sync mesh: a QSO logged anywhere gossips to every other node on the
+network (desktop, headless xlog2-syncd, and other phones) over an encrypted LAN
+mesh, with no central server and no cloud account.
+
+Features:
+
+* Fast entry form built for the field — large Call field, live DXCC country /
+  CQ / ITU / continent resolution, dupe detection, and band-from-frequency.
+* Peer-to-peer sync over the LAN, auto-discovered, running as a foreground
+  service. No server, no account, no cloud.
+* Trusted-peer model: the mesh will not sync your log until a peer explicitly
+  trusts this node's identity key, so your log stays yours.
+* ADIF import and export through the system file picker.
+* Offline DXCC lookups from a bundled prefix table.
+* Optional USB HID Morse-paddle input for keying a networked CW station.
+
+Everything the app needs to log and sync works fully offline and free. Optional
+QRZ.com callsign lookups use your own QRZ account if you choose to enter one;
+the app works without it.
+
+xlog2 is free software (GPL-3.0-or-later) and part of a small ecosystem of
+open ham-radio tools — see the project page for the desktop app, the headless
+sync daemon, and the CW keyer daemon.

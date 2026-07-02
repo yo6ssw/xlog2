@@ -91,9 +91,11 @@ app (Android rejects a differently-signed APK for the same `applicationId`), so
 back it up. Locally, `./gradlew :app:assembleRelease` with no keystore in the
 environment just produces an **unsigned** APK — handy for smoke tests.
 
-A signed APK is the easy path; the natural next step for discoverability is
-**F-Droid** (this app is fully FOSS — libsodium/sqlite/OkHttp, no Google libs),
-which builds from source using the same Gradle recipe.
+A signed APK is the easy path; the wider-reach channel is **F-Droid** (this app
+is fully FOSS — libsodium/sqlite/OkHttp, no Google libs), which builds from
+source on its own servers. The build recipe and store-listing metadata are
+prepared under [`fdroid/`](fdroid/) — see `fdroid/README.md` for the one-time
+submission procedure.
 
 ## v1 features
 

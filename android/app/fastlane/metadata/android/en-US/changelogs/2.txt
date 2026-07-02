@@ -1,0 +1,3 @@
+First F-Droid release of the xlog2 mobile client: field logging with
+peer-to-peer LAN sync to the xlog2 desktop, ADIF import/export, offline DXCC
+lookup, trusted-peer model, and optional USB HID Morse-paddle input.

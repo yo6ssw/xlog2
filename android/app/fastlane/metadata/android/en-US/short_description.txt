@@ -1,0 +1,1 @@
+Peer-to-peer amateur-radio field logbook that syncs with the xlog2 desktop
