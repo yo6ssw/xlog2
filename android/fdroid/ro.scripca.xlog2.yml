@@ -42,6 +42,15 @@ Builds:
       # image does not ship. (curl/unzip for the source fetches are present.)
       - apt-get update
       - apt-get install -y make
+    # The scanner would flag the static/shared libs that build-deps.sh compiles
+    # FROM SOURCE (libsodium/opus) under third_party/. These are build artifacts,
+    # not committed blobs, so ignore the build + per-ABI output dirs (the vendored
+    # sqlite3.c source and build-deps.sh itself stay scanned).
+    scanignore:
+      - android/third_party/.build
+      - android/third_party/arm64-v8a
+      - android/third_party/armeabi-v7a
+      - android/third_party/x86_64
     gradle:
       - yes
     prebuild:
