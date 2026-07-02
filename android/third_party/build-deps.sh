@@ -82,6 +82,16 @@ echo ">> building libsodium (dist-build/android-*.sh)"
 ( cd "$work/libsodium"
   export ANDROID_NDK_HOME
   export NDK_PLATFORM="android-$API"   # libsodium's android-*.sh requires this
+  # libsodium's android-build.sh only sets CC, leaving configure to discover the
+  # binutils. NDK r26 ships ONLY the llvm-prefixed tools (no ar/nm/ranlib and no
+  # aarch64-linux-android-* wrappers), so configure otherwise falls back to the
+  # host nm — which fails libtool's "parse nm output from a clang object" test on
+  # some hosts (e.g. the F-Droid buildserver / Debian trixie). Point the archive
+  # tools at the NDK's llvm-* explicitly so the build never touches host binutils.
+  export AR="$TOOLCHAIN/bin/llvm-ar"
+  export NM="$TOOLCHAIN/bin/llvm-nm"
+  export RANLIB="$TOOLCHAIN/bin/llvm-ranlib"
+  export STRIP="$TOOLCHAIN/bin/llvm-strip"
   for abi in $ABIS; do
       case "$abi" in
         arm64-v8a)   script=android-armv8-a.sh;;

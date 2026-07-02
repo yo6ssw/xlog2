@@ -1,3 +1,12 @@
+xlog2 (0.6.6) noble; urgency=medium
+
+  * Android/F-Droid: point libsodium's archive tools (AR/NM/RANLIB/STRIP) at the
+    NDK's llvm-* binutils. NDK r26 ships only the llvm-prefixed tools, so
+    configure otherwise fell back to the host nm and failed libtool's object-parse
+    test on the F-Droid buildserver. Verified in a Debian trixie container.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 20:00:00 +0300
+
 xlog2 (0.6.5) noble; urgency=medium
 
   * Android/F-Droid: make the native-dep build portable — disable automake
