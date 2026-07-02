@@ -1,3 +1,9 @@
+xlog2 (0.6.8) noble; urgency=medium
+
+  * Release 0.6.8.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 23:01:16 +0300
+
 xlog2 (0.6.7) noble; urgency=medium
 
   * Android: version the app in lockstep with the ecosystem release tags
