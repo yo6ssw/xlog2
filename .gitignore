@@ -9,3 +9,5 @@
 *.adif
 /appimage-work/
 *.AppImage
+/build-syncd*/
+/xlog2-syncd-*-linux-*

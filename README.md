@@ -95,6 +95,22 @@ It bundles Qt 6, so it doesn't need a recent system GTK (the GTK frontend
 requires GTK ≥ 4.10). LoTW upload still needs `tqsl` installed on the host.
 Otherwise, build from source below.
 
+### Headless sync peer (xlog2-syncd)
+
+To run an always-on logbook backup / sync peer (e.g. on a spare Raspberry Pi):
+
+- **Ubuntu:** `sudo apt install xlog2-syncd`, then
+  `systemctl --user enable --now xlog2-syncd` and
+  `sudo loginctl enable-linger "$USER"` (so it runs headless / at boot).
+- **Debian / Raspberry Pi OS / other:** download the `xlog2-syncd-*-linux-*.tar.gz`
+  from the [releases](https://github.com/yo6ssw/xlog2/releases), unpack, and run
+  `./install.sh` — it installs a per-user service, scaffolds the config, enables
+  it and turns on lingering.
+
+Either way, set `[sync] secret` in `~/.config/xlog2/layout.ini` to match your
+other nodes, then `systemctl --user restart xlog2-syncd`. Follow it with
+`journalctl --user -u xlog2-syncd -f`.
+
 ## Building
 
 A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib,
