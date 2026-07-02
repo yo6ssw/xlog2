@@ -16,8 +16,8 @@ android {
         // Versioned in lockstep with the ecosystem release tags (vX.Y.Z) so
         // F-Droid autoupdate (UpdateCheckMode: Tags + AutoUpdateMode: Version v%v)
         // can map a tag to this build. versionCode = major*1000000 + minor*10000 + patch*100.
-        versionCode = 60800
-        versionName = "0.6.8"
+        versionCode = 60900
+        versionName = "0.6.9"
 
         ndk {
             // ABIs we vendor deps for (see android/third_party/build-deps.sh).
