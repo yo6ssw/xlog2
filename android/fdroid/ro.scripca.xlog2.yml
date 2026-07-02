@@ -40,9 +40,9 @@ Binaries: https://github.com/yo6ssw/xlog2/releases/download/v%v/xlog2-android-%v
 AllowedAPKSigningKeys: 295dcb7ce93977048c86fa8b38c300a5a4e0d474bd933fb363bfdcbb5be929ce
 
 Builds:
-  - versionName: 0.6.8
-    versionCode: 60800
-    commit: ce71519407423284af5f02284dd33707b3d57894
+  - versionName: 0.6.9
+    versionCode: 60900
+    commit: f1b75eeac67fb5c0d953b0f86d247effc1c5f29f
     subdir: android/app
     submodules: true          # multimaster mesh library lives in third_party/
     ndk: r26d                 # == 26.3.11579264, the ndkVersion in build.gradle.kts
@@ -73,5 +73,5 @@ Builds:
 # commit hash; autoupdate-generated entries reference the tag.
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
-CurrentVersion: 0.6.8
-CurrentVersionCode: 60800
+CurrentVersion: 0.6.9
+CurrentVersionCode: 60900
