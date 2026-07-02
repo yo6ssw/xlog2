@@ -114,8 +114,10 @@ other nodes, then `systemctl --user restart xlog2-syncd`. Follow it with
 ## Building
 
 A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib,
-libcurl, Opus and ALSA, plus gtkmm-4 (for the GTK frontend) and/or Qt 6 (for the
-Qt frontend).
+libcurl, Opus, ALSA, PipeWire, D-Bus and libsodium, plus gtkmm-4 (for the GTK
+frontend) and/or Qt 6 (for the Qt frontend). PipeWire and D-Bus are required
+(rig-audio playback / sidetone and RealtimeKit RT scheduling); libsodium backs
+the sync mesh's encryption.
 
 On Debian/Ubuntu:
 
@@ -123,7 +125,8 @@ On Debian/Ubuntu:
 sudo apt install build-essential cmake pkg-config \
     libgtkmm-4.0-dev qt6-base-dev \
     libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
-    libopus-dev libasound2-dev
+    libopus-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev \
+    libsodium-dev
 # Optional, runtime only — for LoTW upload:
 sudo apt install tqsl
 ```
