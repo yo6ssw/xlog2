@@ -85,6 +85,15 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+
+    // AGP embeds a "dependency information" block in the APK signing block by
+    // default (for Play). F-Droid rejects extra signing blocks, and it also
+    // leaks a dependency list, so omit it. Applies to both our release build and
+    // F-Droid's from-source build, so the reproducible match is preserved.
+    dependenciesInfo {
+        includeInApk = false
+        includeInBundle = false
+    }
 }
 
 dependencies {
