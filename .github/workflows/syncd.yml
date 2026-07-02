@@ -52,3 +52,41 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: xlog2-syncd-*-linux-*.tar.gz
+
+  # Fully-static musl build: a single dependency-free binary that runs on ANY
+  # Linux (glibc or musl). Built in Alpine via docker; the whole core compiles on
+  # musl and syncd is hand-linked over the archives so only sqlite/curl/sodium are
+  # pulled (no statically-unavailable pipewire/dbus). arm64 uses the native runner.
+  musl:
+    name: fully-static musl (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  runner: ubuntu-24.04 }
+          - { arch: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build fully-static musl syncd (Alpine)
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          [ -n "$ver" ] || ver="$(git describe --tags --always 2>/dev/null || echo dev)"
+          docker run -i --rm -e VER="$ver" -e ARCH='${{ matrix.arch }}' \
+            -v "$GITHUB_WORKSPACE":/src -w /src alpine:3.20 sh packaging/build-syncd-musl.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xlog2-syncd-musl-${{ matrix.arch }}
+          path: xlog2-syncd-*-static.tar.gz
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: xlog2-syncd-*-static.tar.gz

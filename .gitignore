@@ -11,3 +11,4 @@
 *.AppImage
 /build-syncd*/
 /xlog2-syncd-*-linux-*
+/xlog2-syncd
