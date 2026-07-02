@@ -33,10 +33,21 @@ packaging/release.sh 0.2.0      # bumps CMakeLists + debian/changelog, commits,
 git push origin master --follow-tags
 ```
 
-`release.sh` keeps `CMakeLists.txt` and `debian/changelog` in sync and creates
-the annotated tag `vX.Y.Z`, so the tag, the build version, and the package
-version can never drift apart. Do the work and commit it first; run
-`release.sh` when you're ready to cut the release.
+`release.sh` keeps `CMakeLists.txt`, `debian/changelog` **and the Android app
+version** (`android/app/build.gradle.kts`) in sync, GPG-signs the commit and tag,
+and creates the annotated tag `vX.Y.Z`, so the tag, the build version, the
+package version and the Android version can never drift apart. Do the work and
+commit it first; run `release.sh` when you're ready to cut the release.
+
+### Android version / F-Droid autoupdate
+
+The Android app must move in lockstep with the tag: its `versionName` equals the
+release version and its `versionCode` is `major*1000000 + minor*10000 +
+patch*100` (e.g. `0.6.7` → `60700`). F-Droid autoupdate (`UpdateCheckMode: Tags`
++ `AutoUpdateMode: Version` in the fdroiddata recipe) maps a new tag back to its
+`versionName`, so a release whose Android `versionName` didn't match the tag
+would never publish on F-Droid. `release.sh` sets both, so this stays correct as
+long as releases go through it.
 
 ## Git tags
 
