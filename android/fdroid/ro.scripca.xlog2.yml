@@ -9,11 +9,11 @@
 #
 # NOTE: no Summary/Description here on purpose. F-Droid sources the listing text
 # (and changelog) from the upstream Fastlane metadata in android/app/fastlane/,
-# read from the built commit — which is why `commit` must point at a tag that
-# contains it and the buildserver libsodium fix (>= v0.6.6). fdroiddata's
-# make-summary-translatable.py check
-# rejects an inline Summary, and the contributor guidelines ask not to duplicate
-# summary/description in fdroiddata when the repo carries Fastlane metadata.
+# read from the built commit — so the built commit must contain that metadata and
+# the buildserver libsodium fix (v0.6.6+; the pinned hash below is v0.6.7).
+# fdroiddata's make-summary-translatable.py check rejects an inline Summary, and
+# the contributor guidelines ask not to duplicate summary/description in
+# fdroiddata when the repo carries Fastlane metadata.
 
 Categories:
   - Connectivity
@@ -31,9 +31,9 @@ RepoType: git
 Repo: https://github.com/yo6ssw/xlog2.git
 
 Builds:
-  - versionName: 0.2.0
-    versionCode: 2
-    commit: v0.6.6
+  - versionName: 0.6.7
+    versionCode: 60700
+    commit: 0050bbf6e5545dcb869d228adacaf485a4441382
     subdir: android/app
     submodules: true          # multimaster mesh library lives in third_party/
     ndk: r26d                 # == 26.3.11579264, the ndkVersion in build.gradle.kts
@@ -62,14 +62,13 @@ Builds:
       - ./third_party/build-deps.sh --no-qrz --ndk "${ANDROID_NDK_HOME:-$ANDROID_NDK}"
       - popd
 
-# The app's own version track (0.2.0 / code 2) is independent of the ecosystem's
-# git tags (v0.6.x, shared with the desktop app). UpdateCheckMode: Tags reads the
-# versionCode from android/app/build.gradle.kts at the newest tag, so a desktop-
-# only release that does not bump the Android versionCode correctly yields no
-# false update. Bump versionCode in build.gradle.kts on any release that should
-# ship a new APK; add a matching Builds entry here (AutoUpdateMode is None because
-# the app versionName does not equal the tag name).
-AutoUpdateMode: None
+# The Android app is versioned in lockstep with the ecosystem release tags
+# (vX.Y.Z), so a new tag whose android/app/build.gradle.kts versionName matches
+# drives a new build automatically: UpdateCheckMode Tags finds the newest tag and
+# reads its versionCode; AutoUpdateMode Version maps that versionName back to the
+# tag `v%v`. The manual build above pins a full commit hash; autoupdate-generated
+# entries reference the tag.
+AutoUpdateMode: Version v%v
 UpdateCheckMode: Tags
-CurrentVersion: 0.2.0
-CurrentVersionCode: 2
+CurrentVersion: 0.6.7
+CurrentVersionCode: 60700
