@@ -5,3 +5,8 @@ local.properties
 .idea/
 .cxx/
 captures/
+# Release signing material — never commit.
+*.jks
+*.keystore
+*.p12
+keystore.properties

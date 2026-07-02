@@ -62,6 +62,39 @@ cmake -S native -B ../build-android-host && cmake --build ../build-android-host 
 # run a second instance with the same secret to watch a QSO sync
 ```
 
+### Release APK / publishing
+
+`.github/workflows/android.yml` builds a **universal signed APK** (all vendored
+ABIs in one file) on every `v*` tag and attaches it to the GitHub release, next
+to the desktop AppImage and syncd tarballs. Users install it by sideloading the
+`xlog2-android-<ver>.apk` asset.
+
+Signing keys live in **repo secrets**, never in git. One-time setup:
+
+```sh
+keytool -genkeypair -v -keystore xlog2-release.jks -alias xlog2 \
+        -keyalg RSA -keysize 4096 -validity 10000       # keep this file SAFE + backed up
+base64 -w0 xlog2-release.jks                            # -> ANDROID_KEYSTORE_BASE64
+```
+
+Add four secrets to the repo (Settings ▸ Secrets ▸ Actions):
+
+| secret | value |
+| --- | --- |
+| `ANDROID_KEYSTORE_BASE64`   | base64 of `xlog2-release.jks` |
+| `ANDROID_KEYSTORE_PASSWORD` | the store password |
+| `ANDROID_KEY_ALIAS`         | `xlog2` |
+| `ANDROID_KEY_PASSWORD`      | the key password |
+
+Losing the keystore means you can never ship an *update* to an already-installed
+app (Android rejects a differently-signed APK for the same `applicationId`), so
+back it up. Locally, `./gradlew :app:assembleRelease` with no keystore in the
+environment just produces an **unsigned** APK — handy for smoke tests.
+
+A signed APK is the easy path; the natural next step for discoverability is
+**F-Droid** (this app is fully FOSS — libsodium/sqlite/OkHttp, no Google libs),
+which builds from source using the same Gradle recipe.
+
 ## v1 features
 
 - **Log**: fast entry form (big Call field, live DXCC/dupe/band-from-freq),

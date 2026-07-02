@@ -41,10 +41,28 @@ android {
         }
     }
 
+    // Release signing is configured only when a keystore is supplied via the
+    // environment (CI decodes the KEYSTORE_FILE secret before the build). With
+    // no keystore set — e.g. a local `assembleRelease` — the block is skipped
+    // and Gradle produces an unsigned APK, so nothing breaks without secrets.
+    val keystorePath = System.getenv("KEYSTORE_FILE")
+    signingConfigs {
+        if (keystorePath != null && file(keystorePath).exists()) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS") ?: "xlog2"
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // null when no keystore is present -> unsigned local build.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 

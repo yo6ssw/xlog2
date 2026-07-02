@@ -1,0 +1,92 @@
+name: Android APK
+
+# Builds the xlog2 Android client (a third frontend over the shared C++ sync
+# core, cross-compiled via the NDK) and attaches a signed release APK to each
+# tag. One universal APK covers all vendored ABIs (arm64-v8a, armeabi-v7a,
+# x86_64) — see android/app/build.gradle.kts abiFilters.
+#
+# Signing: the release keystore is supplied through repo secrets and decoded at
+# build time. Without those secrets (e.g. a fork's workflow_dispatch) the build
+# still runs and produces an UNSIGNED APK — it just isn't attached to a release.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive     # multimaster
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK / CMake / platform
+        run: |
+          sdkmanager "ndk;26.3.11579264" "cmake;3.22.1" \
+                     "platforms;android-35" "build-tools;35.0.0" "platform-tools"
+
+      - name: Vendor native deps (libsodium + sqlite; no libcurl — QRZ via OkHttp)
+        run: |
+          ANDROID_NDK_HOME="$ANDROID_SDK_ROOT/ndk/26.3.11579264" \
+            ./third_party/build-deps.sh --no-qrz
+
+      - name: Decode signing keystore
+        id: keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/xlog2-release.jks"
+            echo "path=$RUNNER_TEMP/xlog2-release.jks" >> "$GITHUB_OUTPUT"
+          else
+            echo "No ANDROID_KEYSTORE_BASE64 secret set — building UNSIGNED." >&2
+          fi
+
+      - name: Build release APK
+        env:
+          KEYSTORE_FILE: ${{ steps.keystore.outputs.path }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          ./gradlew --no-daemon :app:assembleRelease
+
+      - name: Name the APK after the tag
+        id: apk
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          [ -n "$ver" ] || ver="$(git describe --tags --always 2>/dev/null || echo dev)"
+          src="$(find app/build/outputs/apk/release -name '*.apk' | head -n1)"
+          out="xlog2-android-${ver}.apk"
+          cp "$src" "$out"
+          echo "file=android/$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xlog2-android-apk
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/') && steps.keystore.outputs.path != ''
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.file }}
