@@ -1,3 +1,11 @@
+xlog2 (0.6.7) noble; urgency=medium
+
+  * Android: version the app in lockstep with the ecosystem release tags
+    (versionName 0.6.7, versionCode 60700) so F-Droid autoupdate can track new
+    releases from the git tags. No functional change.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 21:00:00 +0300
+
 xlog2 (0.6.6) noble; urgency=medium
 
   * Android/F-Droid: point libsodium's archive tools (AR/NM/RANLIB/STRIP) at the

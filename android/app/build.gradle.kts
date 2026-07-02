@@ -13,8 +13,11 @@ android {
         applicationId = "ro.scripca.xlog2"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0"
+        // Versioned in lockstep with the ecosystem release tags (vX.Y.Z) so
+        // F-Droid autoupdate (UpdateCheckMode: Tags + AutoUpdateMode: Version v%v)
+        // can map a tag to this build. versionCode = major*1000000 + minor*10000 + patch*100.
+        versionCode = 60700
+        versionName = "0.6.7"
 
         ndk {
             // ABIs we vendor deps for (see android/third_party/build-deps.sh).
