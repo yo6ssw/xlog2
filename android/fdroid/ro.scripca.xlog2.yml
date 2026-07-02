@@ -37,6 +37,11 @@ Builds:
     subdir: android/app
     submodules: true          # multimaster mesh library lives in third_party/
     ndk: r26d                 # == 26.3.11579264, the ndkVersion in build.gradle.kts
+    sudo:
+      # libsodium's autotools build needs `make`, which the F-Droid buildserver
+      # image does not ship. (curl/unzip for the source fetches are present.)
+      - apt-get update
+      - apt-get install -y make
     gradle:
       - yes
     prebuild:
