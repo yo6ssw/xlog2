@@ -45,7 +45,9 @@ android {
     // environment (CI decodes the KEYSTORE_FILE secret before the build). With
     // no keystore set — e.g. a local `assembleRelease` — the block is skipped
     // and Gradle produces an unsigned APK, so nothing breaks without secrets.
-    val keystorePath = System.getenv("KEYSTORE_FILE")
+    // Empty (not just null) when CI has no keystore secret: the workflow passes
+    // KEYSTORE_FILE=${{ steps.keystore.outputs.path }}, which resolves to "".
+    val keystorePath = System.getenv("KEYSTORE_FILE")?.takeIf { it.isNotBlank() }
     signingConfigs {
         if (keystorePath != null && file(keystorePath).exists()) {
             create("release") {
