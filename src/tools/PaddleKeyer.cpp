@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // xlog2-paddle: a standalone iambic-paddle practice keyer extracted from xlog2.
 //
 // It reuses xlog2's RemotePaddleKeyer in *local-only* mode: the iambic element

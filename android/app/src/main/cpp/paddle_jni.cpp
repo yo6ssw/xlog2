@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // paddle_jni — JNI bridge for the remote paddle keyer (RemotePaddleKeyer). The
 // iambic keyer + UDP edge streaming + AAudio sidetone all run in the C++ core;
 // Kotlin feeds paddle contacts (setDit/setDah, from the USB HID reader) and gets

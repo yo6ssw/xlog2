@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 #pragma once
 
 // Single source of truth for the displayed version is project(VERSION ...) in

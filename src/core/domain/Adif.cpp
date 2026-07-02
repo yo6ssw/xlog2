@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 #include "Adif.h"
 
 #include <algorithm>

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // xlog2-audioplay — a headless companion that reads xlog2's saved configuration
 // and plays the cwsd rig-audio stream, nothing else. Useful for monitoring the
 // rig (and exercising the audio path) without launching the full GUI.

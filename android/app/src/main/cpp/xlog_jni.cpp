@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // xlog_jni — the JNI bridge between the Kotlin/Compose UI and the carved-out
 // C++ sync core (xlog_mobile). It is the Android equivalent of SyncDaemon.cpp:
 // it wires LogPagePresenter + LogbookSync + SyncCoordinator + QrzPeer/QrzClient

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // host_smoke — off-device validation of the xlog_mobile carve-out.
 //
 // It wires the exact pieces the Android JNI core will (and that SyncDaemon.cpp

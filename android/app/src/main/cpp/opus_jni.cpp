@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // opus_jni — a thin JNI wrapper over the vendored libopus decoder, used by the
 // Kotlin OpusDecoder. The rig-audio stream client (AudioStreamClient.kt) does the
 // UDP receive + AudioTrack playback in Kotlin (like QRZ moved to OkHttp) and only

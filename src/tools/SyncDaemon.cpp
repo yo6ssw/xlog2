@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// SPDX-FileCopyrightText: 2025 Adrian Scripcă (YO6SSW)
+
 // xlog2-syncd — a headless, GUI-free backup peer.
 //
 // It joins the same peer-to-peer sync mesh the GUIs use and keeps a full replica
