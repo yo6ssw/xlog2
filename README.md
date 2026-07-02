@@ -60,6 +60,24 @@ you can switch between them freely.
   has no API for it.) The LoTW download password is stored there in **plain
   text** (file mode `0600`); LoTW upload uses `tqsl`/your certificate instead.
 
+## Install (Ubuntu PPA)
+
+Prebuilt packages for current Ubuntu releases are published to the
+[`ppa:benishor/hamtools`](https://launchpad.net/~benishor/+archive/ubuntu/hamtools)
+PPA — no compiling needed:
+
+```sh
+sudo add-apt-repository ppa:benishor/hamtools
+sudo apt update
+sudo apt install xlog2-gtk    # GTK 4 frontend
+# or the Qt 6 frontend:
+sudo apt install xlog2-qt
+```
+
+Optional extras: `xlog2-data` (world-map coastline data) and `xlog2-syncd`
+(headless logbook-sync backup peer). On other distributions, build from source
+below.
+
 ## Building
 
 A C++20 compiler, CMake ≥ 3.16, and the dev packages for SQLite, Hamlib,
