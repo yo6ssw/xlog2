@@ -1,3 +1,10 @@
+xlog2 (0.6.3) noble; urgency=medium
+
+  * Fix the AppImage CI build: install OpenGL dev packages so Qt 6 is found on
+    the Ubuntu 22.04 build host (Qt6 GUI requires OpenGL).
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 17:00:00 +0300
+
 xlog2 (0.6.2) noble; urgency=medium
 
   * Fix the release AppImage / portable-syncd builds on Ubuntu 22.04: guard
