@@ -44,6 +44,18 @@ TOOLCHAIN="$ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64"
 work="$HERE/.build"
 mkdir -p "$work"
 
+# Disable automake dependency tracking for every ./configure we run below
+# (libsodium's android-*.sh, and libcurl). We do clean one-shot cross-builds and
+# never need incremental .deps, and some hosts (e.g. Debian trixie, as used by
+# the F-Droid buildserver) otherwise fail configure with "Something went wrong
+# bootstrapping makefile fragments for automatic dependency tracking". A
+# config.site is honoured by configure regardless of how it's invoked, so we
+# don't have to patch the vendored build scripts.
+cat > "$work/config.site" <<'EOF'
+enable_dependency_tracking=no
+EOF
+export CONFIG_SITE="$work/config.site"
+
 # --- sqlite amalgamation (arch-independent C; compiled into xlog_mobile) ----
 if [ ! -f "$HERE/sqlite/sqlite3.c" ]; then
     echo ">> fetching sqlite amalgamation"

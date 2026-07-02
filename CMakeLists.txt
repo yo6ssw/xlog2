@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 project(xlog2
-    VERSION 0.6.4
+    VERSION 0.6.5
     DESCRIPTION "A GTK4 amateur-radio logging program (xlog clone)"
     LANGUAGES CXX)
 

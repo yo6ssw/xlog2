@@ -1,3 +1,13 @@
+xlog2 (0.6.5) noble; urgency=medium
+
+  * Android/F-Droid: make the native-dep build portable — disable automake
+    dependency tracking so libsodium's ./configure succeeds on the F-Droid
+    buildserver (Debian trixie). No change to the produced app.
+  * This tag carries the Fastlane store-listing metadata so F-Droid sources the
+    app summary/description/changelog from the built commit.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 19:00:00 +0300
+
 xlog2 (0.6.4) noble; urgency=medium
 
   * Android: publish a signed release APK. CI builds a universal APK (all
