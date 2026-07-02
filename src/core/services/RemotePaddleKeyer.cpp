@@ -12,6 +12,7 @@
 #include <aaudio/AAudio.h>
 #else
 #include <pipewire/pipewire.h>
+#include <pipewire/version.h>  // PW_CHECK_VERSION
 #include <spa/param/audio/format-utils.h>
 
 #include "Rtkit.h"
@@ -139,7 +140,11 @@ void PwSidetone::onProcess(void* data) {
   const std::uint32_t stride = sizeof(std::int16_t);  // mono
   const std::uint32_t maxFrames = buf->datas[0].maxsize / stride;
   std::uint32_t n =
+#if PW_CHECK_VERSION(0, 3, 49)
       pb->requested ? static_cast<std::uint32_t>(pb->requested) : maxFrames;
+#else
+      maxFrames;  // pw_buffer::requested added in PipeWire 0.3.49 (not on 22.04)
+#endif
   if (n > maxFrames) n = maxFrames;
 
   for (std::uint32_t i = 0; i < n; ++i) {

@@ -6,6 +6,7 @@
 #include <netdb.h>
 #include <opus/opus.h>
 #include <pipewire/pipewire.h>
+#include <pipewire/version.h>  // PW_CHECK_VERSION
 #include <poll.h>
 #include <spa/param/audio/format-utils.h>
 #include <sys/socket.h>
@@ -151,7 +152,12 @@ void PwBackend::onProcess(void* data) {
       sizeof(std::int16_t) * static_cast<std::uint32_t>(be->channels);
   const std::uint32_t maxFrames = buf->datas[0].maxsize / stride;
   std::uint32_t reqFrames =
+#if PW_CHECK_VERSION(0, 3, 49)
       pb->requested ? static_cast<std::uint32_t>(pb->requested) : maxFrames;
+#else
+      maxFrames;  // pw_buffer::requested was added in PipeWire 0.3.49 (e.g. not
+                  // on Ubuntu 22.04's 0.3.48); fill the whole buffer instead.
+#endif
   if (reqFrames > maxFrames) reqFrames = maxFrames;
 
   const std::uint32_t want =
