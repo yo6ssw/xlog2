@@ -58,17 +58,17 @@ Builds:
       # QRZ (libcurl/TLS) is disabled — the app does QRZ lookups in Kotlin/OkHttp
       # — so the native core needs no network TLS stack. build-deps.sh fetches the
       # libsodium and sqlite source from their official sites and compiles them.
+      # It reads ANDROID_NDK_HOME, which the buildserver sets for us.
       - pushd ..
-      - ./third_party/build-deps.sh --no-qrz --ndk "${ANDROID_NDK_HOME:-$ANDROID_NDK}"
+      - ./third_party/build-deps.sh --no-qrz
       - popd
 
 # The Android app is versioned in lockstep with the ecosystem release tags
-# (vX.Y.Z), so a new tag whose android/app/build.gradle.kts versionName matches
-# drives a new build automatically: UpdateCheckMode Tags finds the newest tag and
-# reads its versionCode; AutoUpdateMode Version maps that versionName back to the
-# tag `v%v`. The manual build above pins a full commit hash; autoupdate-generated
-# entries reference the tag.
-AutoUpdateMode: Version v%v
+# (vX.Y.Z), so new releases build automatically: UpdateCheckMode Tags finds the
+# newest tag and reads its versionCode from android/app/build.gradle.kts, and
+# AutoUpdateMode Version adds a build for it. The manual build above pins a full
+# commit hash; autoupdate-generated entries reference the tag.
+AutoUpdateMode: Version
 UpdateCheckMode: Tags
 CurrentVersion: 0.6.7
 CurrentVersionCode: 60700
