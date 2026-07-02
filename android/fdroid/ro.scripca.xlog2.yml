@@ -34,12 +34,9 @@ Description: |-
 
   Features:
 
-  * Fast entry form built for the field — large Call field, live DXCC country /
-    CQ / ITU / continent resolution, dupe detection, and band-from-frequency.
-  * Peer-to-peer sync over the LAN, auto-discovered, as a foreground service.
-    No server, no account, no cloud.
-  * Trusted-peer model: the mesh will not sync your log until a peer explicitly
-    trusts this node's identity key, so your log stays yours.
+  * Fast entry form built for the field — large Call field, live DXCC country/CQ/ITU/continent resolution, dupe detection, and band-from-frequency.
+  * Peer-to-peer sync over the LAN, auto-discovered, as a foreground service. No server, no account, no cloud.
+  * Trusted-peer model: the mesh will not sync your log until a peer explicitly trusts this node's identity key, so your log stays yours.
   * ADIF import and export through the system file picker.
   * Offline DXCC lookups from a bundled prefix table.
   * Optional USB HID Morse-paddle input for keying a networked CW station.
