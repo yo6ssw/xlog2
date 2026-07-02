@@ -4,8 +4,15 @@
 #   metadata/ro.scripca.xlog2.yml
 # It is kept here, versioned with the app, so the build steps stay in sync with
 # the source. See android/fdroid/README.md for the submission procedure and the
-# two things a reviewer is likely to ask about (native-dep downloads, versionCode
-# bumps). Keep it in sync whenever the Android build changes.
+# reviewer notes (native-dep downloads, versionCode bumps). Keep it in sync
+# whenever the Android build changes.
+#
+# NOTE: no Summary/Description here on purpose. F-Droid sources the listing text
+# (and changelog) from the upstream Fastlane metadata in android/app/fastlane/,
+# read from the built commit — which is why `commit` must point at a tag that
+# contains it (>= v0.6.5). fdroiddata's make-summary-translatable.py check
+# rejects an inline Summary, and the contributor guidelines ask not to duplicate
+# summary/description in fdroiddata when the repo carries Fastlane metadata.
 
 Categories:
   - Connectivity
@@ -17,33 +24,7 @@ SourceCode: https://github.com/yo6ssw/xlog2
 IssueTracker: https://github.com/yo6ssw/xlog2/issues
 Changelog: https://github.com/yo6ssw/xlog2/releases
 
-# Inline text so the listing renders on the first build regardless of the built
-# commit. The Fastlane files under android/app/fastlane/ mirror this and take
-# over (plus screenshots) once a built tag contains them.
-Summary: Peer-to-peer amateur-radio field logbook that syncs with the xlog2 desktop
-Description: |-
-  xlog2 is an amateur-radio (ham) logging application. This is its mobile
-  field-logging client: log QSOs (contacts) on your phone in the field and have
-  them appear on your desktop station automatically — and vice-versa.
-
-  The phone is not a separate logbook that you sync later. It is a third frontend
-  over the very same C++ core as the xlog2 desktop app, so it joins the identical
-  peer-to-peer sync mesh: a QSO logged anywhere gossips to every other node
-  (desktop, headless xlog2-syncd, and other phones) over an encrypted LAN mesh,
-  with no central server and no cloud account.
-
-  Features:
-
-  * Fast entry form built for the field — large Call field, live DXCC country/CQ/ITU/continent resolution, dupe detection, and band-from-frequency.
-  * Peer-to-peer sync over the LAN, auto-discovered, as a foreground service. No server, no account, no cloud.
-  * Trusted-peer model: the mesh will not sync your log until a peer explicitly trusts this node's identity key, so your log stays yours.
-  * ADIF import and export through the system file picker.
-  * Offline DXCC lookups from a bundled prefix table.
-  * Optional USB HID Morse-paddle input for keying a networked CW station.
-
-  Everything needed to log and sync works fully offline and free. Optional
-  QRZ.com callsign lookups use your own QRZ account if you enter one; the app
-  works without it.
+AutoName: XLOG2
 
 RepoType: git
 Repo: https://github.com/yo6ssw/xlog2.git
@@ -51,7 +32,7 @@ Repo: https://github.com/yo6ssw/xlog2.git
 Builds:
   - versionName: 0.2.0
     versionCode: 2
-    commit: v0.6.4
+    commit: v0.6.5
     subdir: android/app
     submodules: true          # multimaster mesh library lives in third_party/
     ndk: r26d                 # == 26.3.11579264, the ndkVersion in build.gradle.kts
