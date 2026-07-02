@@ -78,8 +78,22 @@ sudo apt install xlog2-qt
 ```
 
 Optional extras: `xlog2-data` (world-map coastline data) and `xlog2-syncd`
-(headless logbook-sync backup peer). On other distributions, build from source
-below.
+(headless logbook-sync backup peer).
+
+### Debian / Raspberry Pi OS / other distros — AppImage
+
+The PPA is Ubuntu-only, so for Debian, **Raspberry Pi OS**, or anything else,
+grab the self-contained **Qt** AppImage from the
+[releases](https://github.com/yo6ssw/xlog2/releases) (`x86_64` or `aarch64`):
+
+```sh
+chmod +x xlog2-qt-*-aarch64.AppImage
+./xlog2-qt-*-aarch64.AppImage
+```
+
+It bundles Qt 6, so it doesn't need a recent system GTK (the GTK frontend
+requires GTK ≥ 4.10). LoTW upload still needs `tqsl` installed on the host.
+Otherwise, build from source below.
 
 ## Building
 

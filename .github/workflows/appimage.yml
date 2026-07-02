@@ -1,0 +1,55 @@
+name: AppImage
+
+# Builds a Qt-only xlog2 AppImage for x86-64 and arm64 and attaches it to each
+# release. Qt-only avoids the GTK 4.10 floor entirely, and building on Ubuntu
+# 22.04 (glibc 2.35) means the arm64 image runs on Raspberry Pi OS bookworm
+# (glibc 2.36) and newer — the install path the Ubuntu-only PPA can't provide.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64,  runner: ubuntu-22.04 }
+          - { arch: aarch64, runner: ubuntu-22.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive     # multimaster
+          fetch-depth: 0
+
+      - name: Install build dependencies (Qt frontend only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake pkg-config curl \
+            qt6-base-dev qt6-base-dev-tools \
+            libsqlite3-dev libhamlib-dev libcurl4-openssl-dev \
+            libopus-dev libasound2-dev libpipewire-0.3-dev libdbus-1-dev libsodium-dev
+
+      - name: Build AppImage
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          [ -n "$ver" ] || ver="$(git describe --tags --always 2>/dev/null || echo dev)"
+          VER="$ver" ARCH="${{ matrix.arch }}" packaging/build-appimage.sh
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: xlog2-qt-${{ matrix.arch }}.AppImage
+          path: xlog2-qt-*.AppImage
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: xlog2-qt-*.AppImage

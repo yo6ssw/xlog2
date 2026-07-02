@@ -7,3 +7,5 @@
 *.sqlite
 *.adi
 *.adif
+/appimage-work/
+*.AppImage
