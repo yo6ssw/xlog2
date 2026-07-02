@@ -1,3 +1,10 @@
+xlog2 (0.6.1) noble; urgency=medium
+
+  * Release artifacts: Qt AppImage and portable/static xlog2-syncd tarballs
+    for Debian / Raspberry Pi OS. No functional change to the app.
+
+ -- Adrian Scripca <benishor@gmail.com>  Thu, 02 Jul 2026 15:00:00 +0300
+
 xlog2 (0.6.0) noble; urgency=medium
 
   * First open-source release: GPL-3.0 LICENSE, SPDX headers, CONTRIBUTING,
