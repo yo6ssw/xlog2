@@ -8,8 +8,8 @@
 #include "Qso.h"
 
 // Converts between the entry-form DTO and the stored Qso record, applying the
-// normalization the UI used to do inline (upper-casing call/locator, mapping the
-// QSL check-boxes to "Y"/"N", attaching derived DXCC fields).
+// normalization the UI used to do inline (upper-casing call/locator, mapping
+// the QSL check-boxes to "Y"/"N", attaching derived DXCC fields).
 namespace qsomap {
 
 // Build a Qso from the form. `id` is the row being edited (0 = new). `dxcc`

@@ -13,28 +13,26 @@ namespace strutil {
 // Uppercase an ASCII string in place-style (returns a copy). Used for callsigns
 // and Maidenhead locators, which are conventionally upper-case.
 inline std::string toUpper(std::string s) {
-    for (auto& c : s)
-        c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
-    return s;
+  for (auto& c : s)
+    c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+  return s;
 }
 
 // Split a ';'-separated list, dropping empty fields. Used for the saved session
 // path list.
 inline std::vector<std::string> splitSemicolons(const std::string& s) {
-    std::vector<std::string> out;
-    std::string cur;
-    for (char c : s) {
-        if (c == ';') {
-            if (!cur.empty())
-                out.push_back(cur);
-            cur.clear();
-        } else {
-            cur += c;
-        }
+  std::vector<std::string> out;
+  std::string cur;
+  for (char c : s) {
+    if (c == ';') {
+      if (!cur.empty()) out.push_back(cur);
+      cur.clear();
+    } else {
+      cur += c;
     }
-    if (!cur.empty())
-        out.push_back(cur);
-    return out;
+  }
+  if (!cur.empty()) out.push_back(cur);
+  return out;
 }
 
 }  // namespace strutil

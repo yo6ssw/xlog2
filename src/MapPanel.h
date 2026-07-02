@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "Geo.h"
-
 #include <gtkmm.h>
 
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "Geo.h"
 
 // gtkmm world-map panel: an equirectangular map (bundled coastline) with a
 // great-circle line drawn between two Maidenhead locators, above From/To entry
@@ -18,23 +18,23 @@
 // also override either field by typing. Value member of the shell (like the
 // other dockable panels) so it survives reparenting between paned slots.
 class MapPanel : public Gtk::Box {
-public:
-    MapPanel();
+ public:
+  MapPanel();
 
-    void setFrom(const std::string& grid);
-    void setTo(const std::string& grid);
+  void setFrom(const std::string& grid);
+  void setTo(const std::string& grid);
 
-private:
-    void recompute();  // re-parse both fields, refresh the drawing + readout
-    void onDraw(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
+ private:
+  void recompute();  // re-parse both fields, refresh the drawing + readout
+  void onDraw(const Cairo::RefPtr<Cairo::Context>& cr, int w, int h);
 
-    Gtk::DrawingArea area_;
-    Gtk::Entry       fromEntry_;
-    Gtk::Entry       toEntry_;
-    Gtk::Label       info_;
-    bool             loading_ = false;
+  Gtk::DrawingArea area_;
+  Gtk::Entry fromEntry_;
+  Gtk::Entry toEntry_;
+  Gtk::Label info_;
+  bool loading_ = false;
 
-    std::vector<std::vector<geo::LatLon>> coast_;
-    std::vector<geo::LatLon>              path_;
-    std::optional<geo::LatLon>            from_, to_;
+  std::vector<std::vector<geo::LatLon>> coast_;
+  std::vector<geo::LatLon> path_;
+  std::optional<geo::LatLon> from_, to_;
 };

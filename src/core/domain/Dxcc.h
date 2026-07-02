@@ -13,10 +13,10 @@
 namespace dxcc {
 
 struct Info {
-    std::string entity;     // e.g. "Germany"
-    std::string continent;  // "EU", "NA", …
-    int         cqZone  = 0;
-    int         ituZone = 0;
+  std::string entity;     // e.g. "Germany"
+  std::string continent;  // "EU", "NA", …
+  int cqZone = 0;
+  int ituZone = 0;
 };
 
 // Parse cty.dat text into the in-memory tables (replaces anything prior). Used

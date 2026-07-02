@@ -8,12 +8,12 @@
 // The Gtk::Application for xlog2. Owns application lifetime and creates the
 // main window on activation.
 class XlogApplication : public Gtk::Application {
-protected:
-    XlogApplication();
+ protected:
+  XlogApplication();
 
-public:
-    static Glib::RefPtr<XlogApplication> create();
+ public:
+  static Glib::RefPtr<XlogApplication> create();
 
-protected:
-    void on_activate() override;
+ protected:
+  void on_activate() override;
 };

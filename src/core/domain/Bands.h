@@ -20,4 +20,4 @@ const std::vector<std::string>& modes();
 // or an empty string if it falls outside the known amateur allocations.
 std::string forFrequencyMHz(double mhz);
 
-} // namespace bands
+}  // namespace bands

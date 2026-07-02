@@ -3,12 +3,12 @@
 
 #pragma once
 
-#include "IUiDispatcher.h"
-
 #include <functional>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "IUiDispatcher.h"
 
 // Runs an external command asynchronously and reports its result on the UI
 // thread, replacing the toolkit-specific Gio::Subprocess used for the LoTW
@@ -17,25 +17,25 @@
 //
 // Linux/POSIX only, matching the application's target platform.
 class ProcessRunner {
-public:
-    struct Result {
-        bool        ok = false;     // true iff the child exited 0
-        int         exitCode = -1;
-        std::string output;         // merged stdout + stderr
-        std::string error;          // set when the child could not be spawned
-    };
+ public:
+  struct Result {
+    bool ok = false;  // true iff the child exited 0
+    int exitCode = -1;
+    std::string output;  // merged stdout + stderr
+    std::string error;   // set when the child could not be spawned
+  };
 
-    explicit ProcessRunner(IUiDispatcher& ui) : ui_(ui) {}
-    ~ProcessRunner();
-    ProcessRunner(const ProcessRunner&)            = delete;
-    ProcessRunner& operator=(const ProcessRunner&) = delete;
+  explicit ProcessRunner(IUiDispatcher& ui) : ui_(ui) {}
+  ~ProcessRunner();
+  ProcessRunner(const ProcessRunner&) = delete;
+  ProcessRunner& operator=(const ProcessRunner&) = delete;
 
-    // Spawn argv (argv[0] is the program, resolved via PATH). `onDone` fires on
-    // the UI thread when the child exits or fails to start.
-    void run(const std::vector<std::string>& argv,
-             std::function<void(const Result&)> onDone);
+  // Spawn argv (argv[0] is the program, resolved via PATH). `onDone` fires on
+  // the UI thread when the child exits or fails to start.
+  void run(const std::vector<std::string>& argv,
+           std::function<void(const Result&)> onDone);
 
-private:
-    IUiDispatcher& ui_;
-    std::thread    thread_;
+ private:
+  IUiDispatcher& ui_;
+  std::thread thread_;
 };

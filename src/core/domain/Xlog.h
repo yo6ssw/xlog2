@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "Qso.h"
-
 #include <string>
 #include <vector>
+
+#include "Qso.h"
 
 // Reader for the native log format of the original `xlog` program (its "Flog"
 // format, files with a ".xlog" extension).
@@ -25,4 +25,4 @@ namespace xlog {
 // text does not look like an xlog file (no recognisable header).
 std::vector<Qso> parse(const std::string& text);
 
-} // namespace xlog
+}  // namespace xlog

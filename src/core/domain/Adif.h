@@ -3,10 +3,10 @@
 
 #pragma once
 
-#include "Qso.h"
-
 #include <string>
 #include <vector>
+
+#include "Qso.h"
 
 // Minimal ADIF (Amateur Data Interchange Format) reader/writer.
 //
@@ -22,4 +22,4 @@ std::vector<Qso> parse(const std::string& text);
 // Serialises QSOs to a complete ADIF document, including a short header.
 std::string write(const std::vector<Qso>& qsos);
 
-} // namespace adif
+}  // namespace adif

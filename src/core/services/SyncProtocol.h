@@ -3,13 +3,13 @@
 
 #pragma once
 
-#include "LogBook.h"  // SyncEntry, SyncManifest
-#include "Qso.h"
-#include "QrzResult.h"
-
 #include <cstdint>
 #include <string>
 #include <vector>
+
+#include "LogBook.h"  // SyncEntry, SyncManifest
+#include "QrzResult.h"
+#include "Qso.h"
 
 // Wire format for logbook sync. Socket-free and dependency-free (a small
 // SHA-256 lives in the .cpp), so it can be unit-tested without a transport.
@@ -19,27 +19,27 @@
 // are length-prefixed (uint32 + bytes). The framing layer carries no ADIF/JSON.
 namespace syncproto {
 
-constexpr std::uint32_t kMagic   = 0x584C5347u;  // 'XLSG'
+constexpr std::uint32_t kMagic = 0x584C5347u;  // 'XLSG'
 constexpr std::uint16_t kVersion = 1;
 
 enum class Type : std::uint16_t {
-    Hello      = 1,
-    HelloAck   = 2,
-    Digest     = 3,
-    Manifest   = 4,
-    Request    = 5,
-    Records    = 6,
-    Tombstones = 7,
-    Push       = 8,
-    Ping       = 9,
-    Pong       = 10,
-    QrzQuery   = 11,  // "does anyone have this callsign cached?"
-    QrzResponse= 12,  // "yes — here is the record"
+  Hello = 1,
+  HelloAck = 2,
+  Digest = 3,
+  Manifest = 4,
+  Request = 5,
+  Records = 6,
+  Tombstones = 7,
+  Push = 8,
+  Ping = 9,
+  Pong = 10,
+  QrzQuery = 11,     // "does anyone have this callsign cached?"
+  QrzResponse = 12,  // "yes — here is the record"
 };
 
 struct Message {
-    Type        type{};
-    std::string payload;  // already-serialized body bytes
+  Type type{};
+  std::string payload;  // already-serialized body bytes
 };
 
 // Serialize a message to full wire bytes (frame header + payload).
@@ -48,17 +48,17 @@ std::string encodeFrame(const Message& m);
 // Incremental frame reassembler: TCP gives no message boundaries, so bytes are
 // fed in as they arrive and complete messages are pulled out one at a time.
 class Decoder {
-public:
-    void feed(const char* data, std::size_t n) { buf_.append(data, n); }
-    // Pops the next complete message; false if more bytes are needed. Sets
-    // failed() on a bad magic / version / oversize frame (caller should drop
-    // the connection).
-    bool next(Message& out);
-    bool failed() const { return failed_; }
+ public:
+  void feed(const char* data, std::size_t n) { buf_.append(data, n); }
+  // Pops the next complete message; false if more bytes are needed. Sets
+  // failed() on a bad magic / version / oversize frame (caller should drop
+  // the connection).
+  bool next(Message& out);
+  bool failed() const { return failed_; }
 
-private:
-    std::string buf_;
-    bool        failed_ = false;
+ private:
+  std::string buf_;
+  bool failed_ = false;
 };
 
 // The mesh group name for a given shared secret: "xlog2" when empty, else
@@ -74,12 +74,19 @@ std::string meshGroup(const std::string& secret);
 // secret is empty on both sides).
 std::string encodeHello(const std::string& nodeId, const std::string& syncId,
                         const std::string& nonce, const std::string& secret);
-struct Hello { std::string nodeId, syncId, nonce; bool authOk = false; };
-bool decodeHello(const std::string& payload, const std::string& secret, Hello& out);
+struct Hello {
+  std::string nodeId, syncId, nonce;
+  bool authOk = false;
+};
+bool decodeHello(const std::string& payload, const std::string& secret,
+                 Hello& out);
 
 std::string encodeHelloAck(bool ok, const std::string& syncId,
                            const std::string& reason);
-struct HelloAck { bool ok = false; std::string syncId, reason; };
+struct HelloAck {
+  bool ok = false;
+  std::string syncId, reason;
+};
 bool decodeHelloAck(const std::string& payload, HelloAck& out);
 
 // Order-independent hex digest of a manifest, for the steady-state fast path.
@@ -102,17 +109,23 @@ bool decodeTombstones(const std::string& payload, std::vector<SyncEntry>& out);
 // A single incremental change pushed in real time: a live record or a deletion.
 std::string encodePushRecord(const Qso& q);
 std::string encodePushTombstone(const SyncEntry& t);
-struct Push { bool isTombstone = false; Qso record; SyncEntry tomb; };
+struct Push {
+  bool isTombstone = false;
+  Qso record;
+  SyncEntry tomb;
+};
 bool decodePush(const std::string& payload, Push& out);
 
 // Distributed QRZ cache: a node asks the mesh whether anyone has a callsign
-// cached (QrzQuery), and a node that does answers with the record (QrzResponse).
-// The query id is echoed back so the asker can match the reply (it is unique
-// only per-asker; replies are addressed straight back, so cross-node reuse is
-// harmless).
+// cached (QrzQuery), and a node that does answers with the record
+// (QrzResponse). The query id is echoed back so the asker can match the reply
+// (it is unique only per-asker; replies are addressed straight back, so
+// cross-node reuse is harmless).
 std::string encodeQrzQuery(std::uint32_t id, const std::string& callsign);
-bool decodeQrzQuery(const std::string& payload, std::uint32_t& id, std::string& callsign);
+bool decodeQrzQuery(const std::string& payload, std::uint32_t& id,
+                    std::string& callsign);
 std::string encodeQrzResponse(std::uint32_t id, const QrzResult& result);
-bool decodeQrzResponse(const std::string& payload, std::uint32_t& id, QrzResult& out);
+bool decodeQrzResponse(const std::string& payload, std::uint32_t& id,
+                       QrzResult& out);
 
 }  // namespace syncproto

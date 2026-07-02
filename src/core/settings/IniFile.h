@@ -15,24 +15,27 @@
 // back to a default when the key is missing or malformed. Booleans serialise as
 // "true"/"false" to stay compatible with existing layout.ini files.
 class IniFile {
-public:
-    bool loadFromFile(const std::string& path);  // false if the file can't be read
-    std::string toString() const;
+ public:
+  bool loadFromFile(
+      const std::string& path);  // false if the file can't be read
+  std::string toString() const;
 
-    bool hasGroup(const std::string& group) const;
-    bool hasKey(const std::string& group, const std::string& key) const;
+  bool hasGroup(const std::string& group) const;
+  bool hasKey(const std::string& group, const std::string& key) const;
 
-    std::string getString(const std::string& group, const std::string& key,
-                          const std::string& def = "") const;
-    int  getInt(const std::string& group, const std::string& key, int def = 0) const;
-    bool getBool(const std::string& group, const std::string& key, bool def = false) const;
+  std::string getString(const std::string& group, const std::string& key,
+                        const std::string& def = "") const;
+  int getInt(const std::string& group, const std::string& key,
+             int def = 0) const;
+  bool getBool(const std::string& group, const std::string& key,
+               bool def = false) const;
 
-    void setString(const std::string& group, const std::string& key,
-                   const std::string& value);
-    void setInt(const std::string& group, const std::string& key, int value);
-    void setBool(const std::string& group, const std::string& key, bool value);
+  void setString(const std::string& group, const std::string& key,
+                 const std::string& value);
+  void setInt(const std::string& group, const std::string& key, int value);
+  void setBool(const std::string& group, const std::string& key, bool value);
 
-private:
-    // group -> (key -> value); std::map gives deterministic output ordering.
-    std::map<std::string, std::map<std::string, std::string>> data_;
+ private:
+  // group -> (key -> value); std::map gives deterministic output ordering.
+  std::map<std::string, std::map<std::string, std::string>> data_;
 };

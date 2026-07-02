@@ -3,13 +3,12 @@
 
 #pragma once
 
-#include "Geo.h"
-
 #include <QWidget>
-
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "Geo.h"
 
 class QLineEdit;
 class QLabel;
@@ -21,19 +20,19 @@ class MapView;  // defined in the .cpp (plain QWidget, no moc needed)
 // operator's locator and setTo() with the selected QSO's locator; the user can
 // also override either field by typing.
 class QtMapPanel : public QWidget {
-    Q_OBJECT
-public:
-    explicit QtMapPanel(QWidget* parent = nullptr);
+  Q_OBJECT
+ public:
+  explicit QtMapPanel(QWidget* parent = nullptr);
 
-    void setFrom(const std::string& grid);  // operator QTH (from settings)
-    void setTo(const std::string& grid);     // selected QSO / form locator
+  void setFrom(const std::string& grid);  // operator QTH (from settings)
+  void setTo(const std::string& grid);    // selected QSO / form locator
 
-private:
-    void recompute();  // re-parse both fields, update the map + readout
+ private:
+  void recompute();  // re-parse both fields, update the map + readout
 
-    QLineEdit* fromEdit_ = nullptr;
-    QLineEdit* toEdit_   = nullptr;
-    QLabel*    info_     = nullptr;
-    MapView*   map_      = nullptr;
-    bool       loading_  = false;  // suppress recompute while setting text
+  QLineEdit* fromEdit_ = nullptr;
+  QLineEdit* toEdit_ = nullptr;
+  QLabel* info_ = nullptr;
+  MapView* map_ = nullptr;
+  bool loading_ = false;  // suppress recompute while setting text
 };

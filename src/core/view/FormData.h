@@ -13,20 +13,20 @@
 // DXCC fields are intentionally absent: they are derived from the callsign by
 // the presenter (see DxccDeriver), not typed into the form.
 struct FormData {
-    std::string date;       // YYYY-MM-DD (UTC)
-    std::string time_on;    // HH:MM (UTC)
-    std::string time_off;   // HH:MM (UTC)
-    std::string call;
-    std::string band;       // selected band name, empty if none
-    std::string mode;       // selected mode name, empty if none
-    std::string freq;       // MHz as text
-    std::string rst_sent;
-    std::string rst_rcvd;
-    std::string name;
-    std::string qth;
-    std::string locator;
-    std::string power;
-    std::string comment;
-    bool        qsl_sent = false;
-    bool        qsl_rcvd = false;
+  std::string date;      // YYYY-MM-DD (UTC)
+  std::string time_on;   // HH:MM (UTC)
+  std::string time_off;  // HH:MM (UTC)
+  std::string call;
+  std::string band;  // selected band name, empty if none
+  std::string mode;  // selected mode name, empty if none
+  std::string freq;  // MHz as text
+  std::string rst_sent;
+  std::string rst_rcvd;
+  std::string name;
+  std::string qth;
+  std::string locator;
+  std::string power;
+  std::string comment;
+  bool qsl_sent = false;
+  bool qsl_rcvd = false;
 };
