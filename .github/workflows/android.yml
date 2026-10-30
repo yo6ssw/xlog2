@@ -37,6 +37,10 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # The action's default list includes the legacy 'tools' package,
+          # which current cmdline-tools no longer carry (sdkmanager fails).
+          packages: 'platform-tools'
 
       - name: Install NDK / CMake / platform
         run: |
