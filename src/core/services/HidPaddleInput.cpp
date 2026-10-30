@@ -7,6 +7,8 @@
 #include <fcntl.h>
 #include <linux/hidraw.h>
 #include <poll.h>
+#include <pthread.h>
+#include <sched.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 
@@ -14,10 +16,28 @@
 #include <cstdint>
 #include <cstring>
 
+#include "Rtkit.h"
+
 namespace {
 
 constexpr uint16_t kVendor =
     0x1EAF;  // LeafLabs Maple (the Blue Pill's USB VID)
+
+// Same best-effort real-time bump as RemotePaddleKeyer's worker (direct
+// SCHED_FIFO, else the rtkit D-Bus broker): the reader must forward a contact
+// edge the moment poll() wakes, or the keyer sees the press late no matter how
+// tight its own loop runs. Without rtprio it just stays at normal priority —
+// keying still works, with more input-delivery jitter. (This file is
+// desktop-only; Android reads the paddle in Kotlin — see UsbPaddle.kt.)
+void raiseToRealtime() {
+  sched_param sp{};
+  int prio = sched_get_priority_min(SCHED_FIFO) + 5;
+  const int maxPrio = sched_get_priority_max(SCHED_FIFO);
+  if (prio > maxPrio) prio = maxPrio;
+  sp.sched_priority = prio;
+  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0) return;
+  platform::makeThreadRealtime(prio);
+}
 
 // The bytes HID_RAW_REPORT_DESCRIPTOR emits for "Usage Page (vendor 0xFFC0)":
 // item 0x06 (Usage Page, 2-byte) followed by 0xC0, 0xFF (little-endian 0xFFC0).
@@ -118,6 +138,7 @@ int HidPaddleInput::openPaddle(std::string& nameOut, bool& permissionDenied) {
 }
 
 void HidPaddleInput::worker() {
+  raiseToRealtime();  // best-effort; bounds press→keyer delivery latency
   postStatus("HID paddle: searching…");
 
   int fd = -1;

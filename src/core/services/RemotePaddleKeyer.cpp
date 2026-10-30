@@ -21,6 +21,7 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <sched.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
@@ -61,8 +62,13 @@ bool raiseToRealtime() {
   sp.sched_priority = prio;
   if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &sp) == 0) return true;
 #ifdef __ANDROID__
-  return false;  // no rtkit on Android; element timing is schedule-locked
-                 // anyway
+  // No rtkit on Android and apps are never granted SCHED_FIFO, but the kernel
+  // does let a process raise its *own* threads to the URGENT_AUDIO nice level
+  // (-19, what Process.setThreadPriority uses for audio). Not hard RT, yet it
+  // front-runs all normal-priority work, which shrinks the poll-wakeup tail
+  // under load — otherwise the CFS default can stall this loop long enough to
+  // delay (and formerly swallow) quick taps.
+  return ::setpriority(PRIO_PROCESS, static_cast<id_t>(::gettid()), -19) == 0;
 #else
   return platform::makeThreadRealtime(
       prio);  // desktop fallback via RealtimeKit
@@ -372,6 +378,8 @@ void RemotePaddleKeyer::start(const RemotePaddleConfig& cfg) {
   alive_ = std::make_shared<bool>(true);
   dit_.store(false);
   dah_.store(false);
+  ditPress_.store(false);
+  dahPress_.store(false);
   toneOn_.store(false);
   running_.store(true);
   thread_ = std::thread(&RemotePaddleKeyer::worker, this, cfg);
@@ -517,8 +525,14 @@ void RemotePaddleKeyer::worker(RemotePaddleConfig cfg) {
 
   while (running_.load()) {
     const std::uint64_t now = nowUs();
-    const bool d = dit_.load(std::memory_order_relaxed);
-    const bool h = dah_.load(std::memory_order_relaxed);
+    // Level plus the one-shot press latch: a tap (or a brief opposite-paddle
+    // squeeze) whose press and release both landed since the previous wakeup
+    // still reads as pressed for this iteration, so a scheduler stall can
+    // delay a contact but never swallow it.
+    const bool dPress = ditPress_.exchange(false, std::memory_order_relaxed);
+    const bool hPress = dahPress_.exchange(false, std::memory_order_relaxed);
+    const bool d = dit_.load(std::memory_order_relaxed) || dPress;
+    const bool h = dah_.load(std::memory_order_relaxed) || hPress;
 
     // Detect fresh paddle presses. In ultimatic mode the latest press both wins
     // (lastDah) and is remembered (memDit/memDah) so a tap released before the

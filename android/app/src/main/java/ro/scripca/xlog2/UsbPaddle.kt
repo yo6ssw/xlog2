@@ -60,6 +60,13 @@ class UsbPaddle(context: Context) {
         usb.deviceList.values.firstOrNull { it.vendorId == VID }
 
     private fun run() {
+        // A contact edge must reach the keyer the moment the interrupt report
+        // lands; URGENT_AUDIO (-19) is the highest priority Android grants an
+        // app's own threads (no SCHED_FIFO for apps), matching the keyer
+        // worker's native setpriority fallback.
+        runCatching {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_URGENT_AUDIO)
+        }
         var permissionRequested = false
         while (running) {
             val dev = findDevice()

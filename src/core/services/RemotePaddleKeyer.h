@@ -99,8 +99,18 @@ class RemotePaddleKeyer {
   bool isActive() const { return running_.load(); }
 
   // Paddle contacts, set from the UI thread. The worker samples these atomics.
-  void setDit(bool pressed) { dit_.store(pressed, std::memory_order_relaxed); }
-  void setDah(bool pressed) { dah_.store(pressed, std::memory_order_relaxed); }
+  // A press additionally sets a one-shot latch the worker consumes each cycle,
+  // so a tap whose press AND release both land between two worker wakeups
+  // (e.g. across a scheduler stall) still registers instead of being lost to
+  // level sampling.
+  void setDit(bool pressed) {
+    if (pressed) ditPress_.store(true, std::memory_order_relaxed);
+    dit_.store(pressed, std::memory_order_relaxed);
+  }
+  void setDah(bool pressed) {
+    if (pressed) dahPress_.store(true, std::memory_order_relaxed);
+    dah_.store(pressed, std::memory_order_relaxed);
+  }
 
  private:
   void worker(RemotePaddleConfig cfg);
@@ -111,6 +121,8 @@ class RemotePaddleKeyer {
   IUiDispatcher& ui_;
   std::atomic<bool> dit_{false};
   std::atomic<bool> dah_{false};
+  std::atomic<bool> ditPress_{false};  // one-shot press latches (see setDit)
+  std::atomic<bool> dahPress_{false};
   std::atomic<bool> toneOn_{false};  // key state for the sidetone thread
   std::atomic<bool> running_{false};
   std::thread thread_;
