@@ -140,8 +140,10 @@ operator admits the other. The list updates as peers come and go.
 
 ### Networking
 
-On a LAN, auto-discovery (UDP multicast, local subnet) needs nothing configured.
-Over the internet, set one reachable side as the other's **WAN peer** (open /
+On a LAN, auto-discovery (UDP multicast, local subnet) needs nothing configured
+in xlog2, but host firewalls, IGMP snooping and Wi-Fi APs can get in the way.
+See [`lan-multicast-discovery.md`](lan-multicast-discovery.md) for what to allow
+and how to diagnose it. Over the internet, set one reachable side as the other's **WAN peer** (open /
 port-forward the listen port). With a shared secret set, the link is already
 authenticated **and encrypted** (PSK), so a tunnel is no longer required for
 confidentiality — though running both inside a **WireGuard/SSH tunnel** remains a
@@ -155,8 +157,9 @@ fine way to avoid exposing the port at all.
   path if multi-second skew becomes a problem. The node id is the mesh peer id,
   minted once and persisted (`[sync] node_id`).
 - **Multicast**: LAN discovery uses multicast on the local subnet (TTL 1). If the
-  network blocks it (some Wi-Fi APs, containers), use a WAN-peer entry pointing at
-  the other host instead.
+  network blocks it (some Wi-Fi APs, containers, host firewalls dropping IGMP),
+  see [`lan-multicast-discovery.md`](lan-multicast-discovery.md), or use a
+  WAN-peer entry pointing at the other host instead.
 - Tombstones are kept indefinitely (tiny); age-based GC is a TODO.
 - Bulk operations (DXCC fill, locator fill, LoTW mark) propagate per affected
   row; LoTW *confirmations* propagate on the next anti-entropy pass.
